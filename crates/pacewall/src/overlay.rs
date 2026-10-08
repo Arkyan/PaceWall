@@ -25,7 +25,7 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, MsgWaitForMultipleObjects, PeekMessageW, PostQuitMessage, RegisterClassW, SetWindowPos,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetWindowLongW, GWL_EXSTYLE, MsgWaitForMultipleObjects, PeekMessageW, PostQuitMessage, RegisterClassW, SetWindowPos,
     ShowWindow, TranslateMessage, UpdateLayeredWindow, HWND_TOPMOST, MSG, PM_REMOVE, QS_ALLINPUT, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNA,
     ULW_ALPHA, WM_CLOSE, WM_NCHITTEST, WM_QUIT, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
@@ -364,7 +364,11 @@ pub fn run() {
             next_topmost = now + Duration::from_secs(3);
             for p in &panels {
                 unsafe {
-                    let _ = SetWindowPos(p.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                    // Seulement si la fenêtre a réellement perdu son rang : réaffirmer à chaque fois fait scintiller par-dessus un jeu.
+                    let ex = GetWindowLongW(p.hwnd, GWL_EXSTYLE) as u32;
+                    if ex & WS_EX_TOPMOST.0 == 0 {
+                        let _ = SetWindowPos(p.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                    }
                 }
             }
         }
