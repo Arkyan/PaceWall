@@ -20,6 +20,8 @@ pub struct Live {
     reader: Option<Reader>,
     strategy: Strategy,
     pulse: Pulse,
+    /// Le jeu a publié du neuf que personne n'a encore lu (la lecture complète n'est faite que sur demande).
+    pending: bool,
     last_change: Instant,
     last_open: Instant,
     reported_absent: bool,
@@ -37,6 +39,7 @@ impl Live {
             reader: None,
             strategy: Strategy::default(),
             pulse: Pulse::new(),
+            pending: false,
             last_change: Instant::now(),
             last_open: Instant::now() - Duration::from_secs(10),
             reported_absent: false,
@@ -45,6 +48,12 @@ impl Live {
 
     /// À appeler à la cadence voulue. `with_grid` : lire aussi le classement complet (plus coûteux).
     pub fn poll(&mut self, with_grid: bool) -> Update {
+        self.poll_if(with_grid, true)
+    }
+
+    /// Comme `poll`, mais la lecture complète (coûteuse) n'a lieu que si `want` : sinon on constate seulement que le jeu
+    /// publie, et les nouveautés sont lues au prochain appel avec `want`.
+    pub fn poll_if(&mut self, with_grid: bool, want: bool) -> Update {
         if self.reader.is_none() {
             // Tant que le jeu n'a pas créé sa zone, on n'essaie que toutes les 2 s.
             if self.last_open.elapsed() < Duration::from_secs(2) {
@@ -62,12 +71,17 @@ impl Live {
         if self.pulse.changed(reader) {
             self.last_change = Instant::now();
             self.reported_absent = false;
+            self.pending = true;
+        }
+        if self.pending && want {
+            self.pending = false;
             let mut fields = flatten::read_all(reader, with_grid);
             self.strategy.update(&mut fields);
             return Update::Data(Data::new(fields));
         }
         if self.last_change.elapsed() > Duration::from_secs(3) {
             self.reader = None;
+            self.pending = false;
             return self.absent();
         }
         Update::Unchanged

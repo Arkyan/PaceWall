@@ -5,7 +5,7 @@ use crate::draw::{Canvas, Font, HAlign};
 use ab_glyph::{Font as _, FontArc, OutlineCurve, Point};
 use eframe::egui::Color32;
 use std::collections::HashMap;
-use tiny_skia::{FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, PixmapMut, Rect, Stroke, Transform};
+use tiny_skia::{FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PixmapMut, Rect, Stroke, Transform};
 
 /// Masque de transparence d'un caractère déjà dessiné à une taille donnée.
 struct GlyphBmp {
@@ -22,6 +22,8 @@ pub struct Fonts {
     num: Vec<FontArc>,
     cache: HashMap<(bool, char), Option<(Path, f32)>>,
     bitmaps: HashMap<(bool, char, u32), Option<GlyphBmp>>,
+    /// Couches pré-dessinées (tracé des circuits) : position du coin et image.
+    layers: HashMap<u64, (i32, i32, Pixmap)>,
 }
 
 fn load(name: &str) -> Option<FontArc> {
@@ -38,7 +40,7 @@ impl Fonts {
         let mut num: Vec<FontArc> = load("consola.ttf").into_iter().collect();
         ui.extend(fallback.iter().cloned());
         num.extend(fallback.iter().cloned());
-        Self { ui, num, cache: HashMap::new(), bitmaps: HashMap::new() }
+        Self { ui, num, cache: HashMap::new(), bitmaps: HashMap::new(), layers: HashMap::new() }
     }
 
     fn chain(&self, num: bool) -> &[FontArc] {
@@ -273,9 +275,65 @@ impl Canvas for SoftCanvas<'_> {
     }
 
     fn polyline(&mut self, pts: &[(f32, f32)], width: f32, color: Color32) {
+        // Les traits longs (tracés de circuit) sont faits de segments presque alignés : jonctions à angle vif, bien moins
+        // coûteuses que des jonctions arrondies, sans différence visible.
+        let join = if pts.len() > 40 { LineJoin::Miter } else { LineJoin::Round };
         let Some(path) = path_of(pts, false) else { return };
-        let st = Stroke { width, line_cap: LineCap::Round, line_join: LineJoin::Round, ..Stroke::default() };
+        let st = Stroke { width, line_cap: LineCap::Round, line_join: join, ..Stroke::default() };
         self.pm.stroke_path(&path, &paint(color), &st, Transform::identity(), None);
+    }
+
+    fn layer(&mut self, key: u64, rect: (f32, f32, f32, f32), f: &mut dyn FnMut(&mut dyn Canvas, (f32, f32))) {
+        let (ix, iy) = (rect.0.floor() as i32, rect.1.floor() as i32);
+        let (iw, ih) = (rect.2.ceil() as i64 + 2, rect.3.ceil() as i64 + 2);
+        if iw <= 0 || ih <= 0 || iw > 4096 || ih > 4096 {
+            return f(self, (0.0, 0.0));
+        }
+        if !self.fonts.layers.contains_key(&key) {
+            if self.fonts.layers.len() > 12 {
+                self.fonts.layers.clear();
+            }
+            let Some(mut img) = Pixmap::new(iw as u32, ih as u32) else { return f(self, (0.0, 0.0)) };
+            {
+                let mut child = SoftCanvas { pm: img.as_mut(), fonts: &mut *self.fonts };
+                f(&mut child, (ix as f32, iy as f32));
+            }
+            self.fonts.layers.insert(key, (ix, iy, img));
+        }
+        if let Some((lx, ly, img)) = self.fonts.layers.get(&key) {
+            // Recopie « source par-dessus » en pixels prémultipliés. Les couches sont surtout transparentes : on saute
+            // les pixels vides, bien plus vite que le pipeline général pour une grande image.
+            let (dw, dh) = (self.pm.width() as i32, self.pm.height() as i32);
+            let (sw, sh) = (img.width() as i32, img.height() as i32);
+            let src = img.data();
+            let dst = self.pm.data_mut();
+            for sy in 0..sh {
+                let dy = ly + sy;
+                if dy < 0 || dy >= dh {
+                    continue;
+                }
+                for sx in 0..sw {
+                    let dx = lx + sx;
+                    if dx < 0 || dx >= dw {
+                        continue;
+                    }
+                    let si = ((sy * sw + sx) * 4) as usize;
+                    let sa = src[si + 3] as u32;
+                    if sa == 0 {
+                        continue;
+                    }
+                    let di = ((dy * dw + dx) * 4) as usize;
+                    if sa == 255 {
+                        dst[di..di + 4].copy_from_slice(&src[si..si + 4]);
+                    } else {
+                        let inv = 255 - sa;
+                        for c in 0..4 {
+                            dst[di + c] = (src[si + c] as u32 + (dst[di + c] as u32 * inv + 127) / 255).min(255) as u8;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn text(&mut self, x: f32, y: f32, s: &str, size: f32, font: Font, align: HAlign, color: Color32) -> f32 {

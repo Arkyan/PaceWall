@@ -75,6 +75,7 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "size", label: "Taille de la carte", kind: Num { min: 160.0, max: 460.0, step: 10.0, def: 300.0 } },
             Opt { id: "rotate", label: "Rotation", kind: Choice(&[("0", "0°"), ("90", "90°"), ("180", "180°"), ("270", "270°")], "0") },
             Opt { id: "others", label: "Afficher les autres voitures", kind: Bool(true) },
+            Opt { id: "fps", label: "Fluidité (images/s)", kind: Choice(&[("10", "10"), ("20", "20"), ("30", "30")], "20") },
             Opt { id: "sectors", label: "Limites des secteurs", kind: Bool(true) },
             Opt { id: "numbers", label: "Numéro dans les pastilles", kind: Choice(&[("none", "Aucun"), ("class", "Place en classe"), ("overall", "Place au général")], "none") },
         ],
@@ -117,7 +118,7 @@ pub fn hz(kind: &str, spec: &WidgetSpec) -> f32 {
         "fuel" => 2.0,
         "tyres" => 1.0,
         "standings" => 1.0,
-        "trackmap" => 5.0,
+        "trackmap" => spec.num("fps", 20.0) as f32,
         _ => 1.0,
     }
 }
@@ -130,6 +131,8 @@ pub struct WState {
     /// Carte du circuit chargée : (circuit, carte). Rechargée au changement de circuit, ou toutes les 3 s tant qu'elle manque.
     map: Option<(String, Option<TrackMap>)>,
     map_checked: f64,
+    /// Dernière position connue de chaque voiture de la carte : (x, y, instant, vitesse x, vitesse y), pour la lisser.
+    car_pos: std::collections::HashMap<usize, (f32, f32, f64, f32, f32)>,
 }
 
 pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
@@ -627,6 +630,7 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
 
 /// Position d'une voiture sur la carte : (x, -z), repère de TinyPedal.
 struct MapCar {
+    idx: usize,
     xy: [f32; 2],
     lap_dist: f64,
     class: String,
@@ -689,10 +693,10 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
     let (bw, bh) = ((max[0] - min[0]).max(1.0), (max[1] - min[1]).max(1.0));
 
     // La carte prend la forme du circuit : plus de grand vide pour un tracé allongé.
-    let (ax, ay, aw) = (14.0, 14.0, w - 28.0);
+    let (ax, ay, aw) = (24.0, 24.0, w - 48.0);
     let aspect = if pts.is_empty() { 1.0 } else { (bh / bw).clamp(0.5, 1.15) };
     let ah = aw * aspect;
-    let h = ay + ah + 14.0;
+    let h = ay + ah + 24.0;
     if d.measuring() {
         return (w, h);
     }
@@ -706,6 +710,7 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
             let p = format!("grid.{i:03}");
             let (x, z) = (data.num(&format!("{p}.x"))?, data.num(&format!("{p}.z"))?);
             Some(MapCar {
+                idx: i,
                 xy: [x as f32, -z as f32],
                 lap_dist: data.f(&format!("{p}.lap_dist"), 0.0),
                 class: data.text(&format!("{p}.class")).to_string(),
@@ -716,6 +721,20 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
             })
         })
         .collect();
+    // Fluidité : le jeu ne publie la position des voitures que ~5 fois par seconde. Entre deux mesures on prolonge
+    // le mouvement à la vitesse observée (au plus 0,25 s), ce qui évite les sauts.
+    for c in cars.iter_mut() {
+        let e = st.car_pos.entry(c.idx).or_insert((c.xy[0], c.xy[1], now, 0.0, 0.0));
+        if (c.xy[0], c.xy[1]) != (e.0, e.1) {
+            let dt = (now - e.2) as f32;
+            let (dx, dy) = (c.xy[0] - e.0, c.xy[1] - e.1);
+            // Saut brutal (retour au stand, téléportation) ou trou dans les mesures : pas de vitesse.
+            let (vx, vy) = if dt > 0.005 && dt < 1.0 && dx.abs() + dy.abs() < 150.0 { (dx / dt, dy / dt) } else { (0.0, 0.0) };
+            *e = (c.xy[0], c.xy[1], now, vx, vy);
+        }
+        let ahead = ((now - e.2) as f32).clamp(0.0, 0.25);
+        c.xy = [e.0 + e.3 * ahead, e.1 + e.4 * ahead];
+    }
     // Place en classe : rang parmi les voitures de la même classe, dans l'ordre du classement général.
     let mut order: Vec<usize> = (0..cars.len()).collect();
     order.sort_by_key(|&i| cars[i].place);
@@ -753,13 +772,13 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         }
     };
     // Route : liseré clair, asphalte sombre, filet central.
-    let road = |line: &[(f32, f32)]| {
+    let road = |d: &D, line: &[(f32, f32)]| {
         d.line(line, 12.0 * k, Color32::from_rgb(112, 125, 146));
         d.line(line, 8.0 * k, Color32::from_rgb(30, 36, 46));
         d.line(line, 1.2, Color32::from_white_alpha(38));
     };
     // Ligne de départ en travers de la route, et chevron pour le sens de roulage.
-    let start = |at: (f32, f32), dir: (f32, f32)| {
+    let start = |d: &D, at: (f32, f32), dir: (f32, f32)| {
         let len = (dir.0 * dir.0 + dir.1 * dir.1).sqrt().max(0.001);
         let (tx, ty) = (dir.0 / len, dir.1 / len);
         let (nx, ny) = (-ty * 8.0 * k, tx * 8.0 * k);
@@ -774,38 +793,49 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         let (ox, oy) = (ax + (aw - bw * scale) / 2.0, ay + (ah - bh * scale) / 2.0);
         let to_screen = |p: [f32; 2]| (ox + (p[0] - min[0]) * scale, oy + (p[1] - min[1]) * scale);
 
-        let mut line: Vec<(f32, f32)> = smooth_loop(&pts, 2).into_iter().map(to_screen).collect();
-        line.push(line[0]);
-        road(&line);
-        let (a, b) = (to_screen(pts[0]), to_screen(pts[1]));
-        start(a, (b.0 - a.0, b.1 - a.1));
-        // Limites des secteurs : un trait en travers de la route et le numéro du secteur au milieu.
-        if spec.flag("sectors", true) {
-            if let Some(map) = map.filter(|m| m.sectors.len() >= 2) {
-                let n = pts.len();
-                let ticks: Vec<f64> = vec![0.0, map.sectors[0], map.sectors[1], 1.0];
-                for f in map.sectors.iter().take(2) {
-                    let i = ((f * n as f64) as usize).min(n - 1);
-                    let (p, before, after) = (to_screen(pts[i]), to_screen(pts[(i + n - 2) % n]), to_screen(pts[(i + 2) % n]));
-                    let (dx, dy) = (after.0 - before.0, after.1 - before.1);
-                    let len = (dx * dx + dy * dy).sqrt().max(0.001);
-                    let (nx, ny) = (-dy / len * 7.5 * k, dx / len * 7.5 * k);
-                    d.line(&[(p.0 - nx, p.1 - ny), (p.0 + nx, p.1 + ny)], 2.5 * k, Color32::from_rgb(255, 214, 51));
-                }
-                for s in 0..3 {
-                    let mid = (ticks[s] + ticks[s + 1]) / 2.0;
-                    let i = ((mid * n as f64) as usize).min(n - 1);
-                    let (p, before, after) = (to_screen(pts[i]), to_screen(pts[(i + n - 2) % n]), to_screen(pts[(i + 2) % n]));
-                    let (dx, dy) = (after.0 - before.0, after.1 - before.1);
-                    let len = (dx * dx + dy * dy).sqrt().max(0.001);
-                    // Le numéro est posé du côté extérieur de la route, hors du tracé.
-                    let (nx, ny) = (-dy / len * 17.0 * k, dx / len * 17.0 * k);
-                    let (cx, cy) = (ox + bw * scale / 2.0, oy + bh * scale / 2.0);
-                    let sign = if (p.0 + nx - cx).powi(2) + (p.1 + ny - cy).powi(2) > (p.0 - nx - cx).powi(2) + (p.1 - ny - cy).powi(2) { 1.0 } else { -1.0 };
-                    d.text(p.0 + sign * nx, p.1 + sign * ny - 5.5 * k, &format!("S{}", s + 1), 10.0 * k, Color32::from_rgb(255, 214, 51), Font::Num, HAlign::Center);
+        // Le tracé (route, départ, secteurs) ne change pas : il est dessiné une fois puis recopié à chaque image.
+        let tag = {
+            use std::hash::{Hash, Hasher};
+            let mut hs = std::collections::hash_map::DefaultHasher::new();
+            let first = pts.first().map(|p| (p[0].to_bits(), p[1].to_bits()));
+            let sectors: Vec<u64> = map.map(|m| m.sectors.iter().map(|s| s.to_bits()).collect()).unwrap_or_default();
+            ("map", &st.map.as_ref().map(|(name, _)| name.clone()), pts.len(), first, sectors, spec.flag("sectors", true), w.to_bits(), h.to_bits(), d.cache_tag()).hash(&mut hs);
+            hs.finish()
+        };
+        d.layer(tag, 0.0, 0.0, w, h, &mut |dl| {
+            let mut line: Vec<(f32, f32)> = smooth_loop(&pts, 1).into_iter().map(to_screen).collect();
+            line.push(line[0]);
+            road(dl, &line);
+            let (a, b) = (to_screen(pts[0]), to_screen(pts[1]));
+            start(dl, a, (b.0 - a.0, b.1 - a.1));
+            // Limites des secteurs : un trait en travers de la route et le numéro du secteur au milieu.
+            if spec.flag("sectors", true) {
+                if let Some(map) = map.filter(|m| m.sectors.len() >= 2) {
+                    let n = pts.len();
+                    let ticks: Vec<f64> = vec![0.0, map.sectors[0], map.sectors[1], 1.0];
+                    for f in map.sectors.iter().take(2) {
+                        let i = ((f * n as f64) as usize).min(n - 1);
+                        let (p, before, after) = (to_screen(pts[i]), to_screen(pts[(i + n - 2) % n]), to_screen(pts[(i + 2) % n]));
+                        let (dx, dy) = (after.0 - before.0, after.1 - before.1);
+                        let len = (dx * dx + dy * dy).sqrt().max(0.001);
+                        let (nx, ny) = (-dy / len * 7.5 * k, dx / len * 7.5 * k);
+                        dl.line(&[(p.0 - nx, p.1 - ny), (p.0 + nx, p.1 + ny)], 2.5 * k, Color32::from_rgb(255, 214, 51));
+                    }
+                    for s in 0..3 {
+                        let mid = (ticks[s] + ticks[s + 1]) / 2.0;
+                        let i = ((mid * n as f64) as usize).min(n - 1);
+                        let (p, before, after) = (to_screen(pts[i]), to_screen(pts[(i + n - 2) % n]), to_screen(pts[(i + 2) % n]));
+                        let (dx, dy) = (after.0 - before.0, after.1 - before.1);
+                        let len = (dx * dx + dy * dy).sqrt().max(0.001);
+                        // Le numéro est posé du côté extérieur de la route, hors du tracé.
+                        let (nx, ny) = (-dy / len * 17.0 * k, dx / len * 17.0 * k);
+                        let (cx, cy) = (ox + bw * scale / 2.0, oy + bh * scale / 2.0);
+                        let sign = if (p.0 + nx - cx).powi(2) + (p.1 + ny - cy).powi(2) > (p.0 - nx - cx).powi(2) + (p.1 - ny - cy).powi(2) { 1.0 } else { -1.0 };
+                        dl.text(p.0 + sign * nx, p.1 + sign * ny - 5.5 * k, &format!("S{}", s + 1), 10.0 * k, Color32::from_rgb(255, 214, 51), Font::Num, HAlign::Center);
+                    }
                 }
             }
-        }
+        });
         // Les autres d'abord, le joueur par-dessus.
         for c in &cars {
             let (x, y) = to_screen(rot(c.xy));
@@ -821,8 +851,15 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
                 (cx + r * a.cos(), cy + r * a.sin())
             })
             .collect();
-        road(&circle);
-        start((cx, cy - r), (1.0, 0.0));
+        {
+            use std::hash::{Hash, Hasher};
+            let mut hs = std::collections::hash_map::DefaultHasher::new();
+            ("circle", w.to_bits(), h.to_bits(), d.cache_tag()).hash(&mut hs);
+            d.layer(hs.finish(), 0.0, 0.0, w, h, &mut |dl| {
+                road(dl, &circle);
+                start(dl, (cx, cy - r), (1.0, 0.0));
+            });
+        }
         let length = data.f("session.track_length", 0.0).max(1.0);
         for c in &cars {
             let a = -std::f32::consts::FRAC_PI_2 + (c.lap_dist / length) as f32 * std::f32::consts::TAU;

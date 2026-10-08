@@ -360,17 +360,18 @@ PW.widgets.session = {
 PW.widgets.trackmap = {
   name: 'Carte du circuit',
   keys: ['grid.', 'session.track', 'session.vehicles', 'demo.map'],
-  hz: 5, size: [300, 330],
+  hz: o => +o.fps || 20, size: [300, 330],
   options: [
     { id: 'size', label: 'Taille de la carte', type: 'number', min: 160, max: 460, step: 10, def: 300 },
     { id: 'rotate', label: 'Rotation', type: 'select', choices: [['0', '0°'], ['90', '90°'], ['180', '180°'], ['270', '270°']], def: '0' },
     { id: 'others', label: 'Afficher les autres voitures', type: 'bool', def: true },
+    { id: 'fps', label: 'Fluidité (images/s)', type: 'select', choices: [['10', '10'], ['20', '20'], ['30', '30']], def: '20' },
     { id: 'sectors', label: 'Limites des secteurs', type: 'bool', def: true },
     { id: 'numbers', label: 'Numéro dans les pastilles', type: 'select', choices: [['none', 'Aucun'], ['class', 'Place en classe'], ['overall', 'Place au général']], def: 'none' },
   ],
   mount(root, o) {
     const AC = (getComputedStyle(root).getPropertyValue('--pw-accent') || '').trim() || '#19d3f3', W = +o.size || 300, K = Math.min(1.4, Math.max(0.7, W / 300)), R = 2;
-    const ax = 14, ay = 14, aw = W - 28, maxH = ay + aw * 1.15 + 14;
+    const ax = 24, ay = 24, aw = W - 48, maxH = ay + aw * 1.15 + 24;
     const card = PW.tpl(`<div class="pw-card" style="width:${W}px;height:${maxH}px;padding:0">
       <canvas width="${W * R}" height="${maxH * R}" style="width:${W}px;height:${maxH}px;position:absolute;left:0;top:0"></canvas>
       </div>`).firstChild;
@@ -379,6 +380,7 @@ PW.widgets.trackmap = {
     const angle = (+o.rotate || 0) * Math.PI / 180, sin = Math.sin(angle), cos = Math.cos(angle);
     const rot = p => [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos];
     let key = null, map = null, sectors = [], tried = -1e9;
+    const carPos = new Map();
 
     const demoMap = () => Array.from({ length: 360 }, (_, i) => { const a = i / 360 * Math.PI * 2; return [520 * Math.cos(a) + 130 * Math.cos(3 * a), 300 * Math.sin(a) + 90 * Math.sin(2 * a)]; });
     const colorOf = c => /hyper/i.test(c) ? '#e5393b' : /lmp2/i.test(c) ? '#2d7ff9' : /gt3/i.test(c) ? '#2fbf71' : /lmp3/i.test(c) ? '#a85cf2' : /gte/i.test(c) ? '#f2a93b' : '#7b8494';
@@ -397,15 +399,27 @@ PW.widgets.trackmap = {
         for (let i = 0; i < n; i++) {
           const p = 'grid.' + String(i).padStart(3, '0');
           const x = g(p + '.x'), z = g(p + '.z'); if (x == null || z == null) continue;
-          cars.push({ xy: [x, -z], d: g(p + '.lap_dist', 0), cls: g(p + '.class', ''), me: !!g(p + '.is_player'), pit: !!g(p + '.in_pits'), place: g(p + '.place', 0), rank: 0 });
+          cars.push({ idx: i, xy: [x, -z], d: g(p + '.lap_dist', 0), cls: g(p + '.class', ''), me: !!g(p + '.is_player'), pit: !!g(p + '.in_pits'), place: g(p + '.place', 0), rank: 0 });
         }
         const seen = {};
         cars.slice().sort((a, b) => a.place - b.place).forEach(c => { seen[c.cls] = (seen[c.cls] || 0) + 1; c.rank = seen[c.cls]; });
         for (let i = cars.length - 1; i >= 0; i--) if (!cars[i].me && !o.others) cars.splice(i, 1);
+        // Fluidité : positions publiées ~5 fois par seconde ; on prolonge le mouvement à la vitesse observée (0,25 s au plus).
+        const nowS = performance.now() / 1000;
+        for (const c of cars) {
+          let e = carPos.get(c.idx);
+          if (!e) { e = { x: c.xy[0], y: c.xy[1], t: nowS, vx: 0, vy: 0 }; carPos.set(c.idx, e); }
+          if (c.xy[0] !== e.x || c.xy[1] !== e.y) {
+            const dt = nowS - e.t, dx = c.xy[0] - e.x, dy = c.xy[1] - e.y, ok = dt > 0.005 && dt < 1 && Math.abs(dx) + Math.abs(dy) < 150;
+            e.vx = ok ? dx / dt : 0; e.vy = ok ? dy / dt : 0; e.x = c.xy[0]; e.y = c.xy[1]; e.t = nowS;
+          }
+          const ahead = Math.min(0.25, Math.max(0, nowS - e.t));
+          c.xy = [e.x + e.vx * ahead, e.y + e.vy * ahead];
+        }
         const pts = map ? map.map(rot) : [];
         let minx = 0, miny = 0, bw = 1, bh = 1;
         if (pts.length) { const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); minx = Math.min(...xs); miny = Math.min(...ys); bw = Math.max(1, Math.max(...xs) - minx); bh = Math.max(1, Math.max(...ys) - miny); }
-        const ah = aw * (pts.length ? Math.min(1.15, Math.max(0.5, bh / bw)) : 1), H = ay + ah + 14;
+        const ah = aw * (pts.length ? Math.min(1.15, Math.max(0.5, bh / bw)) : 1), H = ay + ah + 24;
         card.style.height = H + 'px';
         ctx.setTransform(R, 0, 0, R, 0, 0); ctx.clearRect(0, 0, W, maxH);
         const mode = o.numbers || 'none';
@@ -440,7 +454,7 @@ PW.widgets.trackmap = {
         if (pts.length > 2) {
           const s = Math.min(aw / bw, ah / bh), ox = ax + (aw - bw * s) / 2, oy = ay + (ah - bh * s) / 2;
           const to = p => [ox + (p[0] - minx) * s, oy + (p[1] - miny) * s];
-          road(smooth(pts, 2).map(to));
+          road(smooth(pts, 1).map(to));
           const a = to(pts[0]), c = to(pts[1]); start(a, [c[0] - a[0], c[1] - a[1]]);
           if (o.sectors !== false && sectors.length >= 2) {
             const N = pts.length, at = f => { const i = Math.min(N - 1, Math.floor(f * N)); const p = to(pts[i]), b = to(pts[(i + N - 2) % N]), n = to(pts[(i + 2) % N]); const dx = n[0] - b[0], dy = n[1] - b[1], l = Math.hypot(dx, dy) || 1; return { p, nx: -dy / l, ny: dx / l }; };

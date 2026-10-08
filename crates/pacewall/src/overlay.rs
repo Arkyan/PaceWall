@@ -198,6 +198,10 @@ pub fn run() {
         return;
     }
     win::set_dpi_aware();
+    // Sans cela, Windows réveille le processus toutes les 15,6 ms au mieux : impossible de tenir 20 ou 30 images par seconde.
+    unsafe {
+        windows::Win32::Media::timeBeginPeriod(1);
+    }
     register_class();
 
     let mut fonts = Fonts::load();
@@ -227,6 +231,7 @@ pub fn run() {
     // Durées cumulées (ms) : lecture, mesure, dessin, envoi à la fenêtre.
     let mut t_poll = Duration::ZERO;
     let (mut t_measure, mut t_draw, mut t_present) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
+    let (mut t_fill, mut t_widget, mut t_swap) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
 
     'main: loop {
         loops += 1;
@@ -236,6 +241,8 @@ pub fn run() {
             let line = format!("{:.0}s: boucles/s {:.0}, lectures/s {:.0}, rendus/s {:.0} | ms par seconde : lecture {:.1}, mesure {:.1}, dessin {:.1}, envoi {:.1}
 ", start.elapsed().as_secs_f32(), loops as f32 / s, polls as f32 / s, renders as f32 / s, ms(t_poll), ms(t_measure), ms(t_draw), ms(t_present));
             (t_poll, t_measure, t_draw, t_present) = (Duration::ZERO, Duration::ZERO, Duration::ZERO, Duration::ZERO);
+            let line = format!("{line} | fill {:.1} widget {:.1} swap {:.1}", ms(t_fill), ms(t_widget), ms(t_swap));
+            (t_fill, t_widget, t_swap) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
             let _ = std::fs::write(std::env::temp_dir().join("pw-overlay.log"), line);
             (loops, polls, renders, dbg_at) = (0, 0, 0, Instant::now());
         }
@@ -268,8 +275,13 @@ pub fn run() {
         }
 
         let with_grid = layout.widgets.iter().any(|w| w.kind == "standings" || w.kind == "trackmap");
+        // On ne lit le jeu en entier que si un widget doit être redessiné (le jeu publie plus vite que les widgets n'en ont besoin).
+        let want = panels.len() < layout.widgets.len()
+            || layout.widgets.iter().zip(panels.iter()).any(|(spec, panel)| {
+                now.duration_since(panel.last) >= Duration::from_secs_f32(1.0 / widgets::hz(&spec.kind, spec).max(0.2))
+            });
         let t = Instant::now();
-        let update = live.poll(with_grid);
+        let update = live.poll_if(with_grid, want);
         t_poll += t.elapsed();
         match update {
             Update::Data(d) => {
@@ -346,7 +358,12 @@ pub fn run() {
                 let (bw, bh) = {
                     let mut measure = Measure;
                     let d = D::new(&mut measure, (0.0, 0.0), scale, spec.opacity, bg).styled(widgets::accent(spec), widgets::bar(spec));
-                    widgets::draw(&spec.kind, &d, spec, &data, &mut probe, time)
+                    // La carte du circuit garde sa carte chargée entre deux images : la relire à chaque mesure coûterait cher.
+                    if spec.kind == "trackmap" {
+                        widgets::draw(&spec.kind, &d, spec, &data, &mut panel.state, time)
+                    } else {
+                        widgets::draw(&spec.kind, &d, spec, &data, &mut probe, time)
+                    }
                 };
                 t_measure += t.elapsed();
                 let (pw, ph) = ((bw * scale).ceil() as i32 + 2, (bh * scale).ceil() as i32 + 2);
@@ -360,17 +377,23 @@ pub fn run() {
                 let t = Instant::now();
                 unsafe {
                     let bytes = std::slice::from_raw_parts_mut(panel.bits, (pw * ph * 4) as usize);
+                    let tf = Instant::now();
                     bytes.fill(0);
+                    t_fill += tf.elapsed();
+                    let tw = Instant::now();
                     if let Some(pm) = PixmapMut::from_bytes(bytes, pw as u32, ph as u32) {
                         let mut canvas = SoftCanvas { pm, fonts: &mut fonts };
                         let d = D::new(&mut canvas, (0.0, 0.0), scale, spec.opacity, bg).styled(widgets::accent(spec), widgets::bar(spec));
                         widgets::draw(&spec.kind, &d, spec, &data, &mut panel.state, time);
                     }
+                    t_widget += tw.elapsed();
+                    let ts = Instant::now();
                     // tiny-skia écrit en RGBA prémultiplié ; la fenêtre attend du BGRA prémultiplié.
                     let bytes = std::slice::from_raw_parts_mut(panel.bits, (pw * ph * 4) as usize);
                     for px in bytes.chunks_exact_mut(4) {
                         px.swap(0, 2);
                     }
+                    t_swap += ts.elapsed();
                 }
                 t_draw += t.elapsed();
                 let t = Instant::now();
@@ -378,7 +401,8 @@ pub fn run() {
                 let y = mon.y + (spec.y * mon.h as f32).round() as i32;
                 panel.present(x, y);
                 t_present += t.elapsed();
-                sleep = sleep.min(period);
+                // Prochaine image dans une période à partir du début de celle-ci (et non de la fin) : cadence tenue.
+                sleep = sleep.min(period.saturating_sub(panel.last.elapsed()).max(Duration::from_millis(1)));
             }
         } else {
             for p in &mut panels {
@@ -405,5 +429,8 @@ pub fn run() {
         unsafe {
             MsgWaitForMultipleObjects(None, false, sleep.as_millis().clamp(1, 1000) as u32, QS_ALLINPUT);
         }
+    }
+    unsafe {
+        windows::Win32::Media::timeEndPeriod(1);
     }
 }

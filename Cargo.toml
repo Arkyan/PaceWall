@@ -8,3 +8,10 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# Le rendu logiciel (carte, widgets) est la partie chaude de l'overlay : vitesse plutôt que taille pour ces bibliothèques.
+[profile.release.package.tiny-skia]
+opt-level = 3
+
+[profile.release.package.tiny-skia-path]
+opt-level = 3

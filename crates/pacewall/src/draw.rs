@@ -30,6 +30,10 @@ pub trait Canvas {
     /// Texte d'une ligne dont le haut est à `y` ; renvoie sa largeur en pixels.
     fn text(&mut self, x: f32, y: f32, s: &str, size: f32, font: Font, align: HAlign, color: Color32) -> f32;
     fn circle(&mut self, x: f32, y: f32, r: f32, fill: Color32, stroke: Option<(f32, Color32)>);
+    /// Couche en cache : `f` dessine un contenu qui ne change pas d'une image à l'autre (tracé d'un circuit). Le rendu
+    /// logiciel ne le dessine qu'une fois par `key` puis le recopie ; `rect` est la zone en pixels (x, y, l, h).
+    /// `f` reçoit la surface et le décalage à retirer des coordonnées.
+    fn layer(&mut self, key: u64, rect: (f32, f32, f32, f32), f: &mut dyn FnMut(&mut dyn Canvas, (f32, f32)));
     /// `true` pour le canvas de mesure : un widget peut alors renvoyer sa taille sans rien calculer.
     fn measuring(&self) -> bool {
         false
@@ -47,6 +51,7 @@ impl Canvas for Measure {
         s.chars().count() as f32 * size * 0.55
     }
     fn circle(&mut self, _: f32, _: f32, _: f32, _: Color32, _: Option<(f32, Color32)>) {}
+    fn layer(&mut self, _: u64, _: (f32, f32, f32, f32), _: &mut dyn FnMut(&mut dyn Canvas, (f32, f32))) {}
     fn measuring(&self) -> bool {
         true
     }
@@ -80,6 +85,24 @@ impl<'a> D<'a> {
 
     pub fn accent(&self) -> Color32 {
         self.accent
+    }
+
+    /// Empreinte de ce qui change l'apparence d'une couche en cache (échelle, opacité, couleur d'accent).
+    pub fn cache_tag(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (self.s.to_bits(), self.a.to_bits(), self.accent.to_array()).hash(&mut h);
+        h.finish()
+    }
+
+    /// Dessine `draw` dans une couche mise en cache sous `key` (voir `Canvas::layer`). `(x, y, w, h)` en unités de base.
+    pub fn layer(&self, key: u64, x: f32, y: f32, w: f32, h: f32, draw: &mut dyn FnMut(&D)) {
+        let (px, py) = self.pt(x, y);
+        let (o, s, a, bg, accent, bar) = (self.o, self.s, self.a, self.bg, self.accent, self.bar);
+        self.c.borrow_mut().layer(key, (px, py, w * s, h * s), &mut |canvas, (tx, ty)| {
+            let inner = D { c: RefCell::new(canvas), o: (o.0 - tx, o.1 - ty), s, a, bg, accent, bar };
+            draw(&inner);
+        });
     }
 
     fn col(&self, c: Color32) -> Color32 {

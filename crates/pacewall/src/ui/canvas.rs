@@ -24,6 +24,10 @@ impl Canvas for EguiCanvas<'_> {
         self.painter.add(Shape::line(v, Stroke::new(width, color)));
     }
 
+    fn layer(&mut self, _: u64, _: (f32, f32, f32, f32), f: &mut dyn FnMut(&mut dyn Canvas, (f32, f32))) {
+        f(self, (0.0, 0.0));
+    }
+
     fn circle(&mut self, x: f32, y: f32, r: f32, fill: Color32, stroke: Option<(f32, Color32)>) {
         let st = stroke.map(|(w, c)| Stroke::new(w, c)).unwrap_or(Stroke::NONE);
         self.painter.circle(pos2(x, y), r, fill, st);
