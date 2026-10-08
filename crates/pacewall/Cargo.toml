@@ -5,6 +5,7 @@ edition = "2021"
 description = "PaceWall : overlays de course natifs pour Le Mans Ultimate"
 
 [dependencies]
+fakegame = { path = "../fakegame" }
 pwcore = { path = "../pwcore" }
 server = { path = "../server" }
 lmu = { path = "../lmu" }

@@ -2253,6 +2253,7 @@ dependencies = [
  "ab_glyph",
  "eframe",
  "egui_plot",
+ "fakegame",
  "global-hotkey",
  "lmu",
  "png 0.17.16",

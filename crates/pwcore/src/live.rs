@@ -16,9 +16,28 @@ pub enum Update {
     Unchanged,
 }
 
+/// Une simulation (`pacewall.exe --simulate`) est-elle en cours ? Elle tient un verrou nommé pendant qu'elle tourne.
+pub fn simulation_running() -> bool {
+    use windows::core::w;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
+    unsafe {
+        match OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, w!("Local\\PaceWallSimulator")) {
+            Ok(h) => {
+                let _ = CloseHandle(h);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+}
+
 /// Le programme du jeu tourne-t-il ? Un jeu en pause ne publie plus rien mais n'est pas absent : c'est ce qui les distingue.
 /// Si la liste des processus est illisible, on suppose qu'il tourne.
 pub fn process_alive() -> bool {
+    if simulation_running() {
+        return true;
+    }
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
     unsafe {

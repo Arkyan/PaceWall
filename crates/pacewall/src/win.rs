@@ -6,8 +6,8 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{GetLastError, BOOL, ERROR_ALREADY_EXISTS, HWND, LPARAM, RECT, TRUE, WPARAM};
 use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
 use windows::core::PWSTR;
-use windows::Win32::Foundation::CloseHandle;
-use windows::Win32::System::Threading::{CreateMutexW, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+use windows::Win32::System::Threading::{CreateEventW, OpenEventW, SetEvent, WaitForSingleObject, EVENT_MODIFY_STATE, CreateMutexW, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 use windows::Win32::UI::WindowsAndMessaging::{
     FindWindowW, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, PostMessageW, SetForegroundWindow, ShowWindow, SW_RESTORE, WM_CLOSE,
@@ -182,5 +182,27 @@ pub fn foreground_exe() -> String {
 /// Le programme au premier plan est-il le jeu (ou son faux pour les tests) ?
 pub fn game_in_front() -> bool {
     let exe = foreground_exe();
-    exe.contains("le mans ultimate") || exe.contains("lmu") || exe.contains("fakegame")
+    // Pendant une simulation, c'est PaceWall lui-même (réglages, éditeur) qui est au premier plan.
+    exe.contains("le mans ultimate") || exe.contains("lmu") || exe.contains("fakegame") || (exe.contains("pacewall") && pwcore::live::simulation_running())
+}
+
+/// Crée l'événement d'arrêt de la simulation ; renvoie une fonction qui dit « il faut s'arrêter ».
+pub fn simulator_stop_signal() -> impl Fn() -> bool {
+    let name = wide("Local\\PaceWallSimulatorStop");
+    let handle = unsafe { CreateEventW(None, true, false, PCWSTR(name.as_ptr())).ok() };
+    move || match &handle {
+        Some(h) => unsafe { WaitForSingleObject(*h, 0) == WAIT_OBJECT_0 },
+        None => false,
+    }
+}
+
+/// Demande à la simulation en cours de s'arrêter.
+pub fn stop_simulator() {
+    let name = wide("Local\\PaceWallSimulatorStop");
+    unsafe {
+        if let Ok(h) = OpenEventW(EVENT_MODIFY_STATE, false, PCWSTR(name.as_ptr())) {
+            let _ = SetEvent(h);
+            let _ = CloseHandle(h);
+        }
+    }
 }

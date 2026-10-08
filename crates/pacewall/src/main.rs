@@ -23,7 +23,14 @@ mod win;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let has = |f: &str| args.iter().any(|a| a == f);
-    if has("--say") {
+    if has("--simulate") {
+        // Faux jeu intégré : le verrou nommé dit au reste de PaceWall qu'une simulation tourne (voir Réglages).
+        if win::single_instance("PaceWallSimulator") {
+            let stop = win::simulator_stop_signal();
+            let opts = fakegame::Options { lap_seconds: 10.0, frozen_events: true, yellow: false, scenario: true };
+            let _ = fakegame::run(opts, &stop);
+        }
+    } else if has("--say") {
         // `pacewall.exe --say "texte"` : essai de la voix des alertes.
         let text = args.iter().skip_while(|a| *a != "--say").nth(1).cloned().unwrap_or_else(|| "Alertes vocales PaceWall".into());
         speech::Speaker::global().say(&text, pwcore::settings::int_of("voice_volume", 80) as u32);

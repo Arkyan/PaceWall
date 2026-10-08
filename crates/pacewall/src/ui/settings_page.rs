@@ -26,6 +26,8 @@ impl State {
                 ui.add_space(14.0);
                 self.voice(ui);
                 ui.add_space(14.0);
+                self.simulation(ui);
+                ui.add_space(14.0);
                 self.obs(ui);
                 ui.add_space(14.0);
                 self.app(ui);
@@ -72,6 +74,36 @@ impl State {
             ui.add_space(4.0);
             ui.label(RichText::new("La voix est celle de Windows (hors ligne). Pour une voix française, installe-la dans Paramètres > Heure et langue > Voix.").size(11.5).color(MUTED));
         });
+    }
+
+    /// Simulation : un faux jeu intégré qui déroule toutes les alertes, pour essayer PaceWall sans Le Mans Ultimate.
+    fn simulation(&mut self, ui: &mut Ui) {
+        kit::panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            kit::section(ui, "Simulation (sans le jeu)");
+            ui.add_space(6.0);
+            let simulating = pwcore::live::simulation_running();
+            let game = !simulating && pwcore::live::game_running();
+            ui.label(RichText::new("Lance un faux Le Mans Ultimate : les overlays, la carte et les alertes vocales se déclenchent comme en course (un cycle de 90 s qui se répète : pneus froids puis chauds puis usés, carburant, drapeau jaune, full course jaune, pluie, crevaison).").size(12.0).color(MUTED));
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if simulating {
+                    if kit::button(ui, "Arrêter la simulation").clicked() {
+                        win::stop_simulator();
+                    }
+                    ui.label(RichText::new("Simulation en cours").color(OK));
+                } else if game {
+                    ui.add_enabled(false, egui::Button::new("Lancer la simulation"));
+                    ui.label(RichText::new("Le jeu tourne : simulation impossible").color(MUTED));
+                } else if kit::button(ui, "Lancer la simulation").clicked() {
+                    win::spawn_self(&["--simulate"]);
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(RichText::new("Pour que l'overlay s'ouvre toute seule, PaceWall doit tourner en arrière-plan (icône près de l'horloge).").size(11.5).color(MUTED));
+        });
+        // Le statut se met à jour tout seul pendant que la page est ouverte.
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
     }
 
     fn overlay(&mut self, ui: &mut Ui) {
