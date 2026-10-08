@@ -344,10 +344,11 @@ PW.widgets.trackmap = {
     { id: 'size', label: 'Taille de la carte', type: 'number', min: 160, max: 460, step: 10, def: 300 },
     { id: 'rotate', label: 'Rotation', type: 'select', choices: [['0', '0°'], ['90', '90°'], ['180', '180°'], ['270', '270°']], def: '0' },
     { id: 'others', label: 'Afficher les autres voitures', type: 'bool', def: true },
+    { id: 'numbers', label: 'Numéro dans les pastilles', type: 'select', choices: [['class', 'Place en classe'], ['overall', 'Place au général'], ['none', 'Aucun']], def: 'class' },
   ],
   mount(root, o) {
     const W = +o.size || 300, K = Math.min(1.4, Math.max(0.7, W / 300)), R = 2;
-    const ax = 14, ay = 32, aw = W - 28, maxH = ay + aw * 1.15 + 16;
+    const ax = 14, ay = 32, aw = W - 28, maxH = ay + aw * 1.15 + 34;
     const card = PW.tpl(`<div class="pw-card" style="width:${W}px;height:${maxH}px;padding:0">
       <canvas width="${W * R}" height="${maxH * R}" style="width:${W}px;height:${maxH}px;position:absolute;left:0;top:0"></canvas>
       <div class="pw-title" style="position:absolute;left:16px;right:16px;top:10px"><span>Carte</span><em data-k="trk"></em></div></div>`).firstChild;
@@ -375,24 +376,33 @@ PW.widgets.trackmap = {
         for (let i = 0; i < n; i++) {
           const p = 'grid.' + String(i).padStart(3, '0');
           const x = g(p + '.x'), z = g(p + '.z'); if (x == null || z == null) continue;
-          const me = !!g(p + '.is_player'); if (!me && !o.others) continue;
-          cars.push({ xy: [x, -z], d: g(p + '.lap_dist', 0), cls: g(p + '.class', ''), me, pit: !!g(p + '.in_pits') });
+          cars.push({ xy: [x, -z], d: g(p + '.lap_dist', 0), cls: g(p + '.class', ''), me: !!g(p + '.is_player'), pit: !!g(p + '.in_pits'), place: g(p + '.place', 0), rank: 0 });
         }
+        const seen = {};
+        cars.slice().sort((a, b) => a.place - b.place).forEach(c => { seen[c.cls] = (seen[c.cls] || 0) + 1; c.rank = seen[c.cls]; });
+        const mine = cars.find(c => c.me);
+        for (let i = cars.length - 1; i >= 0; i--) if (!cars[i].me && !o.others) cars.splice(i, 1);
         const pts = map ? map.map(rot) : [];
         let minx = 0, miny = 0, bw = 1, bh = 1;
         if (pts.length) { const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); minx = Math.min(...xs); miny = Math.min(...ys); bw = Math.max(1, Math.max(...xs) - minx); bh = Math.max(1, Math.max(...ys) - miny); }
-        const ah = aw * (pts.length ? Math.min(1.15, Math.max(0.5, bh / bw)) : 1), H = ay + ah + 16;
+        const ah = aw * (pts.length ? Math.min(1.15, Math.max(0.5, bh / bw)) : 1), H = ay + ah + 34;
         card.style.height = H + 'px';
         ctx.setTransform(R, 0, 0, R, 0, 0); ctx.clearRect(0, 0, W, maxH);
+        const mode = o.numbers || 'class';
         const dot = (c, x, y) => {
+          const num = mode === 'none' ? 0 : mode === 'overall' ? c.place : c.rank;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           if (c.me) {
-            ctx.beginPath(); ctx.arc(x, y, 11 * K, 0, 7); ctx.fillStyle = 'rgba(25,211,243,.22)'; ctx.fill();
-            ctx.beginPath(); ctx.arc(x, y, 6.5 * K, 0, 7); ctx.fillStyle = '#19d3f3'; ctx.fill(); ctx.lineWidth = 2 * K; ctx.strokeStyle = '#e8edf4'; ctx.stroke();
+            ctx.beginPath(); ctx.arc(x, y, 14 * K, 0, 7); ctx.fillStyle = 'rgba(25,211,243,.22)'; ctx.fill();
+            ctx.beginPath(); ctx.arc(x, y, 9 * K, 0, 7); ctx.fillStyle = '#19d3f3'; ctx.fill(); ctx.lineWidth = 2 * K; ctx.strokeStyle = '#e8edf4'; ctx.stroke();
+            if (num > 0) { ctx.fillStyle = '#031014'; ctx.font = `700 ${12 * K}px Consolas, monospace`; ctx.fillText(num, x, y + 0.5); }
           } else {
-            ctx.beginPath(); ctx.arc(x, y, 4.6 * K, 0, 7); ctx.fillStyle = c.pit ? '#7f8a9a' : colorOf(c.cls); ctx.fill(); ctx.lineWidth = 1.4; ctx.strokeStyle = 'rgba(6,8,12,.9)'; ctx.stroke();
+            ctx.beginPath(); ctx.arc(x, y, (num > 0 ? 7 : 4.6) * K, 0, 7); ctx.fillStyle = c.pit ? '#7f8a9a' : colorOf(c.cls); ctx.fill(); ctx.lineWidth = 1.4; ctx.strokeStyle = 'rgba(6,8,12,.9)'; ctx.stroke();
+            if (num > 0) { ctx.fillStyle = '#fff'; ctx.font = `700 ${9.5 * K}px Consolas, monospace`; ctx.fillText(num, x, y + 0.5); }
           }
+          ctx.textBaseline = 'alphabetic';
         };
-        const order = cars.filter(c => !c.me).concat(cars.filter(c => c.me));
+        const order = cars.slice().sort((a, b) => (a.me - b.me) || (b.place - a.place));
         const road = pts2 => {
           ctx.beginPath(); pts2.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath();
           ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -419,7 +429,11 @@ PW.widgets.trackmap = {
           start([cx, cy - r], [1, 0]);
           const len = Math.max(1, g('session.track_length', 1));
           order.forEach(c => { const a = -Math.PI / 2 + c.d / len * 6.2832; dot(c, cx + r * Math.cos(a), cy + r * Math.sin(a)); });
-          ctx.fillStyle = '#7f8a9a'; ctx.font = '10.5px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Un tour propre trace la carte', W / 2, H - 14);
+          ctx.fillStyle = '#7f8a9a'; ctx.font = '10.5px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Un tour propre trace la carte', W / 2, cy);
+        }
+        if (mine && mine.place > 0) {
+          ctx.textAlign = 'left'; ctx.fillStyle = '#19d3f3'; ctx.font = '700 16px Consolas, monospace'; ctx.fillText('P' + mine.place, 16, H - 12);
+          ctx.textAlign = 'right'; ctx.fillStyle = colorOf(mine.cls); ctx.font = '600 11px sans-serif'; ctx.fillText(mine.cls.toUpperCase() + ' · P' + mine.rank, W - 16, H - 12);
         }
       },
     };

@@ -71,6 +71,7 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "size", label: "Taille de la carte", kind: Num { min: 160.0, max: 460.0, step: 10.0, def: 300.0 } },
             Opt { id: "rotate", label: "Rotation", kind: Choice(&[("0", "0°"), ("90", "90°"), ("180", "180°"), ("270", "270°")], "0") },
             Opt { id: "others", label: "Afficher les autres voitures", kind: Bool(true) },
+            Opt { id: "numbers", label: "Numéro dans les pastilles", kind: Choice(&[("class", "Place en classe"), ("overall", "Place au général"), ("none", "Aucun")], "class") },
         ],
         _ => NO_OPTS,
     }
@@ -558,6 +559,8 @@ struct MapCar {
     class: String,
     me: bool,
     pit: bool,
+    place: i64,
+    rank: i64,
 }
 
 /// Lissage de Chaikin d'une boucle fermée : adoucit les angles des points enregistrés.
@@ -616,7 +619,7 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
     let (ax, ay, aw) = (14.0, 32.0, w - 28.0);
     let aspect = if pts.is_empty() { 1.0 } else { (bh / bw).clamp(0.5, 1.15) };
     let ah = aw * aspect;
-    let h = ay + ah + 16.0;
+    let h = ay + ah + 34.0;
     if d.measuring() {
         return (w, h);
     }
@@ -626,29 +629,57 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
 
     let n = (data.f("session.vehicles", 0.0) as usize).min(104);
     let show_others = spec.flag("others", true);
-    let cars: Vec<MapCar> = (0..n)
+    let mode = spec.choice("numbers", "class").to_string();
+    let mut cars: Vec<MapCar> = (0..n)
         .filter_map(|i| {
             let p = format!("grid.{i:03}");
             let (x, z) = (data.num(&format!("{p}.x"))?, data.num(&format!("{p}.z"))?);
-            let me = data.flag(&format!("{p}.is_player"));
-            (me || show_others).then(|| MapCar {
+            Some(MapCar {
                 xy: [x as f32, -z as f32],
                 lap_dist: data.f(&format!("{p}.lap_dist"), 0.0),
                 class: data.text(&format!("{p}.class")).to_string(),
-                me,
+                me: data.flag(&format!("{p}.is_player")),
                 pit: data.flag(&format!("{p}.in_pits")),
+                place: data.f(&format!("{p}.place"), 0.0) as i64,
+                rank: 0,
             })
         })
         .collect();
+    // Place en classe : rang parmi les voitures de la même classe, dans l'ordre du classement général.
+    let mut order: Vec<usize> = (0..cars.len()).collect();
+    order.sort_by_key(|&i| cars[i].place);
+    let mut seen: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for i in order {
+        let c = seen.entry(cars[i].class.clone()).or_insert(0);
+        *c += 1;
+        cars[i].rank = *c;
+    }
+    let me_info = cars.iter().find(|c| c.me).map(|c| (c.place, c.rank, c.class.clone()));
+    cars.retain(|c| c.me || show_others);
+    // Les premiers au-dessus des suivants, le joueur tout en haut.
+    cars.sort_by_key(|c| (c.me, -c.place));
 
     let outline = Color32::from_rgba_unmultiplied(6, 8, 12, 230);
     let dot = |c: &MapCar, x: f32, y: f32| {
+        let num = match mode.as_str() {
+            "none" => 0,
+            "overall" => c.place,
+            _ => c.rank,
+        };
+        let label = (num > 0).then(|| num.to_string());
         if c.me {
-            d.circle(x, y, 11.0 * k, Color32::from_rgba_unmultiplied(25, 211, 243, 55), None);
-            d.circle(x, y, 6.5 * k, ACCENT, Some((2.0 * k, TEXT)));
+            d.circle(x, y, 14.0 * k, Color32::from_rgba_unmultiplied(25, 211, 243, 55), None);
+            d.circle(x, y, 9.0 * k, ACCENT, Some((2.0 * k, TEXT)));
+            if let Some(l) = &label {
+                d.text(x, y - 6.0 * k, l, 12.0 * k, ACCENT_INK, Font::Num, HAlign::Center);
+            }
         } else {
             let col = if c.pit { MUTED } else { class_color(&c.class) };
-            d.circle(x, y, 4.6 * k, col, Some((1.4, outline)));
+            let r = if label.is_some() { 7.0 * k } else { 4.6 * k };
+            d.circle(x, y, r, col, Some((1.4, outline)));
+            if let Some(l) = &label {
+                d.text(x, y - 4.8 * k, l, 9.5 * k, Color32::WHITE, Font::Num, HAlign::Center);
+            }
         }
     };
     // Route : liseré clair, asphalte sombre, filet central.
@@ -679,7 +710,7 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         let (a, b) = (to_screen(pts[0]), to_screen(pts[1]));
         start(a, (b.0 - a.0, b.1 - a.1));
         // Les autres d'abord, le joueur par-dessus.
-        for c in cars.iter().filter(|c| !c.me).chain(cars.iter().filter(|c| c.me)) {
+        for c in &cars {
             let (x, y) = to_screen(rot(c.xy));
             dot(c, x, y);
         }
@@ -696,11 +727,18 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         road(&circle);
         start((cx, cy - r), (1.0, 0.0));
         let length = data.f("session.track_length", 0.0).max(1.0);
-        for c in cars.iter().filter(|c| !c.me).chain(cars.iter().filter(|c| c.me)) {
+        for c in &cars {
             let a = -std::f32::consts::FRAC_PI_2 + (c.lap_dist / length) as f32 * std::f32::consts::TAU;
             dot(c, cx + r * a.cos(), cy + r * a.sin());
         }
-        d.text(w / 2.0, h - 20.0, "Un tour propre trace la carte", 10.5, MUTED, Font::Ui, HAlign::Center);
+        d.text(w / 2.0, cy - 6.0, "Un tour propre trace la carte", 10.5, MUTED, Font::Ui, HAlign::Center);
+    }
+    // Pied : ma place au général et dans ma classe.
+    if let Some((place, rank, class)) = me_info {
+        if place > 0 {
+            d.text(16.0, h - 24.0, &format!("P{place}"), 16.0, ACCENT, Font::Num, HAlign::Left);
+            d.text(w - 16.0, h - 21.0, &format!("{} · P{rank}", class.to_uppercase()), 11.0, class_color(&class), Font::Ui, HAlign::Right);
+        }
     }
     (w, h)
 }
