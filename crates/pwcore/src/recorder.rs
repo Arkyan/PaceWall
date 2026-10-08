@@ -6,7 +6,7 @@
 
 use crate::db::{self, NewLap, NewSession};
 use crate::pulse::Pulse;
-use crate::trackmap::{self, Builder};
+use crate::trackmap::{self, Builder, SectorLearner};
 use lmu::reader::{c_str, Reader};
 use lmu::{ScoringInfo, VehicleScoring, VehicleTelemetry};
 use rusqlite::Connection;
@@ -45,7 +45,7 @@ pub fn run() {
     let mut reader: Option<Reader> = None;
     let mut session: Option<Session> = None;
     // Carte du circuit : (circuit, constructeur tant qu'elle n'existe pas encore).
-    let mut map: Option<(String, Option<Builder>)> = None;
+    let mut map: Option<MapState> = None;
     let mut building = false;
     let mut pulse = Pulse::new();
     let mut last_change = Instant::now();
@@ -84,13 +84,21 @@ fn averages(t: &VehicleTelemetry) -> (f64, f64, f64) {
         let temps = w.mTemperature;
         tyre += (temps[0] + temps[1] + temps[2]) / 3.0 - 273.15;
         brake += w.mBrakeTemp;
-        wear += w.mWear * 100.0;
+        wear += (1.0 - w.mWear) * 100.0;
     }
     (tyre / 4.0, brake / 4.0, wear / 4.0)
 }
 
+/// État de la carte du circuit en cours : constructeur tant qu'elle n'existe pas, relevé des secteurs tant qu'ils manquent.
+struct MapState {
+    track: String,
+    builder: Option<Builder>,
+    sectors: SectorLearner,
+    need_sectors: bool,
+}
+
 /// Renvoie `true` tant que la carte du circuit est en construction.
-fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<Session>, map: &mut Option<(String, Option<Builder>)>) -> bool {
+fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<Session>, map: &mut Option<MapState>) -> bool {
     let Some((si, ti)) = r.player_indexes() else { return false };
     let (Some(s), Some(t)) = (r.vehicle_scoring(si), r.telemetry(ti)) else { return false };
     let info = r.scoring_info();
@@ -108,19 +116,35 @@ fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<
         *session = begin(conn, &track, &info, &s, &t, start_event);
     }
     // Carte du circuit : on la construit au premier passage, puis elle est réutilisée.
-    if map.as_ref().is_none_or(|(name, _)| *name != track) {
-        let builder = (!trackmap::exists(&track)).then(|| Builder::new(&track, info.mLapDist));
-        *map = Some((track.clone(), builder));
+    if map.as_ref().is_none_or(|m| m.track != track) {
+        let existing = trackmap::load(&track);
+        *map = Some(MapState {
+            builder: existing.is_none().then(|| Builder::new(&track, info.mLapDist)),
+            need_sectors: existing.as_ref().is_none_or(|m| m.sectors.len() < 2),
+            sectors: SectorLearner::default(),
+            track: track.clone(),
+        });
     }
     let mut building = false;
-    if let Some((_, slot)) = map.as_mut() {
-        if let Some(b) = slot.as_mut() {
+    if let Some(m) = map.as_mut() {
+        if let Some(b) = m.builder.as_mut() {
             building = true;
             let pos = s.mPos;
             if let Some(done) = b.update(s.mTotalLaps as i64, s.mLapDist, pos.x, pos.z, s.mInPits != 0, s.mLastLapTime, info.mCurrentET) {
                 if trackmap::save(&done).is_ok() {
-                    *slot = None;
+                    m.builder = None;
                     building = false;
+                }
+            }
+        }
+        // Limites des secteurs : relevées sur un tour propre, ajoutées à la carte dès qu'elle existe.
+        if m.need_sectors {
+            if let Some(limits) = m.sectors.update(s.mSector, s.mLapDist, info.mLapDist, s.mInPits != 0) {
+                if let Some(mut saved) = trackmap::load(&m.track) {
+                    saved.sectors = limits.to_vec();
+                    if trackmap::save(&saved).is_ok() {
+                        m.need_sectors = false;
+                    }
                 }
             }
         }

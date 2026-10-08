@@ -91,7 +91,7 @@ fn main() {
                 w.mPressure = 165.0 + i as f64;
                 w.mTemperature = [80.0 + 273.15, 85.0 + 273.15, 90.0 + 273.15];
                 w.mTireCarcassTemperature = 82.0 + 273.15;
-                w.mWear = (0.012 * (t / lap_time)).min(1.0);
+                w.mWear = (1.0 - 0.012 * (t / lap_time)).max(0.0);
                 w.mOptimalTemp = 88.0;
                 w.mCompoundType = 1;
             }
@@ -126,6 +126,8 @@ fn main() {
                 put(&mut s.mVehicleClass, "Hypercar");
                 s.mTotalLaps = lap as i16;
                 s.mLapDist = (progress * 4000.0 - i as f64 * 40.0).rem_euclid(4000.0);
+                // Secteurs comme dans le jeu : 1 = secteur 1, 2 = secteur 2, 0 = secteur 3.
+                s.mSector = if s.mLapDist < 1240.0 { 1 } else if s.mLapDist < 2680.0 { 2 } else { 0 };
                 // Position dans le monde : un circuit fermé de forme quelconque, pour tester la carte.
                 let a = s.mLapDist / 4000.0 * std::f64::consts::TAU;
                 s.mPos = Vect3 { x: 500.0 * a.cos() + 130.0 * (3.0 * a).cos(), y: 0.0, z: 300.0 * a.sin() + 90.0 * (2.0 * a).sin() };

@@ -50,7 +50,8 @@ pub fn options(kind: &str) -> &'static [Opt] {
         "tyres" => &[
             Opt { id: "pressure", label: "Pression", kind: Choice(&[("kpa", "kPa"), ("bar", "bar"), ("psi", "psi"), ("off", "Masquer")], "kpa") },
             Opt { id: "brakes", label: "Températures des freins", kind: Bool(false) },
-            Opt { id: "tempsrc", label: "Température affichée", kind: Choice(&[("carcass", "Carcasse"), ("surface", "Surface (moyenne)")], "carcass") },
+            Opt { id: "tempsrc", label: "Température affichée", kind: Choice(&[("carcass", "Carcasse"), ("inner", "Couche interne"), ("surface", "Surface (moyenne)")], "carcass") },
+            Opt { id: "tempoffset", label: "Décalage de température (°C)", kind: Num { min: -10.0, max: 10.0, step: 0.5, def: 0.0 } },
             Opt { id: "wearmode", label: "Usure", kind: Choice(&[("used", "Usée (0 → 100 %)"), ("left", "Restante (100 → 0 %)")], "used") },
             Opt { id: "unit", label: "Unité de température", kind: Choice(&[("c", "°C"), ("f", "°F")], "c") },
         ],
@@ -66,13 +67,14 @@ pub fn options(kind: &str) -> &'static [Opt] {
         "standings" => &[
             Opt { id: "ahead", label: "Voitures devant", kind: Num { min: 0.0, max: 8.0, step: 1.0, def: 3.0 } },
             Opt { id: "behind", label: "Voitures derrière", kind: Num { min: 0.0, max: 8.0, step: 1.0, def: 3.0 } },
-            Opt { id: "classOnly", label: "Ma classe seulement", kind: Bool(false) },
+            Opt { id: "scope", label: "Classement", kind: Choice(&[("overall", "Général"), ("class", "Par classe (ma classe)")], "overall") },
         ],
         "session" => &[Opt { id: "weather", label: "Météo", kind: Bool(true) }],
         "trackmap" => &[
             Opt { id: "size", label: "Taille de la carte", kind: Num { min: 160.0, max: 460.0, step: 10.0, def: 300.0 } },
             Opt { id: "rotate", label: "Rotation", kind: Choice(&[("0", "0°"), ("90", "90°"), ("180", "180°"), ("270", "270°")], "0") },
             Opt { id: "others", label: "Afficher les autres voitures", kind: Bool(true) },
+            Opt { id: "sectors", label: "Limites des secteurs", kind: Bool(true) },
             Opt { id: "numbers", label: "Numéro dans les pastilles", kind: Choice(&[("none", "Aucun"), ("class", "Place en classe"), ("overall", "Place au général")], "none") },
         ],
         _ => NO_OPTS,
@@ -251,7 +253,8 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let brakes = spec.flag("brakes", false);
     let fahrenheit = spec.choice("unit", "c") == "f";
     let pressure = spec.choice("pressure", "kpa");
-    let surface = spec.choice("tempsrc", "carcass") == "surface";
+    let source = spec.choice("tempsrc", "carcass");
+    let offset = spec.num("tempoffset", 0.0);
     let worn = spec.choice("wearmode", "used") == "used";
     let h = 28.0 + 134.0 + 12.0 + if brakes { 40.0 } else { 0.0 };
     d.card(w, h);
@@ -265,11 +268,12 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     for (i, n) in names.iter().enumerate() {
         let x = 16.0 + (i % 2) as f32 * (cw + 8.0);
         let y = 28.0 + (i / 2) as f32 * 70.0;
-        let t = if surface {
-            (data.f(&format!("tyre.{n}.temp_left"), f64::NAN) + data.f(&format!("tyre.{n}.temp_center"), f64::NAN) + data.f(&format!("tyre.{n}.temp_right"), f64::NAN)) / 3.0
-        } else {
-            data.f(&format!("tyre.{n}.carcass"), f64::NAN)
-        };
+        let t = offset
+            + match source {
+                "surface" => (data.f(&format!("tyre.{n}.temp_left"), f64::NAN) + data.f(&format!("tyre.{n}.temp_center"), f64::NAN) + data.f(&format!("tyre.{n}.temp_right"), f64::NAN)) / 3.0,
+                "inner" => data.f(&format!("tyre.{n}.inner"), f64::NAN),
+                _ => data.f(&format!("tyre.{n}.carcass"), f64::NAN),
+            };
         let opt = {
             let o = data.f(&format!("tyre.{n}.optimal"), 0.0);
             if o > 0.0 {
@@ -461,7 +465,8 @@ fn standings(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let ahead = spec.num("ahead", 3.0) as usize;
     let behind = spec.num("behind", 3.0) as usize;
     let rows = ahead + behind + 1;
-    let class_only = spec.flag("classOnly", false);
+    // Ancien réglage « classOnly » conservé pour les mises en page déjà enregistrées.
+    let class_only = spec.choice("scope", if spec.flag("classOnly", false) { "class" } else { "overall" }) == "class";
     let h = 30.0 + rows as f32 * 24.0 + 10.0;
     d.card(w, h);
     d.label(16.0, 10.0, "Classement", MUTED);
@@ -737,6 +742,33 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         road(&line);
         let (a, b) = (to_screen(pts[0]), to_screen(pts[1]));
         start(a, (b.0 - a.0, b.1 - a.1));
+        // Limites des secteurs : un trait en travers de la route et le numéro du secteur au milieu.
+        if spec.flag("sectors", true) {
+            if let Some(map) = map.filter(|m| m.sectors.len() >= 2) {
+                let n = pts.len();
+                let ticks: Vec<f64> = vec![0.0, map.sectors[0], map.sectors[1], 1.0];
+                for f in map.sectors.iter().take(2) {
+                    let i = ((f * n as f64) as usize).min(n - 1);
+                    let (p, before, after) = (to_screen(pts[i]), to_screen(pts[(i + n - 2) % n]), to_screen(pts[(i + 2) % n]));
+                    let (dx, dy) = (after.0 - before.0, after.1 - before.1);
+                    let len = (dx * dx + dy * dy).sqrt().max(0.001);
+                    let (nx, ny) = (-dy / len * 7.5 * k, dx / len * 7.5 * k);
+                    d.line(&[(p.0 - nx, p.1 - ny), (p.0 + nx, p.1 + ny)], 2.5 * k, Color32::from_rgb(255, 214, 51));
+                }
+                for s in 0..3 {
+                    let mid = (ticks[s] + ticks[s + 1]) / 2.0;
+                    let i = ((mid * n as f64) as usize).min(n - 1);
+                    let (p, before, after) = (to_screen(pts[i]), to_screen(pts[(i + n - 2) % n]), to_screen(pts[(i + 2) % n]));
+                    let (dx, dy) = (after.0 - before.0, after.1 - before.1);
+                    let len = (dx * dx + dy * dy).sqrt().max(0.001);
+                    // Le numéro est posé du côté extérieur de la route, hors du tracé.
+                    let (nx, ny) = (-dy / len * 17.0 * k, dx / len * 17.0 * k);
+                    let (cx, cy) = (ox + bw * scale / 2.0, oy + bh * scale / 2.0);
+                    let sign = if (p.0 + nx - cx).powi(2) + (p.1 + ny - cy).powi(2) > (p.0 - nx - cx).powi(2) + (p.1 - ny - cy).powi(2) { 1.0 } else { -1.0 };
+                    d.text(p.0 + sign * nx, p.1 + sign * ny - 5.5 * k, &format!("S{}", s + 1), 10.0 * k, Color32::from_rgb(255, 214, 51), Font::Num, HAlign::Center);
+                }
+            }
+        }
         // Les autres d'abord, le joueur par-dessus.
         for c in &cars {
             let (x, y) = to_screen(rot(c.xy));

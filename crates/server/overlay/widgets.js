@@ -91,7 +91,8 @@ PW.widgets.tyres = {
   options: [
     { id: 'pressure', label: 'Pression', type: 'select', choices: [['kpa', 'kPa'], ['bar', 'bar'], ['psi', 'psi'], ['off', 'Masquer']], def: 'kpa' },
     { id: 'brakes', label: 'Températures des freins', type: 'bool', def: false },
-    { id: 'tempsrc', label: 'Température affichée', type: 'select', choices: [['carcass', 'Carcasse'], ['surface', 'Surface (moyenne)']], def: 'carcass' },
+    { id: 'tempsrc', label: 'Température affichée', type: 'select', choices: [['carcass', 'Carcasse'], ['inner', 'Couche interne'], ['surface', 'Surface (moyenne)']], def: 'carcass' },
+    { id: 'tempoffset', label: 'Décalage de température (°C)', type: 'number', min: -10, max: 10, step: 0.5, def: 0 },
     { id: 'wearmode', label: 'Usure', type: 'select', choices: [['used', 'Usée (0 → 100 %)'], ['left', 'Restante (100 → 0 %)']], def: 'used' },
     { id: 'unit', label: 'Unité de température', type: 'select', choices: [['c', '°C'], ['f', '°F']], def: 'c' },
   ],
@@ -112,7 +113,7 @@ PW.widgets.tyres = {
         const c = (g('tyre.front.compound', '') || g('tyre.rear.compound', ''));
         b.text('cmp', c);
         for (const n of names) {
-          const t = o.tempsrc === 'surface' ? (g(`tyre.${n}.temp_left`) + g(`tyre.${n}.temp_center`) + g(`tyre.${n}.temp_right`)) / 3 : g(`tyre.${n}.carcass`, NaN);
+          const t = (+o.tempoffset || 0) + (o.tempsrc === 'surface' ? (g(`tyre.${n}.temp_left`) + g(`tyre.${n}.temp_center`) + g(`tyre.${n}.temp_right`)) / 3 : o.tempsrc === 'inner' ? g(`tyre.${n}.inner`, NaN) : g(`tyre.${n}.carcass`, NaN));
           const opt = g(`tyre.${n}.optimal`, 0) || 88;
           const wear = g(`tyre.${n}.wear`, 0);
           b.text(n + 't', isFinite(t) ? Math.round(temp(t)) + '°' : '—');
@@ -246,10 +247,11 @@ PW.widgets.standings = {
   options: [
     { id: 'ahead', label: 'Voitures devant', type: 'number', min: 0, max: 8, step: 1, def: 3 },
     { id: 'behind', label: 'Voitures derrière', type: 'number', min: 0, max: 8, step: 1, def: 3 },
-    { id: 'classOnly', label: 'Ma classe seulement', type: 'bool', def: false },
+    { id: 'scope', label: 'Classement', type: 'select', choices: [['overall', 'Général'], ['class', 'Par classe (ma classe)']], def: 'overall' },
   ],
   mount(root, o) {
     const rows = o.ahead + o.behind + 1;
+    const classOnly = o.scope ? o.scope === 'class' : !!o.classOnly;
     const card = PW.tpl(`<div class="pw-card"><div class="pw-title"><span>Classement</span><em data-k="cls"></em></div><table class="pw-board"><tbody data-k="body"></tbody></table></div>`).firstChild;
     root.appendChild(card);
     const body = card.querySelector('tbody');
@@ -272,7 +274,7 @@ PW.widgets.standings = {
         }
         const me = cars.find(c => c.me);
         let list = cars.sort((a, b) => a.place - b.place);
-        if (o.classOnly && me) list = list.filter(c => c.cls === me.cls);
+        if (classOnly && me) list = list.filter(c => c.cls === me.cls);
         const idx = Math.max(0, list.findIndex(c => c.me));
         let start = Math.max(0, idx - o.ahead);
         start = Math.min(start, Math.max(0, list.length - rows));
@@ -285,7 +287,7 @@ PW.widgets.standings = {
           if (!c) return;
           r.tr.className = (c.me ? 'me ' : '') + (c.pit ? 'pit' : '');
           r.c.style.background = classColor(c.cls);
-          r.p.textContent = o.classOnly ? String(start + i + 1) : c.place;
+          r.p.textContent = classOnly ? String(start + i + 1) : c.place;
           r.n.textContent = short(c.name);
           let gap = '';
           if (me && !c.me) {
@@ -347,6 +349,7 @@ PW.widgets.trackmap = {
     { id: 'size', label: 'Taille de la carte', type: 'number', min: 160, max: 460, step: 10, def: 300 },
     { id: 'rotate', label: 'Rotation', type: 'select', choices: [['0', '0°'], ['90', '90°'], ['180', '180°'], ['270', '270°']], def: '0' },
     { id: 'others', label: 'Afficher les autres voitures', type: 'bool', def: true },
+    { id: 'sectors', label: 'Limites des secteurs', type: 'bool', def: true },
     { id: 'numbers', label: 'Numéro dans les pastilles', type: 'select', choices: [['none', 'Aucun'], ['class', 'Place en classe'], ['overall', 'Place au général']], def: 'none' },
   ],
   mount(root, o) {
@@ -359,7 +362,7 @@ PW.widgets.trackmap = {
     const b = PW.bind(card), ctx = card.querySelector('canvas').getContext('2d');
     const angle = (+o.rotate || 0) * Math.PI / 180, sin = Math.sin(angle), cos = Math.cos(angle);
     const rot = p => [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos];
-    let key = null, map = null, tried = -1e9;
+    let key = null, map = null, sectors = [], tried = -1e9;
 
     const demoMap = () => Array.from({ length: 360 }, (_, i) => { const a = i / 360 * Math.PI * 2; return [520 * Math.cos(a) + 130 * Math.cos(3 * a), 300 * Math.sin(a) + 90 * Math.sin(2 * a)]; });
     const colorOf = c => /hyper/i.test(c) ? '#e5393b' : /lmp2/i.test(c) ? '#2d7ff9' : /gt3/i.test(c) ? '#2fbf71' : /lmp3/i.test(c) ? '#a85cf2' : /gte/i.test(c) ? '#f2a93b' : '#7b8494';
@@ -369,10 +372,10 @@ PW.widgets.trackmap = {
     return {
       update(g) {
         const track = g('session.track', ''), demo = !!g('demo.map', false), k = demo ? 'demo' : track;
-        if (k !== key) { key = k; map = null; tried = -1e9; if (demo) map = demoMap(); }
+        if (k !== key) { key = k; map = null; tried = -1e9; if (demo) { map = demoMap(); sectors = [0.31, 0.67]; } else sectors = []; }
         if (!map && !demo && track && performance.now() - tried > 3000) {
           tried = performance.now();
-          fetch('/api/track/' + encodeURIComponent(track)).then(r => r.ok ? r.json() : null).then(m => { if (m && key === k) map = m.points; }).catch(() => {});
+          fetch('/api/track/' + encodeURIComponent(track)).then(r => r.ok ? r.json() : null).then(m => { if (m && key === k) { map = m.points; sectors = m.sectors || []; } }).catch(() => {});
         }
         const n = Math.min(g('session.vehicles', 0), 104), cars = [];
         for (let i = 0; i < n; i++) {
@@ -423,6 +426,19 @@ PW.widgets.trackmap = {
           const to = p => [ox + (p[0] - minx) * s, oy + (p[1] - miny) * s];
           road(smooth(pts, 2).map(to));
           const a = to(pts[0]), c = to(pts[1]); start(a, [c[0] - a[0], c[1] - a[1]]);
+          if (o.sectors !== false && sectors.length >= 2) {
+            const N = pts.length, at = f => { const i = Math.min(N - 1, Math.floor(f * N)); const p = to(pts[i]), b = to(pts[(i + N - 2) % N]), n = to(pts[(i + 2) % N]); const dx = n[0] - b[0], dy = n[1] - b[1], l = Math.hypot(dx, dy) || 1; return { p, nx: -dy / l, ny: dx / l }; };
+            ctx.strokeStyle = '#ffd633'; ctx.lineWidth = 2.5 * K; ctx.lineCap = 'butt';
+            sectors.slice(0, 2).forEach(f => { const { p, nx, ny } = at(f); ctx.beginPath(); ctx.moveTo(p[0] - nx * 7.5 * K, p[1] - ny * 7.5 * K); ctx.lineTo(p[0] + nx * 7.5 * K, p[1] + ny * 7.5 * K); ctx.stroke(); });
+            const edges = [0, sectors[0], sectors[1], 1], cx = ox + bw * s / 2, cy = oy + bh * s / 2;
+            ctx.fillStyle = '#ffd633'; ctx.font = `700 ${10 * K}px Consolas, monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            for (let q = 0; q < 3; q++) {
+              const { p, nx, ny } = at((edges[q] + edges[q + 1]) / 2), x1 = p[0] + nx * 17 * K, y1 = p[1] + ny * 17 * K, x2 = p[0] - nx * 17 * K, y2 = p[1] - ny * 17 * K;
+              const out = (x1 - cx) ** 2 + (y1 - cy) ** 2 > (x2 - cx) ** 2 + (y2 - cy) ** 2;
+              ctx.fillText('S' + (q + 1), out ? x1 : x2, out ? y1 : y2);
+            }
+            ctx.textBaseline = 'alphabetic';
+          }
           order.forEach(c => { const p = to(rot(c.xy)); dot(c, p[0], p[1]); });
         } else {
           const r = Math.max(20, Math.min(aw, ah) / 2 - 8), cx = ax + aw / 2, cy = ay + ah / 2;

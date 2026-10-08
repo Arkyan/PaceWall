@@ -28,7 +28,7 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 .pw-card {
   position: relative; box-sizing: border-box; padding: 10px 14px 12px 16px;
   background: rgba(var(--pw-panel), var(--bg, .78));
-  border: 1px solid var(--pw-line); border-left: 3px solid var(--pw-accent);
+  border: 1px solid rgba(255,255,255, calc(var(--bg, .78) * .13)); border-left: 3px solid var(--pw-accent);
   clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
   font-variant-numeric: tabular-nums;
 }
@@ -112,4 +112,4 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 .flat-nomask .pw-bar, .flat-nomask .pw-rpm, .flat-nomask .pw-pedal { -webkit-mask: none; mask: none; }
 .flat-noclip .pw-card { clip-path: none; }
 
-.pw-w.nobar .pw-card { border-left: 1px solid var(--pw-line); }
+.pw-w.nobar .pw-card { border-left: 1px solid rgba(255,255,255, calc(var(--bg, .78) * .13)); }

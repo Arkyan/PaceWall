@@ -14,6 +14,9 @@ pub struct TrackMap {
     pub length: f64,
     /// Boucle fermée dans l'ordre du tour : `[x, z]` en mètres.
     pub points: Vec<[f32; 2]>,
+    /// Fin des secteurs 1 et 2, en fraction du tour (0..1). Vide tant qu'ils n'ont pas été relevés.
+    #[serde(default)]
+    pub sectors: Vec<f64>,
 }
 
 pub fn dir() -> PathBuf {
@@ -49,7 +52,7 @@ pub fn demo() -> TrackMap {
             [520.0 * a.cos() + 130.0 * (3.0 * a).cos(), 300.0 * a.sin() + 90.0 * (2.0 * a).sin()]
         })
         .collect();
-    TrackMap { track: "demo".into(), length: 4000.0, points }
+    TrackMap { track: "demo".into(), length: 4000.0, points, sectors: vec![0.31, 0.67] }
 }
 
 /// Position d'un point à la fraction `f` (0..1) du tour sur la carte.
@@ -124,7 +127,7 @@ impl Builder {
             } else if timer > 1.0 && last_lap_time > 0.0 {
                 self.validating_since = None;
                 if let Some(points) = self.candidate.take() {
-                    return Some(TrackMap { track: self.track.clone(), length: self.length, points });
+                    return Some(TrackMap { track: self.track.clone(), length: self.length, points, sectors: Vec::new() });
                 }
             }
         }
@@ -151,5 +154,44 @@ impl Builder {
         } else {
             0.0
         }
+    }
+}
+
+/// Relève, pendant que le joueur roule, où finissent les secteurs 1 et 2 (changements de `mSector` du jeu :
+/// 0 = secteur 3, 1 = secteur 1, 2 = secteur 2). Un tour passé aux stands ne compte pas.
+#[derive(Default)]
+pub struct SectorLearner {
+    last: Option<i8>,
+    s1: Option<f64>,
+    s2: Option<f64>,
+    pit_lap: bool,
+    result: Option<[f64; 2]>,
+}
+
+impl SectorLearner {
+    /// Renvoie les deux limites (fractions du tour) dès qu'elles sont connues.
+    pub fn update(&mut self, sector: i8, lap_dist: f64, length: f64, in_pits: bool) -> Option<[f64; 2]> {
+        self.pit_lap |= in_pits;
+        if let Some(prev) = self.last.filter(|p| *p != sector) {
+            let frac = (!self.pit_lap && length > 0.0).then(|| lap_dist / length);
+            match (prev, sector) {
+                (1, 2) => self.s1 = frac,
+                (2, 0) => self.s2 = frac,
+                // Ligne d'arrivée : nouveau tour.
+                (0, 1) => {
+                    self.s1 = None;
+                    self.s2 = None;
+                    self.pit_lap = in_pits;
+                }
+                _ => {}
+            }
+            if let (Some(a), Some(b)) = (self.s1, self.s2) {
+                if a > 0.02 && b > a + 0.02 && b < 0.98 {
+                    self.result = Some([a, b]);
+                }
+            }
+        }
+        self.last = Some(sector);
+        self.result
     }
 }

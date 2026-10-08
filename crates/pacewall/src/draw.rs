@@ -135,7 +135,10 @@ impl<'a> D<'a> {
         let cut = 14.0;
         let pts: Vec<(f32, f32)> = [(0.0, 0.0), (w - cut, 0.0), (w, cut), (w, h), (0.0, h)].iter().map(|&(x, y)| self.pt(x, y)).collect();
         let fill = Color32::from_rgba_unmultiplied(8, 11, 16, (self.bg * 255.0) as u8);
-        self.c.borrow_mut().polygon(&pts, self.col(fill), Some((1.0, self.col(Color32::from_white_alpha(23)))));
+        // Le contour disparaît avec le fond : sans fond, plus de cadre gris.
+        let edge = (23.0 * (self.bg / 0.78).clamp(0.0, 1.0)) as u8;
+        let stroke = (edge > 0).then(|| (1.0, self.col(Color32::from_white_alpha(edge))));
+        self.c.borrow_mut().polygon(&pts, self.col(fill), stroke);
         if self.bar {
             self.fill(0.0, 0.0, 3.0, h, self.accent);
         }

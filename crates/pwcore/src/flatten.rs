@@ -150,9 +150,12 @@ fn player(o: &mut Out, s: &VehicleScoring, t: &VehicleTelemetry) {
         o.num(format!("tyre.{n}.temp_center"), "°C", "Surface centre", temps[1] - KELVIN);
         o.num(format!("tyre.{n}.temp_right"), "°C", "Surface droite", temps[2] - KELVIN);
         o.num(format!("tyre.{n}.carcass"), "°C", "Carcasse", w.mTireCarcassTemperature - KELVIN);
+        let inner = w.mTireInnerLayerTemperature;
+        o.num(format!("tyre.{n}.inner"), "°C", "Couche interne (moyenne)", (inner[0] + inner[1] + inner[2]) / 3.0 - KELVIN);
         o.num(format!("tyre.{n}.optimal"), "°C", "Optimale", w.mOptimalTemp as f64);
         o.num(format!("tyre.{n}.pressure"), "kPa", "Pression", w.mPressure);
-        o.num(format!("tyre.{n}.wear"), "%", "Usure", w.mWear * 100.0);
+        // Le jeu donne la bande de gomme restante (1 = neuve) : on expose l'usure, 0 % = neuve.
+        o.num(format!("tyre.{n}.wear"), "%", "Usure", (1.0 - w.mWear) * 100.0);
         o.num(format!("tyre.{n}.grip_slide"), "%", "Glissement", w.mGripFract * 100.0);
         o.flag(format!("tyre.{n}.flat"), "Crevé", w.mFlat != 0);
         o.num(format!("brake.{n}.temp"), "°C", "Frein", w.mBrakeTemp);

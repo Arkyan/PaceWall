@@ -64,6 +64,7 @@ pub fn data(t: f64) -> Data {
         put(&format!("tyre.{n}.temp_center"), json!(86.0 + i));
         put(&format!("tyre.{n}.temp_right"), json!(92.0 + i));
         put(&format!("tyre.{n}.carcass"), json!(84.0 + i));
+        put(&format!("tyre.{n}.inner"), json!(82.0 + i));
         put(&format!("tyre.{n}.optimal"), json!(88.0));
         put(&format!("tyre.{n}.pressure"), json!(165.0 + i));
         put(&format!("tyre.{n}.wear"), json!(12.0 + i * 2.0));

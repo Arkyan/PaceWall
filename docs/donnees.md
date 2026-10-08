@@ -286,6 +286,17 @@ une option. Les données de ce canal sont celles qui manquent à la mémoire par
 Repère retenu comme TinyPedal : abscisse `mPos.x`, ordonnée `-mPos.z`. ⚠️ À confirmer avec le vrai jeu : sens et
 orientation de la carte (l'option de rotation corrige un décalage).
 
+## 6 ter. Pneus et secteurs
+
+- **Usure** : `mWear` est la bande de gomme **restante** (1 = neuve, comme l'appelle TinyPedal « tread »). PaceWall expose
+  `tyre.*.wear` = `(1 − mWear) × 100` : 0 % neuve, la valeur monte. ⚠️ Déduit du comportement observé, à confirmer.
+- **Températures** : `tyre.*.carcass` (`mTireCarcassTemperature`, la plus proche de l'affichage du jeu d'après TinyPedal),
+  `tyre.*.inner` (moyenne de `mTireInnerLayerTemperature`), `temp_left/center/right` (surface). Le widget propose les trois
+  sources et un décalage en °C.
+- **Secteurs** : `VehicleScoring.mSector` (0 = secteur 3, 1 = secteur 1, 2 = secteur 2). PaceWall relève la distance
+  de tour aux changements 1→2 et 2→0 sur un tour sans stands et les range dans `tracks/<circuit>.json` (`sectors`,
+  fractions du tour). ⚠️ À confirmer avec le vrai jeu.
+
 ## 7. Mesure et vérification
 
 - `cargo test -p lmu` : vérifie que la disposition des structures correspond à celle du jeu
