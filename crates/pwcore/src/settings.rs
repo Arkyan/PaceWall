@@ -13,6 +13,7 @@ fn defaults() -> Map<String, Value> {
         "overlay_fg_only": true,       // masquer l'overlay quand le jeu n'est pas au premier plan
         "overlay_hide_idle": true,     // masquer l'overlay en pause, au menu ou hors piste
         "voice_enabled": true,         // alertes vocales
+        "voice_engine": "engineer",    // "engineer" : clips d'ingénieur (naturels) ; "windows" : voix de synthèse de Windows
         "voice_volume": 80,            // volume de la voix (0 à 100)
         "voice_fuel": true,            // carburant et énergie
         "voice_tyres": true,           // pneus froids, chauds, usés, crevés
@@ -40,6 +41,10 @@ pub fn all() -> Value {
         }
     }
     Value::Object(merged)
+}
+
+pub fn str_of(key: &str, default: &str) -> String {
+    all().get(key).and_then(Value::as_str).unwrap_or(default).to_string()
 }
 
 pub fn bool_of(key: &str, default: bool) -> bool {

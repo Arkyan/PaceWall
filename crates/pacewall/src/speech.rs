@@ -1,16 +1,25 @@
-//! Synthèse vocale : la voix intégrée à Windows (SAPI), hors ligne, sans rien embarquer ni télécharger.
-//! Une voix française est choisie d'office si elle est installée (Paramètres > Heure et langue > Voix).
+//! Voix des alertes. Deux moteurs :
+//! - **ingénieur de course** : des clips enregistrés à l'avance (voir `tools/voice/generate.py`), avec effet radio et
+//!   plusieurs variantes par phrase. Intégrés au programme, lus par la carte son : rien à calculer pendant la course ;
+//! - **voix Windows** (SAPI), hors ligne : secours pour les phrases sans clip ou si on le choisit dans les réglages.
+//!
 //! La parole se fait sur un fil à part : le dessin de l'overlay n'attend jamais la fin d'une phrase.
 
+use crate::voice_clips::CLIPS;
+use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::OnceLock;
 use windows::core::{w, PCWSTR};
+use windows::Win32::Media::Audio::{PlaySoundW, SND_MEMORY, SND_NODEFAULT, SND_SYNC};
 use windows::Win32::Media::Speech::{ISpObjectToken, ISpObjectTokenCategory, ISpVoice, SpObjectTokenCategory, SpVoice, SPCAT_VOICES};
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
 
 struct Say {
+    /// Clé du clip de l'ingénieur (« fuel_3 », « yellow »…), ou le texte lui-même pour un essai.
+    key: String,
     text: String,
     volume: u16,
+    engineer: bool,
 }
 
 pub struct Speaker {
@@ -33,9 +42,10 @@ impl Speaker {
         SPEAKER.get_or_init(Speaker::new)
     }
 
-    /// Dit `text` à `volume` % (0 à 100). Ne bloque pas : la phrase est lue par le fil de parole.
-    pub fn say(&self, text: &str, volume: u32) {
-        let _ = self.tx.send(Say { text: text.to_string(), volume: volume.min(100) as u16 });
+    /// Dit une alerte à `volume` % (0 à 100). `key` désigne le clip de l'ingénieur ; `text` est lu par la voix Windows
+    /// si `engineer` est faux ou si la clé n'a pas de clip. Ne bloque pas : la phrase est lue par le fil de parole.
+    pub fn say(&self, key: &str, text: &str, volume: u32, engineer: bool) {
+        let _ = self.tx.send(Say { key: key.to_string(), text: text.to_string(), volume: volume.min(100) as u16, engineer });
     }
 }
 
@@ -54,27 +64,38 @@ unsafe fn french_voice() -> Option<ISpObjectToken> {
     None
 }
 
+/// Copie d'un clip WAV (PCM 16 bits) dont le niveau est ramené à `volume` % : la lecture système n'a pas de réglage propre.
+fn with_volume(wav: &[u8], volume: u16) -> Vec<u8> {
+    let mut out = wav.to_vec();
+    // Début des échantillons : juste après le bloc « data » et sa taille.
+    let Some(pos) = out.windows(4).position(|w| w == b"data") else { return out };
+    let gain = (volume as f32 / 100.0).powf(1.6); // courbe douce : 50 % semble moitié moins fort à l'oreille
+    for s in out[pos + 8..].chunks_exact_mut(2) {
+        let v = (i16::from_le_bytes([s[0], s[1]]) as f32 * gain).round() as i16;
+        s.copy_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
+/// Joue un clip jusqu'au bout (bloquant, le fil de parole est dédié à ça).
+fn play_clip(wav: &[u8], volume: u16) {
+    let data = with_volume(wav, volume);
+    unsafe {
+        if !PlaySoundW(PCWSTR(data.as_ptr() as *const u16), None, SND_MEMORY | SND_SYNC | SND_NODEFAULT).as_bool() {
+            note("lecture du clip impossible (aucune sortie audio ?)");
+        }
+    }
+}
+
 fn worker(rx: Receiver<Say>) {
     let _ = std::fs::remove_file(std::env::temp_dir().join("pw-speech.log"));
+    // Variante jouée en dernier pour chaque clé : on alterne pour ne jamais redire la même phrase deux fois de suite.
+    let mut last_variant: HashMap<String, usize> = HashMap::new();
+    let mut counter = 0usize;
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        let voice: Option<ISpVoice> = match CoCreateInstance(&SpVoice, None, CLSCTX_ALL) {
-            Ok(v) => Some(v),
-            Err(e) => {
-                note(&format!("voix indisponible : {e}"));
-                None
-            }
-        };
-        if let Some(v) = &voice {
-            match french_voice() {
-                Some(token) => {
-                    if let Err(e) = v.SetVoice(&token) {
-                        note(&format!("voix française refusée : {e}"));
-                    }
-                }
-                None => note("aucune voix française installée : voix par défaut de Windows"),
-            }
-        }
+        // La voix Windows n'est préparée qu'au premier besoin.
+        let mut sapi: Option<Option<ISpVoice>> = None;
         while let Ok(first) = rx.recv() {
             // Si plusieurs phrases se sont accumulées, on ne garde que les deux dernières : une alerte lue en retard
             // ne sert plus à rien.
@@ -83,8 +104,23 @@ fn worker(rx: Receiver<Say>) {
                 pending.push(next);
             }
             let skip = pending.len().saturating_sub(2);
-            let Some(v) = &voice else { continue };
             for say in pending.into_iter().skip(skip) {
+                if say.engineer {
+                    if let Some((_, variants)) = CLIPS.iter().find(|(k, _)| *k == say.key) {
+                        counter += 1;
+                        let previous = last_variant.get(&say.key).copied();
+                        // Variante au hasard (compteur mélangé), différente de la précédente.
+                        let mut pick = (counter.wrapping_mul(2654435761) >> 7) % variants.len();
+                        if variants.len() > 1 && Some(pick) == previous {
+                            pick = (pick + 1) % variants.len();
+                        }
+                        last_variant.insert(say.key.clone(), pick);
+                        play_clip(variants[pick], say.volume);
+                        continue;
+                    }
+                }
+                let voice = sapi.get_or_insert_with(|| open_sapi()).as_ref();
+                let Some(v) = voice else { continue };
                 let _ = v.SetVolume(say.volume);
                 let text: Vec<u16> = say.text.encode_utf16().chain(Some(0)).collect();
                 // Lecture bloquante : les phrases se suivent sans se couper.
@@ -93,6 +129,28 @@ fn worker(rx: Receiver<Say>) {
                 }
             }
         }
+    }
+}
+
+/// Prépare la voix Windows (voix française si possible).
+fn open_sapi() -> Option<ISpVoice> {
+    unsafe {
+        let voice: ISpVoice = match CoCreateInstance(&SpVoice, None, CLSCTX_ALL) {
+            Ok(v) => v,
+            Err(e) => {
+                note(&format!("voix Windows indisponible : {e}"));
+                return None;
+            }
+        };
+        match french_voice() {
+            Some(token) => {
+                if let Err(e) = voice.SetVoice(&token) {
+                    note(&format!("voix française refusée : {e}"));
+                }
+            }
+            None => note("aucune voix française installée : voix par défaut de Windows"),
+        }
+        Some(voice)
     }
 }
 

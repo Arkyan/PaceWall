@@ -60,6 +60,18 @@ impl State {
                     }
                 }
                 ui.add_space(6.0);
+                ui.label(RichText::new("Voix").size(12.0).color(MUTED));
+                let engine = settings::str_of("voice_engine", "engineer");
+                let shown = if engine == "windows" { "Voix de synthèse Windows" } else { "Ingénieur de course (voix naturelle)" };
+                egui::ComboBox::from_id_salt("voice_engine").selected_text(shown).width(300.0).show_ui(ui, |ui| {
+                    if ui.selectable_label(engine != "windows", "Ingénieur de course (voix naturelle)").clicked() {
+                        let _ = settings::set("voice_engine", json!("engineer"));
+                    }
+                    if ui.selectable_label(engine == "windows", "Voix de synthèse Windows").clicked() {
+                        let _ = settings::set("voice_engine", json!("windows"));
+                    }
+                });
+                ui.add_space(6.0);
                 let mut volume = settings::int_of("voice_volume", 80).clamp(0, 100) as f32;
                 ui.label(RichText::new("Volume de la voix").size(12.0).color(MUTED));
                 ui.spacing_mut().slider_width = (ui.available_width() - 200.0).clamp(100.0, 320.0);
@@ -68,11 +80,11 @@ impl State {
                 }
                 ui.add_space(6.0);
                 if kit::button(ui, "Tester la voix").clicked() {
-                    crate::speech::Speaker::global().say("Carburant : trois tours. Pneus froids.", volume.round() as u32);
+                    crate::speech::Speaker::global().say("test", "Radio check. Alertes vocales activées.", volume.round() as u32, settings::str_of("voice_engine", "engineer") != "windows");
                 }
             });
             ui.add_space(4.0);
-            ui.label(RichText::new("La voix est celle de Windows (hors ligne). Pour une voix française, installe-la dans Paramètres > Heure et langue > Voix.").size(11.5).color(MUTED));
+            ui.label(RichText::new("La voix d'ingénieur est enregistrée dans PaceWall (hors ligne, sans coût pendant la course). La voix Windows sert de secours : installe une voix française dans Paramètres > Heure et langue > Voix.").size(11.5).color(MUTED));
         });
     }
 
