@@ -67,6 +67,7 @@ pub fn options(kind: &str) -> &'static [Opt] {
         "standings" => &[
             Opt { id: "ahead", label: "Voitures devant", kind: Num { min: 0.0, max: 8.0, step: 1.0, def: 3.0 } },
             Opt { id: "behind", label: "Voitures derrière", kind: Num { min: 0.0, max: 8.0, step: 1.0, def: 3.0 } },
+            Opt { id: "columns", label: "Colonne de droite", kind: Choice(&[("auto", "Auto (écarts en course, chronos sinon)"), ("gaps", "Toujours les écarts"), ("laps", "Toujours les chronos")], "auto") },
             Opt { id: "scope", label: "Classement", kind: Choice(&[("overall", "Général"), ("class", "Par classe (ma classe)")], "overall") },
         ],
         "session" => &[Opt { id: "weather", label: "Météo", kind: Bool(true) }],
@@ -455,10 +456,30 @@ struct Car {
     place: i64,
     name: String,
     class: String,
-    laps: f64,
-    lead: f64,
+    /// Distance totale parcourue (tours × longueur + distance dans le tour), en mètres.
+    dist: f64,
+    /// Retard sur la voiture juste devant, en secondes (donné par le jeu).
+    behind_next: f64,
+    best: f64,
     pit: bool,
     me: bool,
+}
+
+/// Écart en secondes entre le joueur et la voiture `j` (positif si elle est derrière lui).
+/// On additionne les retards « sur la voiture devant » donnés par le jeu ; s'ils manquent, on estime d'après la distance.
+fn gap_seconds(all: &[Car], me: usize, j: usize, speed: f64) -> f64 {
+    let chain = if j < me {
+        -all[j + 1..=me].iter().map(|c| c.behind_next).sum::<f64>()
+    } else {
+        all[me + 1..=j].iter().map(|c| c.behind_next).sum::<f64>()
+    };
+    let dist = all[me].dist - all[j].dist;
+    if chain.abs() > 0.05 || dist.abs() < 5.0 {
+        chain
+    } else {
+        // Le jeu ne donne rien : distance qui nous sépare / vitesse (au moins 15 m/s pour ne pas exploser à l'arrêt).
+        dist / speed.max(15.0)
+    }
 }
 
 fn standings(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
@@ -468,12 +489,22 @@ fn standings(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let rows = ahead + behind + 1;
     // Ancien réglage « classOnly » conservé pour les mises en page déjà enregistrées.
     let class_only = spec.choice("scope", if spec.flag("classOnly", false) { "class" } else { "overall" }) == "class";
+    // Colonne de droite : en course les écarts avec les autres pilotes, aux essais et en qualifs les meilleurs tours.
+    let is_race = (10..=13).contains(&(data.f("session.type", -1.0) as i64));
+    let show_gaps = match spec.choice("columns", "auto") {
+        "gaps" => true,
+        "laps" => false,
+        _ => is_race,
+    };
     let h = 30.0 + rows as f32 * 24.0 + 10.0;
     d.card(w, h);
     d.label(16.0, 10.0, "Classement", MUTED);
+    d.label_right(w - 16.0, 10.0, if show_gaps { "écarts" } else { "meilleur tour" }, d.accent());
 
+    let length = data.f("session.track_length", 0.0).max(1.0);
+    let speed = data.f("player.speed", 0.0) / 3.6;
     let n = (data.f("session.vehicles", 0.0) as usize).min(104);
-    let mut cars: Vec<Car> = (0..n)
+    let mut all: Vec<Car> = (0..n)
         .filter_map(|i| {
             let p = format!("grid.{i:03}");
             let place = data.num(&format!("{p}.place"))? as i64;
@@ -481,30 +512,30 @@ fn standings(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
                 place,
                 name: data.text(&format!("{p}.driver")).to_string(),
                 class: data.text(&format!("{p}.class")).to_string(),
-                laps: data.f(&format!("{p}.laps"), 0.0),
-                lead: data.f(&format!("{p}.behind_leader"), 0.0),
+                dist: data.f(&format!("{p}.laps"), 0.0) * length + data.f(&format!("{p}.lap_dist"), 0.0),
+                behind_next: data.f(&format!("{p}.behind_next"), 0.0).max(0.0),
+                best: data.f(&format!("{p}.best_lap"), 0.0),
                 pit: data.flag(&format!("{p}.in_pits")),
                 me: data.flag(&format!("{p}.is_player")),
             })
         })
         .collect();
-    cars.sort_by_key(|c| c.place);
-    let me = cars.iter().find(|c| c.me).map(|c| (c.class.clone(), c.laps, c.lead));
-    if class_only {
-        if let Some((cls, _, _)) = &me {
-            cars.retain(|c| &c.class == cls);
-        }
-    }
-    let idx = cars.iter().position(|c| c.me).unwrap_or(0);
+    all.sort_by_key(|c| c.place);
+    let me_idx = all.iter().position(|c| c.me);
+    // Liste affichée : tous les pilotes ou ceux de ma classe, avec leur rang dans la liste complète pour les écarts.
+    let my_class = me_idx.map(|i| all[i].class.clone());
+    let shown: Vec<usize> = (0..all.len()).filter(|&i| !class_only || my_class.as_ref().is_none_or(|c| &all[i].class == c)).collect();
+    let idx = shown.iter().position(|&i| Some(i) == me_idx).unwrap_or(0);
     let mut start = idx.saturating_sub(ahead);
-    start = start.min(cars.len().saturating_sub(rows));
-    for (i, c) in cars.iter().skip(start).take(rows).enumerate() {
-        let y = 30.0 + i as f32 * 24.0;
+    start = start.min(shown.len().saturating_sub(rows));
+    for (row, &j) in shown.iter().skip(start).take(rows).enumerate() {
+        let c = &all[j];
+        let y = 30.0 + row as f32 * 24.0;
         if c.me {
             d.fill(8.0, y, w - 8.0, 22.0, d.accent().gamma_multiply(0.22));
         }
         d.fill(8.0, y + 2.0, 3.0, 18.0, class_color(&c.class));
-        let pos = if class_only { start + i + 1 } else { c.place as usize };
+        let pos = if class_only { start + row + 1 } else { c.place as usize };
         d.text(42.0, y + 3.0, &pos.to_string(), 14.0, TEXT, Font::Num, HAlign::Right);
         let short = {
             let parts: Vec<&str> = c.name.split_whitespace().collect();
@@ -515,15 +546,20 @@ fn standings(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
             }
         };
         d.text(50.0, y + 3.0, &short, 14.0, if c.pit { MUTED } else { TEXT }, Font::Ui, HAlign::Left);
-        if let (Some((_, my_laps, my_lead)), false) = (&me, c.me) {
-            let dl = my_laps - c.laps;
-            let dt = c.lead - my_lead;
-            let gap = if dl.abs() >= 1.0 && dt.abs() > 30.0 {
-                format!("{}{} T", if dl > 0.0 { "+" } else { "−" }, dl.abs())
-            } else {
-                draw::signed(Some(dt), 1)
-            };
-            d.text(w - 16.0, y + 3.0, &gap, 13.0, MUTED, Font::Num, HAlign::Right);
+        if show_gaps {
+            if let (Some(me), false) = (me_idx, c.me) {
+                let behind_dist = all[me].dist - c.dist;
+                let text = if behind_dist.abs() >= length {
+                    // Au moins un tour d'écart : « +1 T » (il est derrière) ou « −1 T » (il est devant).
+                    format!("{}{} T", if behind_dist > 0.0 { "+" } else { "−" }, (behind_dist.abs() / length).floor())
+                } else {
+                    draw::signed(Some(gap_seconds(&all, me, j, speed)), 1)
+                };
+                d.text(w - 16.0, y + 3.0, &text, 13.0, MUTED, Font::Num, HAlign::Right);
+            }
+        } else {
+            let best = draw::lap((c.best > 0.0).then_some(c.best));
+            d.text(w - 16.0, y + 3.0, &best, 13.0, if c.me { TEXT } else { MUTED }, Font::Num, HAlign::Right);
         }
     }
     (w, h)

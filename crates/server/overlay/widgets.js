@@ -242,11 +242,12 @@ const classColor = c => (CLASS_COLORS.find(([re]) => re.test(c)) || [0, '#7b8494
 
 PW.widgets.standings = {
   name: 'Classement',
-  keys: ['grid.', 'session.vehicles'],
+  keys: ['grid.', 'session.vehicles', 'session.type', 'session.track_length', 'player.speed'],
   hz: 2, size: [300, 230],
   options: [
     { id: 'ahead', label: 'Voitures devant', type: 'number', min: 0, max: 8, step: 1, def: 3 },
     { id: 'behind', label: 'Voitures derrière', type: 'number', min: 0, max: 8, step: 1, def: 3 },
+    { id: 'columns', label: 'Colonne de droite', type: 'select', choices: [['auto', 'Auto (écarts en course, chronos sinon)'], ['gaps', 'Toujours les écarts'], ['laps', 'Toujours les chronos']], def: 'auto' },
     { id: 'scope', label: 'Classement', type: 'select', choices: [['overall', 'Général'], ['class', 'Par classe (ma classe)']], def: 'overall' },
   ],
   mount(root, o) {
@@ -265,22 +266,42 @@ PW.widgets.standings = {
     const short = n => { const p = String(n).trim().split(/\s+/); return p.length > 1 ? p[0][0] + '. ' + p.slice(1).join(' ') : n; };
     return {
       update(g) {
-        const n = g('session.vehicles', 0), cars = [];
+        const n = g('session.vehicles', 0), all = [], length = Math.max(1, g('session.track_length', 1)), speed = g('player.speed', 0) / 3.6;
         for (let i = 0; i < n; i++) {
-          const place = g(`grid.${pad(i)}.place`);
+          const p = `grid.${pad(i)}`, place = g(p + '.place');
           if (place == null) continue;
-          cars.push({ place, name: g(`grid.${pad(i)}.driver`, ''), cls: g(`grid.${pad(i)}.class`, ''), laps: g(`grid.${pad(i)}.laps`, 0),
-            lead: g(`grid.${pad(i)}.behind_leader`, 0), pit: g(`grid.${pad(i)}.in_pits`, false), me: g(`grid.${pad(i)}.is_player`, false) });
+          all.push({ place, name: g(p + '.driver', ''), cls: g(p + '.class', ''), dist: g(p + '.laps', 0) * length + g(p + '.lap_dist', 0),
+            next: Math.max(0, g(p + '.behind_next', 0)), best: g(p + '.best_lap', 0), pit: g(p + '.in_pits', false), me: g(p + '.is_player', false) });
         }
-        const me = cars.find(c => c.me);
-        let list = cars.sort((a, b) => a.place - b.place);
-        if (classOnly && me) list = list.filter(c => c.cls === me.cls);
+        all.sort((a, b) => a.place - b.place);
+        const mi = all.findIndex(c => c.me), me = all[mi];
+        // Colonne de droite : écarts en course (types 10 à 13), meilleurs tours aux essais et en qualifs.
+        const type = g('session.type', -1), mode = o.columns || 'auto';
+        const gaps = mode === 'gaps' || (mode === 'auto' && type >= 10 && type <= 13);
+        const list = all.map((c, j) => ({ ...c, j })).filter(c => !classOnly || !me || c.cls === me.cls);
         const idx = Math.max(0, list.findIndex(c => c.me));
         let start = Math.max(0, idx - o.ahead);
         start = Math.min(start, Math.max(0, list.length - rows));
+        // Écart en secondes (positif : derrière moi) : somme des retards « sur la voiture devant » donnés par le jeu,
+        // sinon distance / vitesse.
+        const gapOf = j => {
+          let chain = 0;
+          if (j < mi) for (let k = j + 1; k <= mi; k++) chain -= all[k].next; else for (let k = mi + 1; k <= j; k++) chain += all[k].next;
+          const dist = me.dist - all[j].dist;
+          return Math.abs(chain) > 0.05 || Math.abs(dist) < 5 ? chain : dist / Math.max(speed, 15);
+        };
         trs.forEach((r, i) => {
           const c = list[start + i];
-          const key = c ? [c.place, c.name, c.cls, c.me, c.pit, Math.round(c.lead * 10), c.laps].join('|') : '';
+          let right = '';
+          if (c) {
+            if (gaps) {
+              if (me && !c.me) {
+                const bd = me.dist - c.dist;
+                right = Math.abs(bd) >= length ? (bd > 0 ? '+' : '−') + Math.floor(Math.abs(bd) / length) + ' T' : F.signed(gapOf(c.j), 1);
+              }
+            } else right = c.best > 0 ? F.lap(c.best) : '—';
+          }
+          const key = c ? [c.place, c.name, c.cls, c.me, c.pit, right].join('|') : '';
           if (r.key === key) return;
           r.key = key;
           r.tr.hidden = !c;
@@ -289,12 +310,7 @@ PW.widgets.standings = {
           r.c.style.background = classColor(c.cls);
           r.p.textContent = classOnly ? String(start + i + 1) : c.place;
           r.n.textContent = short(c.name);
-          let gap = '';
-          if (me && !c.me) {
-            const dl = me.laps - c.laps, dt = c.lead - me.lead;
-            gap = Math.abs(dl) >= 1 && Math.abs(dt) > 30 ? (dl > 0 ? '+' : '−') + Math.abs(dl) + ' T' : F.signed(dt, 1);
-          }
-          r.g.textContent = c.me ? '' : gap;
+          r.g.textContent = right;
         });
       },
     };
@@ -456,7 +472,7 @@ PW.widgets.trackmap = {
 /* ---------- Données de démonstration (éditeur, ou sans jeu) ---------- */
 PW.demo = (() => {
   const d = {
-    'game.version': 1, 'demo.map': true, 'session.track': 'Circuit de la Sarthe', 'session.type': 10, 'session.phase': 5, 'session.yellow': 0,
+    'game.version': 1, 'demo.map': true, 'session.track_length': 4000, 'session.track': 'Circuit de la Sarthe', 'session.type': 10, 'session.phase': 5, 'session.yellow': 0,
     'session.remaining': 5 * 3600 + 1234, 'session.max_laps': 0, 'session.vehicles': 12, 'weather.ambient': 21, 'weather.track': 32, 'weather.rain': 0,
     'player.speed': 232, 'player.gear': 5, 'player.rpm': 7100, 'player.rpm_max': 8000, 'player.throttle': 82, 'player.brake': 0, 'player.clutch': 0, 'player.steering': 12,
     'fuel.level': 52.4, 'fuel.capacity': 90, 'fuel.percent': 58, 'energy.virtual': 61,
@@ -474,7 +490,7 @@ PW.demo = (() => {
   const cls = ['Hypercar', 'Hypercar', 'Hypercar', 'Hypercar', 'LMP2', 'Hypercar', 'LMGT3', 'LMP2', 'LMGT3', 'LMGT3', 'LMP2', 'LMGT3'];
   names.forEach((nm, i) => {
     const p = `grid.${String(i).padStart(3, '0')}`;
-    Object.assign(d, { [`${p}.driver`]: nm, [`${p}.class`]: cls[i], [`${p}.place`]: i + 1, [`${p}.laps`]: 14, [`${p}.behind_leader`]: i * 4.3,
+    Object.assign(d, { [`${p}.driver`]: nm, [`${p}.class`]: cls[i], [`${p}.place`]: i + 1, [`${p}.laps`]: 14, [`${p}.behind_leader`]: i * 4.3, [`${p}.lap_dist`]: 3200 - i * 160, [`${p}.behind_next`]: i ? 3.1 + Math.sin(i * 0.7) : 0, [`${p}.best_lap`]: 206.9 + i * 0.37,
       [`${p}.in_pits`]: false, [`${p}.is_player`]: nm === 'Toi' });
   });
   return d;

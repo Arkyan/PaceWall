@@ -79,6 +79,8 @@ pub fn data(t: f64) -> Data {
         put(&format!("{p}.place"), json!(i + 1));
         put(&format!("{p}.laps"), json!(14));
         put(&format!("{p}.behind_leader"), json!(i as f64 * 4.3));
+        put(&format!("{p}.behind_next"), json!(if i == 0 { 0.0 } else { 3.1 + (i as f64 * 0.7).sin() }));
+        put(&format!("{p}.best_lap"), json!(206.9 + i as f64 * 0.37));
         put(&format!("{p}.in_pits"), json!(false));
         put(&format!("{p}.is_player"), json!(*name == "Toi"));
         // Position sur le circuit de démonstration : les voitures avancent le long de la boucle.
