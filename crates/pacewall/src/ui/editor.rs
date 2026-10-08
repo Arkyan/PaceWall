@@ -1,4 +1,4 @@
-//! Éditeur d'overlays : on place et on règle les widgets sur un aperçu 16:9, pour le joueur ou pour OBS.
+﻿//! Éditeur d'overlays : on place et on règle les widgets sur un aperçu 16:9, pour le joueur ou pour OBS.
 //! L'aperçu dessine les mêmes widgets que l'overlay, avec des données de démonstration ou celles du jeu.
 
 use super::canvas::EguiCanvas;
@@ -233,18 +233,27 @@ impl State {
             if resp.clicked() || resp.drag_started() {
                 self.selected = Some(spec.id.clone());
             }
+            // Le widget reste entièrement dans l'écran : sa position maximale dépend de sa taille.
+            let max_x = (1.0 - rect.width() / stage.width()).max(0.0);
+            let max_y = (1.0 - rect.height() / stage.height()).max(0.0);
             if resp.dragged() {
                 let d = resp.drag_delta();
                 let w = &mut self.cur().widgets[i];
-                w.x = (w.x + d.x / stage.width()).clamp(0.0, 0.98);
-                w.y = (w.y + d.y / stage.height()).clamp(0.0, 0.98);
+                w.x = (w.x + d.x / stage.width()).clamp(0.0, max_x);
+                w.y = (w.y + d.y / stage.height()).clamp(0.0, max_y);
+                self.dirty = true;
+            } else if spec.x > max_x + 0.0005 || spec.y > max_y + 0.0005 {
+                // Mise en page existante qui dépasse (ou widget agrandi) : on le ramène sans attendre un déplacement.
+                let w = &mut self.cur().widgets[i];
+                w.x = w.x.min(max_x);
+                w.y = w.y.min(max_y);
                 self.dirty = true;
             }
             if resp.drag_stopped() {
                 // Aimantation légère (grille de 0,25 %) une fois le widget lâché.
                 let w = &mut self.cur().widgets[i];
-                w.x = (w.x * 400.0).round() / 400.0;
-                w.y = (w.y * 400.0).round() / 400.0;
+                w.x = ((w.x * 400.0).round() / 400.0).min(max_x);
+                w.y = ((w.y * 400.0).round() / 400.0).min(max_y);
             }
             if resp.hovered() || resp.dragged() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -303,7 +312,7 @@ impl State {
                 spec.opts.insert("bar".into(), json!(bar));
                 changed = true;
             }
-            apply_all = ui.button("Appliquer le style à tous").clicked();
+            apply_all |= ui.button("Appliquer le style à tous").clicked();
             ui.add_space(6.0);
             for opt in widgets::options(&spec.kind) {
                 match &opt.kind {
