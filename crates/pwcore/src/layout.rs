@@ -88,7 +88,7 @@ pub fn path() -> PathBuf {
 }
 
 pub fn load() -> Layouts {
-    std::fs::read_to_string(path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    std::fs::read_to_string(path()).ok().and_then(|t| serde_json::from_str(t.trim_start_matches('\u{feff}')).ok()).unwrap_or_default()
 }
 
 /// Mise en page d'une cible (`player` ou `obs`), ou celle par défaut.

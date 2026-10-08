@@ -173,26 +173,93 @@ fn path_of(pts: &[(f32, f32)], close: bool) -> Option<Path> {
     pb.finish()
 }
 
-impl Canvas for SoftCanvas<'_> {
-    fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color32) {
-        // Rectangles alignés sur les pixels, sans lissage : bords nets pour les jauges et les traits fins,
-        // et on évite le remplissage lissé de tiny-skia qui échoue sur certaines tailles.
-        let (x0, y0) = (x.round(), y.round());
-        let (x1, y1) = ((x + w).round(), (y + h).round());
-        let (w, h) = ((x1 - x0).max(if w > 0.0 { 1.0 } else { 0.0 }), (y1 - y0).max(if h > 0.0 { 1.0 } else { 0.0 }));
-        if let Some(r) = Rect::from_xywh(x0, y0, w, h) {
-            let mut p = paint(color);
-            p.anti_alias = false;
-            self.pm.fill_rect(r, &p, Transform::identity(), None);
+impl SoftCanvas<'_> {
+    /// Aplat rectangulaire écrit directement en mémoire (source-over, couleur prémultipliée) : bien plus léger
+    /// que le pipeline de tiny-skia pour les centaines de petits rectangles d'un widget.
+    fn blend_rect(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Color32) {
+        let (pw, ph) = (self.pm.width() as i32, self.pm.height() as i32);
+        let (x0, x1) = (x0.max(0), x1.min(pw));
+        let (y0, y1) = (y0.max(0), y1.min(ph));
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        let [r, g, b, a] = color.to_array();
+        let inv = 255 - a as u32;
+        let data = self.pm.data_mut();
+        for y in y0..y1 {
+            let row = (y * pw) as usize * 4;
+            for px in data[row + x0 as usize * 4..row + x1 as usize * 4].chunks_exact_mut(4) {
+                if a == 255 {
+                    px.copy_from_slice(&[r, g, b, 255]);
+                } else {
+                    px[0] = (r as u32 + px[0] as u32 * inv / 255) as u8;
+                    px[1] = (g as u32 + px[1] as u32 * inv / 255) as u8;
+                    px[2] = (b as u32 + px[2] as u32 * inv / 255) as u8;
+                    px[3] = (a as u32 + px[3] as u32 * inv / 255) as u8;
+                }
+            }
         }
     }
 
+    /// Trait d'un pixel d'épaisseur entre deux points (Bresenham), pour les contours.
+    fn hairline(&mut self, (x0, y0): (f32, f32), (x1, y1): (f32, f32), color: Color32) {
+        let (mut x, mut y) = (x0.round() as i32, y0.round() as i32);
+        let (xe, ye) = (x1.round() as i32, y1.round() as i32);
+        let (dx, dy) = ((xe - x).abs(), -(ye - y).abs());
+        let (sx, sy) = (if x < xe { 1 } else { -1 }, if y < ye { 1 } else { -1 });
+        let mut err = dx + dy;
+        loop {
+            self.blend_rect(x, y, x + 1, y + 1, color);
+            if x == xe && y == ye {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+}
+
+impl Canvas for SoftCanvas<'_> {
+    fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color32) {
+        // Alignés sur les pixels, sans lissage : bords nets pour les jauges et les traits fins.
+        let (x0, y0) = (x.round() as i32, y.round() as i32);
+        let x1 = (x + w).round() as i32;
+        let y1 = (y + h).round() as i32;
+        let x1 = if w > 0.0 { x1.max(x0 + 1) } else { x0 };
+        let y1 = if h > 0.0 { y1.max(y0 + 1) } else { y0 };
+        self.blend_rect(x0, y0, x1, y1, color);
+    }
+
     fn polygon(&mut self, pts: &[(f32, f32)], fill: Color32, stroke: Option<(f32, Color32)>) {
-        let Some(path) = path_of(pts, true) else { return };
-        self.pm.fill_path(&path, &paint(fill), FillRule::Winding, Transform::identity(), None);
-        if let Some((width, color)) = stroke {
-            let st = Stroke { width, ..Stroke::default() };
-            self.pm.stroke_path(&path, &paint(color), &st, Transform::identity(), None);
+        // Polygone convexe rempli ligne par ligne (une plage par ligne de pixels), sans lissage.
+        let (min_y, max_y) = pts.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| (lo.min(p.1), hi.max(p.1)));
+        for y in (min_y.floor() as i32)..(max_y.ceil() as i32) {
+            let cy = y as f32 + 0.5;
+            let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+            for i in 0..pts.len() {
+                let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+                if (a.1 <= cy && b.1 > cy) || (b.1 <= cy && a.1 > cy) {
+                    let x = a.0 + (cy - a.1) / (b.1 - a.1) * (b.0 - a.0);
+                    lo = lo.min(x);
+                    hi = hi.max(x);
+                }
+            }
+            if lo <= hi {
+                self.blend_rect(lo.round() as i32, y, hi.round() as i32, y + 1, fill);
+            }
+        }
+        if let Some((_, color)) = stroke {
+            for i in 0..pts.len() {
+                let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+                self.hairline(a, b, color);
+            }
         }
     }
 

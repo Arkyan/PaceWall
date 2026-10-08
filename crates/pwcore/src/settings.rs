@@ -22,7 +22,8 @@ fn defaults() -> Map<String, Value> {
 pub fn all() -> Value {
     let mut merged = defaults();
     if let Ok(text) = std::fs::read_to_string(path()) {
-        if let Ok(Value::Object(saved)) = serde_json::from_str::<Value>(&text) {
+        // Un fichier modifié avec le Bloc-notes peut commencer par un BOM.
+        if let Ok(Value::Object(saved)) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) {
             for (k, v) in saved {
                 if merged.get(&k).is_some_and(|d| std::mem::discriminant(d) == std::mem::discriminant(&v)) {
                     merged.insert(k, v);

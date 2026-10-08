@@ -164,6 +164,16 @@ impl Drop for Panel {
     }
 }
 
+/// Mise en page du joueur. `PACEWALL_ONLY=inputs,fuel` (ou `none`) limite les widgets : mesures de performance.
+fn load_layout() -> Layout {
+    let mut l = layout::load_target("player");
+    if let Ok(only) = std::env::var("PACEWALL_ONLY") {
+        let keep: Vec<&str> = only.split(',').collect();
+        l.widgets.retain(|w| keep.contains(&w.kind.as_str()));
+    }
+    l
+}
+
 fn pick_monitor() -> Option<win::Monitor> {
     let monitors = win::monitors();
     let idx = settings::int_of("overlay_monitor", 0).max(0) as usize;
@@ -183,7 +193,7 @@ pub fn run() {
     let mut game = false;
     let mut data_version = 0u64;
 
-    let mut layout: Layout = layout::load_target("player");
+    let mut layout: Layout = load_layout();
     let mut layout_mtime = layout::modified();
     let mut panels: Vec<Panel> = Vec::new();
     let mut rendered: HashMap<usize, u64> = HashMap::new();
@@ -192,8 +202,24 @@ pub fn run() {
     let mut mon = pick_monitor();
     let mut next_topmost = Instant::now() + Duration::from_secs(3);
     let start = Instant::now();
+    // Diagnostic : PACEWALL_DEBUG=1 écrit des compteurs dans %TEMP%\pw-overlay.log.
+    let debug = std::env::var_os("PACEWALL_DEBUG").is_some();
+    let (mut loops, mut polls, mut renders, mut dbg_at) = (0u32, 0u32, 0u32, Instant::now());
+    // Durées cumulées (ms) : lecture, mesure, dessin, envoi à la fenêtre.
+    let mut t_poll = Duration::ZERO;
+    let (mut t_measure, mut t_draw, mut t_present) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
 
     'main: loop {
+        loops += 1;
+        if debug && dbg_at.elapsed() >= Duration::from_secs(5) {
+            let s = dbg_at.elapsed().as_secs_f32();
+            let ms = |d: Duration| d.as_secs_f32() * 1000.0 / s;
+            let line = format!("{:.0}s: boucles/s {:.0}, lectures/s {:.0}, rendus/s {:.0} | ms par seconde : lecture {:.1}, mesure {:.1}, dessin {:.1}, envoi {:.1}
+", start.elapsed().as_secs_f32(), loops as f32 / s, polls as f32 / s, renders as f32 / s, ms(t_poll), ms(t_measure), ms(t_draw), ms(t_present));
+            (t_poll, t_measure, t_draw, t_present) = (Duration::ZERO, Duration::ZERO, Duration::ZERO, Duration::ZERO);
+            let _ = std::fs::write(std::env::temp_dir().join("pw-overlay.log"), line);
+            (loops, polls, renders, dbg_at) = (0, 0, 0, Instant::now());
+        }
         // Messages : WM_QUIT quand on demande la fermeture.
         unsafe {
             let mut msg = MSG::default();
@@ -214,15 +240,19 @@ pub fn run() {
             let mtime = layout::modified();
             if mtime != layout_mtime {
                 layout_mtime = mtime;
-                layout = layout::load_target("player");
+                layout = load_layout();
                 panels.clear();
                 rendered.clear();
             }
         }
 
         let with_grid = layout.widgets.iter().any(|w| w.kind == "standings");
-        match live.poll(with_grid) {
+        let t = Instant::now();
+        let update = live.poll(with_grid);
+        t_poll += t.elapsed();
+        match update {
             Update::Data(d) => {
+                polls += 1;
                 data = d;
                 game = true;
                 data_version += 1;
@@ -258,17 +288,20 @@ pub fn run() {
                     continue;
                 }
                 panel.last = now;
+                renders += 1;
                 rendered.insert(i, data_version);
 
                 let scale = spec.scale * unit;
                 let bg = widgets::bg(spec);
                 // Mesure : la taille du widget varie (lignes de classement, bandeau jaune…).
+                let t = Instant::now();
                 let mut probe = widgets::WState::default();
                 let (bw, bh) = {
                     let mut measure = Measure;
                     let d = D::new(&mut measure, (0.0, 0.0), scale, spec.opacity, bg);
                     widgets::draw(&spec.kind, &d, spec, &data, &mut probe, time)
                 };
+                t_measure += t.elapsed();
                 let (pw, ph) = ((bw * scale).ceil() as i32 + 2, (bh * scale).ceil() as i32 + 2);
                 if pw <= 2 || ph <= 2 {
                     continue;
@@ -277,6 +310,7 @@ pub fn run() {
                 if panel.bits.is_null() {
                     continue;
                 }
+                let t = Instant::now();
                 unsafe {
                     let bytes = std::slice::from_raw_parts_mut(panel.bits, (pw * ph * 4) as usize);
                     bytes.fill(0);
@@ -291,9 +325,12 @@ pub fn run() {
                         px.swap(0, 2);
                     }
                 }
+                t_draw += t.elapsed();
+                let t = Instant::now();
                 let x = mon.x + (spec.x * mon.w as f32).round() as i32;
                 let y = mon.y + (spec.y * mon.h as f32).round() as i32;
                 panel.present(x, y);
+                t_present += t.elapsed();
                 sleep = sleep.min(period);
             }
         } else {

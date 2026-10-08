@@ -1,91 +1,91 @@
 # PaceWall
 
-Overlays de course pour **Le Mans Ultimate** : télémétrie en direct, stratégie (carburant, énergie virtuelle, pneus, météo) et historique des sessions.
+Overlays de course pour **Le Mans Ultimate** : carburant et énergie, pneus, chrono, pilotage, classement, météo, stratégie
+et historique des sessions. Une application Windows **native et légère** ; le web ne sert que pour OBS.
 
 ## Objectifs
 
 - Des overlays visibles par le pilote, par-dessus le jeu.
-- Les mêmes overlays dans OBS, via une source navigateur, sans capturer le jeu.
-- Une consommation minimale en course, seul ou en stream.
+- Les mêmes overlays dans OBS, sans capturer le jeu (source navigateur).
+- Consommer le moins possible en course, seul ou avec un stream.
 
-## Architecture
+## Architecture : trois programmes en un seul exécutable
+
+| Mode | Lancement | Rôle | Mesuré (release) |
+|---|---|---|---|
+| **Processus de fond** | `pacewall.exe` (ou au démarrage de Windows) | Icône de la zone de notification, raccourci Ctrl+Alt+O, surveillance du jeu, enregistrement de l'historique, serveur OBS à la demande. Aucune interface chargée. | 0,0 % CPU · 12 Mo |
+| **Overlay joueur** | lancée par le processus de fond quand le jeu démarre, fermée quand il s'arrête | Un widget = une petite fenêtre Windows transparente, insensible aux clics, dessinée par le processeur (tiny-skia). Pas de GPU, pas de navigateur. Lit le jeu directement. | ≈ 2 % CPU · 17 Mo |
+| **Fenêtre principale** | `pacewall.exe --ui` (clic sur l'icône) | Accueil, éditeur d'overlays, données en direct, historique, réglages (egui). Fermée, elle libère toute sa mémoire. | 0,1 % CPU · 90 Mo |
+| **Serveur OBS** | activé dans Réglages | Pages HTML des overlays pour une source navigateur OBS. Désactivé, il ne consomme rien. | — |
+
+À titre de comparaison, la première version (overlay dans un navigateur embarqué WebView2) pesait environ 380 Mo et 14 % de CPU.
 
 ```
-LMU ─► collector (Rust) ─► serveur local (HTTP + WebSocket)
-        mémoire partagée    ├─► fenêtre overlay Tauri (transparente, clics traversants)
-        + API REST du jeu   └─► http://localhost:PORT/overlay/... (source navigateur OBS)
+LMU ──► pwcore::live (mémoire partagée) ──┬─► overlay native (--overlay)
+                                          ├─► fenêtre principale (--ui)
+                                          └─► serveur OBS (WebSocket + pages HTML)
 ```
 
-Les widgets sont écrits une seule fois en web (Svelte) et chargés par les deux sorties.
+## Utilisation
 
-## Sources de données
+1. Lancer `pacewall.exe` : l'icône apparaît dans la zone de notification, clic gauche pour ouvrir la fenêtre.
+2. Dans Le Mans Ultimate : Réglages > Gameplay > **Enable Plugins**, et jeu en **fenêtré ou sans bordure**.
+3. L'overlay s'ouvre toute seule avec le jeu. **Ctrl+Alt+O** l'affiche ou la masque.
+4. **Overlays** : place les widgets (glisser-déposer), règle taille, opacité et options. Deux mises en page : *Joueur* et *OBS*.
+5. **OBS** : activer le serveur dans Réglages, puis source navigateur 1920×1080 sur `http://127.0.0.1:8470/overlay/obs`
+   (`?only=fuel,tyres` pour un widget par source).
 
-Voir [docs/donnees.md](docs/donnees.md).
+## Widgets
 
-## Étapes
+Carburant et énergie (tours restants, conso, quantité à ajouter), pneus (température par rapport à l'optimum, usure, pression),
+chrono et écarts, pilotage (rapport, vitesse, pédales, **graphe des inputs**), classement (devant/derrière, couleurs de classe),
+session et météo. Les mêmes sont écrits en Rust (overlay, aperçu) et en JavaScript (OBS) : `crates/pacewall/src/widgets.rs`
+et `crates/server/overlay/widgets.js`.
 
-1. [x] Squelette et détection de la mémoire partagée `LMU_Data`
-2. [x] Structures `#[repr(C, packed(4))]` (tailles et décalages vérifiés contre la référence) et lecture des valeurs brutes
-3. [x] Serveur WebSocket (différences seulement, abonnement par préfixe) et explorateur de données
-4. [x] Overlays web (6 widgets), éditeur, mises en page joueur / OBS
-   - [ ] Fenêtre Tauri transparente aux clics pour l'overlay joueur
-5. [~] Moteur de stratégie (conso, tours restants, à ajouter : fait) ; alertes vocales à faire
-6. [x] Historique SQLite (enregistrement automatique des tours) et page de consultation `/history`
-
-## Développer sans le jeu
+## Développement sans le jeu
 
 ```bash
-cargo run -p fakegame     # faux LMU : crée LMU_Data avec une course simulée
-cargo run -p collector    # lit la zone et affiche vitesse, carburant, énergie, pneus (console)
-cargo run -p server       # serveur local : explorateur http://127.0.0.1:8470, historique /history
-FAKE_LAP_SECONDS=6 cargo run -p fakegame   # tours courts pour tester l'historique
-cargo test -p lmu         # vérifie que les structures ont la même disposition que le jeu
+cargo run -p fakegame                 # faux LMU : crée LMU_Data avec une course simulée (FAKE_LAP_SECONDS=8 pour des tours courts)
+cargo run -p pacewall                 # processus de fond : l'overlay s'ouvre quand fakegame tourne
+cargo run -p pacewall -- --ui         # fenêtre principale (--ui overlays | data | history | settings)
+cargo run -p pacewall -- --overlay    # overlay seule
+cargo run -p server                   # serveur OBS seul (http://127.0.0.1:8470)
+cargo test -p lmu                     # la disposition des structures correspond à celle du jeu
+cargo build -p pacewall --release     # target/release/pacewall.exe (≈ 7 Mo)
 ```
 
-Les valeurs du faux jeu sont inventées : elles servent à tester le pipeline, pas la stratégie.
+Variables utiles : `PACEWALL_DB` (dossier des fichiers de données, ex. `.dev/history.db`), `PACEWALL_PORT`,
+`PACEWALL_ONLY=inputs,fuel` (overlay : limiter les widgets), `PACEWALL_DEBUG=1` (overlay : compteurs et durées dans `%TEMP%\pw-overlay.log`).
 
-## Protocole WebSocket (`ws://127.0.0.1:8470/ws`)
+## Organisation du dépôt
 
-Le client envoie son abonnement ; le serveur ne lit le jeu que si au moins un client écoute.
-
-```json
-{ "sub": ["fuel.", "tyre.fl."], "hz": 10 }
-```
-
-Réponses (seules les valeurs modifiées sont envoyées, `m` donne unité et libellé des nouvelles clés,
-`x` liste les clés disparues) :
-
-```json
-{ "t": "u", "game": true, "d": { "fuel.level": 89.58 }, "m": { "fuel.level": ["L", "Carburant"] } }
-```
-
-Clés : `session.*`, `weather.*`, `player.*`, `fuel.*`, `energy.*`, `lap.*`, `gap.*`, `aids.*`, `car.*`,
-`pit.*`, `position.*`, `tyre.{fl,fr,rl,rr}.*`, `brake.{fl,fr,rl,rr}.*`, `grid.NNN.*` (classement complet,
-lu uniquement si demandé). Unités déjà converties : km/h, °C, %, secondes.
-
-## Historique
-
-- Enregistré en continu par un thread séparé (2 lectures/s, une écriture SQLite par tour), même sans overlay.
-- Base : `%APPDATA%\PaceWall\history.db` (variable `PACEWALL_DB` pour la changer).
-- Par tour : temps, validité, passage aux stands, carburant / énergie / usure consommés (hors tours avec arrêt),
-  températures moyennes pneus et freins, météo, position, gomme.
-- Le tour en cours au moment où PaceWall se branche est ignoré (il serait incomplet).
-- API : `GET /api/sessions`, `GET /api/sessions/{id}/laps`, `DELETE /api/sessions/{id}`.
-
-## Overlays
-
-| Page | Rôle |
+| Crate | Contenu |
 |---|---|
-| `/editor` | Éditeur : ajouter, glisser, régler les widgets ; mises en page « Joueur » et « OBS » ; démo ou jeu en direct |
-| `/overlay/player` | Overlay joueur (fond transparent) |
-| `/overlay/obs` | Overlay pour une source navigateur OBS (1920×1080, fond transparent) |
-| `/overlay/obs?only=fuel,tyres` | Seulement certains widgets (une source OBS par widget) |
-| `/overlay/player?demo=1` | Données factices, pour voir le rendu sans jeu |
+| `lmu` | Structures de la mémoire partagée de LMU (`packed(4)`, tailles et décalages vérifiés par test) et lecteur partiel |
+| `pwcore` | Lecture du jeu (`live`), clés de données (`flatten`), stratégie, historique SQLite, réglages, mises en page, données de démo |
+| `pacewall` | L'application : processus de fond, overlay, fenêtre principale, widgets natifs, rendu logiciel |
+| `server` | Serveur web pour OBS (axum) et pages HTML des overlays |
+| `fakegame` | Faux jeu pour développer sans LMU |
+| `collector` | Petit outil console qui affiche les valeurs lues |
 
-- **Widgets** : carburant et énergie, pneus, chrono et écarts, pilotage, classement, session et météo.
-- Les overlays disparaissent quand le jeu n'est pas là, et se rechargent seules quand la mise en page est enregistrée.
-- Positions en pourcentage de l'écran, tailles relatives à une hauteur de 1080 px : la mise en page suit la résolution.
-- Mises en page enregistrées dans `%APPDATA%\PaceWall\layouts.json`.
-- **Stratégie** (calculée côté serveur, `strategy.*`) : consommation moyenne des 3 derniers tours propres, tours restants,
-  quantité à ajouter pour finir. Un tour avec arrêt ou incomplet n'est pas compté.
-- Ajouter un widget : une entrée dans `crates/server/overlay/widgets.js` (nom, clés suivies, options, `mount`).
+## Données
+
+- Sources, champs et pièges : [docs/donnees.md](docs/donnees.md).
+- Fichiers dans `%APPDATA%\PaceWall\` : `history.db` (tours), `layouts.json` (mises en page), `settings.json` (réglages).
+- **Stratégie** (`strategy.*`) : consommation moyenne des 3 derniers tours propres, tours restants, quantité à ajouter.
+  Un tour avec arrêt aux stands ou incomplet n'est pas compté.
+- **Historique** : un tour est enregistré quand le nombre de tours terminés augmente (consommations hors tours avec arrêt).
+
+## Optimisations notables
+
+- Processus séparés : rien n'est chargé quand rien n'est affiché.
+- Overlay sans GPU : transparence et clics traversants via des fenêtres « en couches » ; le coût est proportionnel à la surface des widgets.
+- Chaque widget a sa cadence ; il n'est redessiné qu'avec de nouvelles données (sauf le graphe, qui avance avec le temps).
+- Cache d'images de glyphes, aplats écrits directement en mémoire, polices système (rien d'embarqué).
+- Le jeu n'est lu que si quelqu'un en a besoin ; la zone mémoire n'est jamais copiée en entier.
+
+## À faire
+
+- Alertes vocales (carburant, pneus, météo).
+- Comparaison de deux tours, import des fichiers de résultats.
+- Valider avec le vrai jeu les points marqués ⚠️ dans `docs/donnees.md` (plage de l'énergie virtuelle, API REST, lecture cohérente).

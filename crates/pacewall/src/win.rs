@@ -6,9 +6,9 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{GetLastError, BOOL, ERROR_ALREADY_EXISTS, HWND, LPARAM, RECT, TRUE, WPARAM};
 use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
 use windows::Win32::System::Threading::CreateMutexW;
-use windows::Win32::UI::HiDpi::{GetDpiForMonitor, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI};
+use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, GetWindowLongPtrW, IsIconic, PostMessageW, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, SW_RESTORE, WM_CLOSE,
+    FindWindowW, IsIconic, PostMessageW, SetForegroundWindow, ShowWindow, SW_RESTORE, WM_CLOSE,
 };
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -112,8 +112,6 @@ pub struct Monitor {
     pub w: i32,
     pub h: i32,
     pub primary: bool,
-    /// Échelle d'affichage (1.0 = 100 %).
-    pub scale: f32,
 }
 
 /// Écrans, le principal en premier.
@@ -122,8 +120,6 @@ pub fn monitors() -> Vec<Monitor> {
         let list = &mut *(data.0 as *mut Vec<Monitor>);
         let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
         if GetMonitorInfoW(hm, &mut info).as_bool() {
-            let (mut dx, mut _dy) = (96u32, 96u32);
-            let _ = GetDpiForMonitor(hm, MDT_EFFECTIVE_DPI, &mut dx, &mut _dy);
             let r = info.rcMonitor;
             list.push(Monitor {
                 x: r.left,
@@ -131,7 +127,6 @@ pub fn monitors() -> Vec<Monitor> {
                 w: r.right - r.left,
                 h: r.bottom - r.top,
                 primary: info.dwFlags & MONITORINFOF_PRIMARY != 0,
-                scale: dx as f32 / 96.0,
             });
         }
         TRUE
@@ -158,26 +153,4 @@ pub fn set_autostart(on: bool) {
     } else {
         let _ = key.delete_value("PaceWall");
     }
-}
-
-/// Rend une fenêtre insensible aux clics et sans focus, sans le style « en couches » que winit ajoute pour
-/// l'insensibilité aux clics et qui empêche l'affichage du rendu OpenGL transparent.
-/// `layered` : conserve ou non `WS_EX_LAYERED` (à tester selon le cas).
-pub fn click_through(title: &str, layered: bool) -> bool {
-    const WS_EX_TRANSPARENT: isize = 0x20;
-    const WS_EX_LAYERED: isize = 0x80000;
-    const WS_EX_NOACTIVATE: isize = 0x0800_0000;
-    const WS_EX_TOOLWINDOW: isize = 0x80;
-    let Some(h) = find(title) else { return false };
-    unsafe {
-        let mut ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
-        ex |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
-        if layered {
-            ex |= WS_EX_LAYERED;
-        } else {
-            ex &= !WS_EX_LAYERED;
-        }
-        SetWindowLongPtrW(h, GWL_EXSTYLE, ex);
-    }
-    true
 }
