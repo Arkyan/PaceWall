@@ -28,8 +28,24 @@ pub struct State {
 
 impl Default for State {
     fn default() -> Self {
-        Self { layouts: layout::load(), target: "player".into(), selected: None, dirty: false, live: false, states: HashMap::new(), status: String::new(), left_open: None, right_open: None }
+        Self { layouts: layout::load(), target: "player".into(), selected: std::env::var("PACEWALL_EDITOR_SELECT").ok(), dirty: false, live: false, states: HashMap::new(), status: String::new(), left_open: None, right_open: None }
     }
+}
+
+/// Curseur avec son libellé au-dessus : tient dans un panneau étroit, quelle que soit la longueur du libellé.
+fn field_slider<N: egui::emath::Numeric>(ui: &mut Ui, label: &str, value: &mut N, range: std::ops::RangeInclusive<N>, step: Option<f64>, decimals: Option<usize>) -> bool {
+    ui.add_space(4.0);
+    ui.label(RichText::new(label).size(12.0).color(MUTED));
+    // La place de la valeur numérique est réservée à droite du curseur.
+    ui.spacing_mut().slider_width = (ui.available_width() - 74.0).max(50.0);
+    let mut slider = egui::Slider::new(value, range);
+    if let Some(s) = step {
+        slider = slider.step_by(s);
+    }
+    if let Some(d) = decimals {
+        slider = slider.fixed_decimals(d);
+    }
+    ui.add(slider).changed()
 }
 
 fn target_label(t: &str) -> &'static str {
@@ -62,7 +78,7 @@ impl State {
         // Sur une petite fenêtre, l'aperçu garde la priorité : les panneaux se masquent (et se rouvrent depuis la barre du haut).
         let width = ui.available_width();
         let show_left = self.left_open.unwrap_or(width >= 1000.0);
-        let show_right = self.right_open.unwrap_or(width >= 880.0 || self.selected.is_some());
+        let show_right = self.right_open.unwrap_or(width >= 880.0);
         let (lw, rw) = if width >= 1200.0 { (210.0, 264.0) } else { (190.0, 240.0) };
         egui::Panel::top("ed_top").frame(bar).show(ui, |ui| self.top_bar(ui, live_missing, show_left, show_right));
         if show_left {
@@ -72,7 +88,10 @@ impl State {
         }
         if show_right {
             egui::Panel::right("ed_right").exact_size(rw).resizable(false).frame(Frame::NONE.fill(PANEL).stroke(Stroke::new(1.0, LINE)).inner_margin(Margin::same(14))).show(ui, |ui| {
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.inspector(ui));
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    ui.set_max_width(ui.available_width());
+                    self.inspector(ui)
+                });
             });
         }
         egui::CentralPanel::default().frame(Frame::NONE.fill(BG).inner_margin(Margin::same(16))).show(ui, |ui| self.stage(ui, data, now));
@@ -183,7 +202,7 @@ impl State {
             h = avail.height();
             w = h * 16.0 / 9.0;
         }
-        let stage = Rect::from_center_size(avail.center(), vec2(w, h));
+        let stage = Rect::from_min_size(egui::pos2(avail.center().x - w / 2.0, avail.min.y), vec2(w, h));
         ui.allocate_rect(avail, Sense::hover());
         let painter = ui.painter_at(stage);
         painter.rect_filled(stage, 0.0, Color32::from_rgb(14, 19, 27));
@@ -255,10 +274,10 @@ impl State {
             let spec = &mut layout.widgets[idx];
             kit::section(ui, widgets::name(&spec.kind));
             ui.add_space(4.0);
-            changed |= ui.add(egui::Slider::new(&mut spec.scale, 0.5..=2.5).text("Taille").fixed_decimals(2)).changed();
-            changed |= ui.add(egui::Slider::new(&mut spec.opacity, 0.1..=1.0).text("Opacité").fixed_decimals(2)).changed();
+            changed |= field_slider(ui, "Taille", &mut spec.scale, 0.5..=2.5, None, Some(2));
+            changed |= field_slider(ui, "Opacité", &mut spec.opacity, 0.1..=1.0, None, Some(2));
             let mut bg = spec.num("bg", 78.0) as f32;
-            if ui.add(egui::Slider::new(&mut bg, 0.0..=100.0).text("Fond (%)").step_by(5.0)).changed() {
+            if field_slider(ui, "Opacité du fond (%)", &mut bg, 0.0..=100.0, Some(5.0), Some(0)) {
                 spec.opts.insert("bg".into(), json!(bg.round()));
                 changed = true;
             }
@@ -274,7 +293,7 @@ impl State {
                     }
                     OptKind::Num { min, max, step, def } => {
                         let mut v = spec.num(opt.id, *def);
-                        if ui.add(egui::Slider::new(&mut v, *min..=*max).step_by(*step).text(opt.label)).changed() {
+                        if field_slider(ui, opt.label, &mut v, *min..=*max, Some(*step), None) {
                             spec.opts.insert(opt.id.into(), json!(v));
                             changed = true;
                         }
@@ -282,22 +301,21 @@ impl State {
                     OptKind::Choice(choices, def) => {
                         let cur = spec.choice(opt.id, def).to_string();
                         let shown = choices.iter().find(|(v, _)| *v == cur).map(|(_, l)| *l).unwrap_or("");
-                        ui.horizontal(|ui| {
-                            ui.label(opt.label);
-                            egui::ComboBox::from_id_salt(("opt", opt.id)).selected_text(shown).show_ui(ui, |ui| {
-                                for (value, label) in choices.iter() {
-                                    if ui.selectable_label(cur == *value, *label).clicked() {
-                                        spec.opts.insert(opt.id.into(), json!(value));
-                                        changed = true;
-                                    }
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(opt.label).size(12.0).color(MUTED));
+                        egui::ComboBox::from_id_salt(("opt", opt.id)).width((ui.available_width() - 8.0).max(60.0)).selected_text(shown).show_ui(ui, |ui| {
+                            for (value, label) in choices.iter() {
+                                if ui.selectable_label(cur == *value, *label).clicked() {
+                                    spec.opts.insert(opt.id.into(), json!(value));
+                                    changed = true;
                                 }
-                            });
+                            }
                         });
                     }
                 }
             }
             ui.add_space(10.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 duplicate = kit::button(ui, "Dupliquer").clicked();
                 remove = kit::button(ui, "Supprimer").clicked();
             });
