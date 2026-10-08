@@ -1,0 +1,109 @@
+//! Identité visuelle « télémétrie pro » : fond quasi noir, angles vifs, chiffres en police mono, accent cyan.
+//! Polices : Bahnschrift (libellés) et Consolas (chiffres), déjà présentes dans Windows, rien à embarquer.
+
+use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke};
+use std::sync::Arc;
+
+pub const BG: Color32 = Color32::from_rgb(7, 9, 13);
+pub const PANEL: Color32 = Color32::from_rgb(13, 17, 23);
+pub const PANEL2: Color32 = Color32::from_rgb(18, 24, 32);
+pub const LINE: Color32 = Color32::from_rgb(31, 40, 53);
+pub const TEXT: Color32 = Color32::from_rgb(232, 237, 244);
+pub const MUTED: Color32 = Color32::from_rgb(127, 138, 154);
+pub const ACCENT: Color32 = Color32::from_rgb(25, 211, 243);
+pub const ACCENT_INK: Color32 = Color32::from_rgb(3, 16, 20);
+pub const OK: Color32 = Color32::from_rgb(56, 224, 123);
+pub const WARN: Color32 = Color32::from_rgb(255, 176, 32);
+pub const BAD: Color32 = Color32::from_rgb(255, 77, 94);
+pub const BLUE: Color32 = Color32::from_rgb(79, 157, 255);
+
+pub fn ui_family() -> FontFamily {
+    FontFamily::Name("ui".into())
+}
+
+pub fn num_family() -> FontFamily {
+    FontFamily::Name("num".into())
+}
+
+pub fn ui_font(size: f32) -> FontId {
+    FontId::new(size, ui_family())
+}
+
+pub fn num_font(size: f32) -> FontId {
+    FontId::new(size, num_family())
+}
+
+fn load(path: &str) -> Option<FontData> {
+    std::fs::read(path).ok().map(FontData::from_owned)
+}
+
+/// Polices, couleurs et formes. À appeler une fois au démarrage de chaque fenêtre.
+pub fn install(ctx: &egui::Context) {
+    let mut fonts = FontDefinitions::default();
+    let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
+    for (name, file, fallback) in [("pw-ui", "bahnschrift.ttf", FontFamily::Proportional), ("pw-num", "consola.ttf", FontFamily::Monospace)] {
+        let family = if name == "pw-ui" { ui_family() } else { num_family() };
+        let mut chain = vec![];
+        if let Some(data) = load(&format!(r"{windir}\Fonts\{file}")) {
+            fonts.font_data.insert(name.into(), Arc::new(data));
+            chain.push(name.to_string());
+        }
+        // Repli sur les polices intégrées si celle de Windows manque.
+        chain.extend(fonts.families.get(&fallback).cloned().unwrap_or_default());
+        fonts.families.insert(family, chain);
+    }
+    // Les textes de l'interface utilisent Bahnschrift partout.
+    if let Some(ui) = fonts.families.get(&ui_family()).cloned() {
+        fonts.families.insert(FontFamily::Proportional, ui);
+    }
+    if let Some(num) = fonts.families.get(&num_family()).cloned() {
+        fonts.families.insert(FontFamily::Monospace, num);
+    }
+    ctx.set_fonts(fonts);
+
+    let mut v = egui::Visuals::dark();
+    v.panel_fill = BG;
+    v.window_fill = PANEL;
+    v.extreme_bg_color = PANEL2;
+    v.faint_bg_color = PANEL;
+    v.override_text_color = Some(TEXT);
+    v.selection.bg_fill = ACCENT.gamma_multiply(0.35);
+    v.selection.stroke = Stroke::new(1.0, ACCENT);
+    v.hyperlink_color = ACCENT;
+    v.window_stroke = Stroke::new(1.0, LINE);
+    let r = CornerRadius::same(2);
+    for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
+        w.corner_radius = r;
+    }
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, LINE);
+    v.widgets.inactive.bg_fill = PANEL2;
+    v.widgets.inactive.weak_bg_fill = PANEL2;
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0, LINE);
+    v.widgets.hovered.bg_fill = PANEL2;
+    v.widgets.hovered.weak_bg_fill = PANEL2;
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT);
+    v.widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
+    ctx.set_visuals(v);
+
+    ctx.global_style_mut(|s| {
+        s.spacing.item_spacing = egui::vec2(8.0, 8.0);
+        s.spacing.button_padding = egui::vec2(12.0, 6.0);
+    });
+}
+
+/// Teinte, saturation, luminosité (0..360, 0..1, 0..1) vers une couleur.
+pub fn hsl(h: f32, s: f32, l: f32) -> Color32 {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let hp = (h.rem_euclid(360.0)) / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r, g, b) = match hp as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = l - c / 2.0;
+    Color32::from_rgb(((r + m) * 255.0) as u8, ((g + m) * 255.0) as u8, ((b + m) * 255.0) as u8)
+}

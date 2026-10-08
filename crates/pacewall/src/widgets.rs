@@ -1,0 +1,538 @@
+//! Widgets natifs : carburant et énergie, pneus, chrono, pilotage, classement, session et météo.
+//! Chaque widget se dessine dans un repère de 1080 px de haut (voir `draw::D`) et renvoie sa taille.
+//! Même catalogue, mêmes réglages et mêmes clés de données que les widgets HTML d'OBS (`server/overlay/widgets.js`).
+
+use crate::draw::{self, Font, HAlign, D};
+use crate::theme::*;
+use eframe::egui::Color32;
+use pwcore::layout::WidgetSpec;
+use pwcore::Data;
+use std::collections::VecDeque;
+
+pub const KINDS: [(&str, &str); 6] = [
+    ("fuel", "Carburant et énergie"),
+    ("tyres", "Pneus"),
+    ("timing", "Chrono et écarts"),
+    ("inputs", "Pilotage"),
+    ("standings", "Classement"),
+    ("session", "Session et météo"),
+];
+
+pub fn name(kind: &str) -> &'static str {
+    KINDS.iter().find(|(k, _)| *k == kind).map(|(_, n)| *n).unwrap_or("Widget")
+}
+
+/* ---------- Réglages ---------- */
+
+pub enum OptKind {
+    Bool(bool),
+    Num { min: f64, max: f64, step: f64, def: f64 },
+    Choice(&'static [(&'static str, &'static str)], &'static str),
+}
+
+pub struct Opt {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub kind: OptKind,
+}
+
+const NO_OPTS: &[Opt] = &[];
+
+pub fn options(kind: &str) -> &'static [Opt] {
+    use OptKind::*;
+    match kind {
+        "fuel" => &[
+            Opt { id: "energy", label: "Afficher l'énergie virtuelle", kind: Bool(true) },
+            Opt { id: "margin", label: "Marge de sécurité (tours)", kind: Num { min: 0.0, max: 3.0, step: 0.5, def: 1.0 } },
+        ],
+        "tyres" => &[
+            Opt { id: "pressure", label: "Pression", kind: Choice(&[("kpa", "kPa"), ("bar", "bar"), ("psi", "psi"), ("off", "Masquer")], "kpa") },
+            Opt { id: "brakes", label: "Températures des freins", kind: Bool(false) },
+            Opt { id: "unit", label: "Température", kind: Choice(&[("c", "°C"), ("f", "°F")], "c") },
+        ],
+        "timing" => &[Opt { id: "gaps", label: "Écarts devant / derrière", kind: Bool(true) }],
+        "inputs" => &[
+            Opt { id: "fps", label: "Fluidité (images/s)", kind: Choice(&[("10", "10"), ("15", "15"), ("20", "20"), ("30", "30")], "20") },
+            Opt { id: "graph", label: "Graphe des inputs", kind: Bool(true) },
+            Opt { id: "window", label: "Durée du graphe", kind: Choice(&[("5", "5 s"), ("10", "10 s"), ("20", "20 s")], "10") },
+            Opt { id: "steering", label: "Volant dans le graphe", kind: Bool(true) },
+            Opt { id: "clutch", label: "Embrayage", kind: Bool(false) },
+            Opt { id: "mph", label: "Vitesse en mph", kind: Bool(false) },
+        ],
+        "standings" => &[
+            Opt { id: "ahead", label: "Voitures devant", kind: Num { min: 0.0, max: 8.0, step: 1.0, def: 3.0 } },
+            Opt { id: "behind", label: "Voitures derrière", kind: Num { min: 0.0, max: 8.0, step: 1.0, def: 3.0 } },
+            Opt { id: "classOnly", label: "Ma classe seulement", kind: Bool(false) },
+        ],
+        "session" => &[Opt { id: "weather", label: "Météo", kind: Bool(true) }],
+        _ => NO_OPTS,
+    }
+}
+
+/// Opacité du fond en pourcentage : réglage commun à tous les widgets.
+pub fn bg(spec: &WidgetSpec) -> f32 {
+    (spec.num("bg", 78.0) / 100.0) as f32
+}
+
+/// Cadence de rafraîchissement voulue (images par seconde) : elle fixe le rythme de l'overlay.
+pub fn hz(kind: &str, spec: &WidgetSpec) -> f32 {
+    match kind {
+        "inputs" => spec.num("fps", 20.0) as f32,
+        "timing" => 4.0,
+        "fuel" => 2.0,
+        "tyres" => 1.0,
+        "standings" => 1.0,
+        _ => 1.0,
+    }
+}
+
+/* ---------- État par widget (graphe des inputs) ---------- */
+
+#[derive(Default)]
+pub struct WState {
+    hist: VecDeque<(f64, [f32; 4])>,
+}
+
+pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
+    match kind {
+        "fuel" => fuel(d, spec, data),
+        "tyres" => tyres(d, spec, data),
+        "timing" => timing(d, spec, data),
+        "inputs" => inputs(d, spec, data, st, now),
+        "standings" => standings(d, spec, data),
+        "session" => session(d, spec, data),
+        _ => (0.0, 0.0),
+    }
+}
+
+fn lap_color(laps: Option<f64>) -> Color32 {
+    match laps {
+        Some(l) if l < 3.0 => BAD,
+        Some(l) if l < 6.0 => WARN,
+        _ => TEXT,
+    }
+}
+
+fn bar_color(frac: f32) -> Color32 {
+    if frac < 0.15 {
+        BAD
+    } else if frac < 0.30 {
+        WARN
+    } else {
+        OK
+    }
+}
+
+/* ---------- Carburant et énergie ---------- */
+
+#[allow(clippy::too_many_arguments)]
+fn resource(
+    d: &D,
+    y0: f32,
+    w: f32,
+    title: &str,
+    unit: &str,
+    level: Option<f64>,
+    pct: Option<f64>,
+    per: Option<f64>,
+    laps: Option<f64>,
+    add: Option<f64>,
+    limiting: bool,
+    margin: f64,
+) {
+    let x0 = 16.0;
+    d.label(x0, y0 + 10.0, title, MUTED);
+    if limiting {
+        d.label_right(w - 16.0, y0 + 10.0, "limitant", ACCENT);
+    }
+    let bw = d.text(x0, y0 + 24.0, &draw::n(level, 1), 34.0, TEXT, Font::Num, HAlign::Left);
+    d.text(x0 + bw + 6.0, y0 + 42.0, unit, 13.0, MUTED, Font::Ui, HAlign::Left);
+    if let Some(p) = pct {
+        d.text(w - 16.0, y0 + 36.0, &format!("{p:.0} %"), 14.0, MUTED, Font::Num, HAlign::Right);
+    }
+    let frac = (pct.unwrap_or(0.0) / 100.0) as f32;
+    d.bar(x0, y0 + 68.0, w - 32.0, 8.0, frac, bar_color(frac));
+
+    let cols = [(x0, "Tours"), (x0 + 90.0, "Conso"), (x0 + 180.0, "À ajouter")];
+    for (x, l) in cols {
+        d.label(x, y0 + 86.0, l, MUTED);
+    }
+    d.text(cols[0].0, y0 + 98.0, &draw::n(laps, 1), 16.0, lap_color(laps), Font::Num, HAlign::Left);
+    d.text(cols[1].0, y0 + 98.0, &draw::n(per, 2), 16.0, TEXT, Font::Num, HAlign::Left);
+    let add_txt = match (add, per) {
+        (Some(a), p) => format!("+{:.1}", a + margin * p.unwrap_or(0.0)),
+        _ => "—".into(),
+    };
+    d.text(cols[2].0, y0 + 98.0, &add_txt, 16.0, TEXT, Font::Num, HAlign::Left);
+}
+
+fn fuel(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
+    let w = 300.0;
+    let energy = spec.flag("energy", true);
+    let margin = spec.num("margin", 1.0);
+    let h = if energy { 268.0 } else { 124.0 };
+    d.card(w, h);
+    let lim = data.text("strategy.limiting");
+    resource(
+        d,
+        0.0,
+        w,
+        "Carburant",
+        "L",
+        data.num("fuel.level"),
+        data.num("fuel.percent"),
+        data.num("strategy.fuel_per_lap"),
+        data.num("strategy.fuel_laps_left"),
+        data.num("strategy.fuel_to_add"),
+        lim == "fuel",
+        margin,
+    );
+    if energy {
+        d.sep(16.0, 132.0, w - 32.0);
+        resource(
+            d,
+            138.0,
+            w,
+            "Énergie virtuelle",
+            "%",
+            data.num("energy.virtual"),
+            data.num("energy.virtual"),
+            data.num("strategy.energy_per_lap"),
+            data.num("strategy.energy_laps_left"),
+            data.num("strategy.energy_to_add"),
+            lim == "energy",
+            margin,
+        );
+    }
+    (w, h)
+}
+
+/* ---------- Pneus ---------- */
+
+fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
+    let w = 262.0;
+    let brakes = spec.flag("brakes", false);
+    let fahrenheit = spec.choice("unit", "c") == "f";
+    let pressure = spec.choice("pressure", "kpa");
+    let h = 28.0 + 134.0 + 12.0 + if brakes { 40.0 } else { 0.0 };
+    d.card(w, h);
+    d.label(16.0, 10.0, "Pneus", MUTED);
+    let comp = if !data.text("tyre.front.compound").is_empty() { data.text("tyre.front.compound") } else { data.text("tyre.rear.compound") };
+    d.label_right(w - 16.0, 10.0, comp, ACCENT);
+
+    let names = ["fl", "fr", "rl", "rr"];
+    let cw = (w - 30.0 - 8.0) / 2.0;
+    let temp = |c: f64| if fahrenheit { c * 9.0 / 5.0 + 32.0 } else { c };
+    for (i, n) in names.iter().enumerate() {
+        let x = 16.0 + (i % 2) as f32 * (cw + 8.0);
+        let y = 28.0 + (i / 2) as f32 * 70.0;
+        let t = (data.f(&format!("tyre.{n}.temp_left"), f64::NAN) + data.f(&format!("tyre.{n}.temp_center"), f64::NAN) + data.f(&format!("tyre.{n}.temp_right"), f64::NAN)) / 3.0;
+        let opt = {
+            let o = data.f(&format!("tyre.{n}.optimal"), 0.0);
+            if o > 0.0 {
+                o
+            } else {
+                88.0
+            }
+        };
+        let wear = data.f(&format!("tyre.{n}.wear"), 0.0);
+        // Bleu = froid, vert = fenêtre idéale, rouge = trop chaud.
+        let dlt = (t - opt) as f32;
+        let hue = if dlt < 0.0 { 130.0 + (-dlt / 25.0).min(1.0) * 80.0 } else { 130.0 - (dlt / 25.0).min(1.0) * 130.0 };
+        let tint = if t.is_finite() { hsl(hue, 0.7, 0.52) } else { MUTED };
+        d.fill(x, y, cw, 64.0, Color32::from_white_alpha(13));
+        d.fill(x, y, cw, 3.0, tint);
+        let ttxt = if t.is_finite() { format!("{:.0}°", temp(t)) } else { "—".into() };
+        d.text(x + cw / 2.0, y + 8.0, &ttxt, 24.0, TEXT, Font::Num, HAlign::Center);
+        let wf = (1.0 - wear / 100.0) as f32;
+        d.fill(x + 8.0, y + 42.0, cw - 16.0, 3.0, Color32::from_white_alpha(26));
+        d.fill(x + 8.0, y + 42.0, (cw - 16.0) * wf.clamp(0.0, 1.0), 3.0, if wear > 70.0 { BAD } else if wear > 45.0 { WARN } else { OK });
+        let p = data.f(&format!("tyre.{n}.pressure"), 0.0);
+        let ptxt = match pressure {
+            "off" => String::new(),
+            _ if p <= 0.0 => String::new(),
+            "bar" => format!("{:.2} bar · ", p / 100.0),
+            "psi" => format!("{:.1} psi · ", p * 0.145038),
+            _ => format!("{p:.0} kPa · "),
+        };
+        d.text(x + cw / 2.0, y + 49.0, &format!("{ptxt}{:.0} %", 100.0 - wear), 11.0, MUTED, Font::Num, HAlign::Center);
+    }
+    if brakes {
+        let bw = (w - 30.0) / 4.0;
+        for (i, n) in names.iter().enumerate() {
+            let x = 16.0 + i as f32 * bw;
+            d.text(x + bw / 2.0, 176.0, &n.to_uppercase(), 10.5, MUTED, Font::Ui, HAlign::Center);
+            d.text(x + bw / 2.0, 188.0, &format!("{:.0}°", temp(data.f(&format!("brake.{n}.temp"), 0.0))), 14.0, TEXT, Font::Num, HAlign::Center);
+        }
+    }
+    (w, h)
+}
+
+/* ---------- Chrono ---------- */
+
+fn timing(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
+    let w = 280.0;
+    let gaps = spec.flag("gaps", true);
+    let rows = if gaps { 5 } else { 3 };
+    let h = 66.0 + rows as f32 * 22.0 + 8.0;
+    d.card(w, h);
+    d.fill(16.0, 10.0, 56.0, 38.0, ACCENT);
+    let place = data.num("position.place").map(|p| format!("P{p:.0}")).unwrap_or_else(|| "P—".into());
+    d.text(44.0, 14.0, &place, 28.0, ACCENT_INK, Font::Num, HAlign::Center);
+    let delta = data.num("lap.delta_best");
+    let dc = match delta {
+        Some(v) if v <= 0.0 => OK,
+        Some(_) => BAD,
+        None => MUTED,
+    };
+    d.text(w - 16.0, 12.0, &draw::signed(delta, 2), 30.0, dc, Font::Num, HAlign::Right);
+    d.sep(16.0, 58.0, w - 32.0);
+
+    let gap = |k: &str| data.num(k).filter(|v| *v > 0.0).map(|v| format!("{v:.1} s")).unwrap_or_else(|| "—".into());
+    let mut list: Vec<(&str, String)> = vec![
+        ("Tour", data.num("lap.number").map(|v| format!("{v:.0}")).unwrap_or_else(|| "—".into())),
+        ("Dernier", draw::lap(data.num("position.last_lap"))),
+        ("Meilleur", draw::lap(data.num("position.best_lap"))),
+    ];
+    if gaps {
+        list.push(("Devant", gap("gap.car_ahead")));
+        list.push(("Derrière", gap("gap.car_behind")));
+    }
+    for (i, (l, v)) in list.iter().enumerate() {
+        let y = 66.0 + i as f32 * 22.0;
+        d.label(16.0, y + 4.0, l, MUTED);
+        d.text(w - 16.0, y + 1.0, v, 14.0, TEXT, Font::Num, HAlign::Right);
+    }
+    (w, h)
+}
+
+/* ---------- Pilotage ---------- */
+
+fn inputs(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
+    let w = 262.0;
+    let graph = spec.flag("graph", true);
+    let clutch = spec.flag("clutch", false);
+    let steering = spec.flag("steering", true);
+    let win = spec.num("window", 10.0).max(1.0);
+    let h = if graph { 114.0 + 56.0 + 12.0 } else { 120.0 };
+    d.card(w, h);
+
+    let rpm = data.f("player.rpm", 0.0);
+    let max = {
+        let m = data.f("player.rpm_max", 8000.0);
+        if m > 0.0 {
+            m
+        } else {
+            8000.0
+        }
+    };
+    let f = (rpm / max) as f32;
+    d.bar(16.0, 12.0, w - 32.0, 6.0, f, if f > 0.95 { BAD } else if f > 0.85 { WARN } else { OK });
+
+    // Pédales : segments verticaux.
+    let thr = data.f("player.throttle", 0.0) as f32 / 100.0;
+    let brk = data.f("player.brake", 0.0) as f32 / 100.0;
+    let clu = data.f("player.clutch", 0.0) as f32 / 100.0;
+    let mut pedals = vec![(brk, BAD), (thr, OK)];
+    if clutch {
+        pedals.push((clu, BLUE));
+    }
+    for (i, (v, color)) in pedals.iter().enumerate() {
+        let x = 16.0 + i as f32 * 17.0;
+        let segs = 14;
+        for s in 0..segs {
+            let y = 28.0 + (segs - 1 - s) as f32 * 6.0;
+            let lit = (s as f32 + 1.0) / segs as f32 <= v.clamp(0.0, 1.0) + 0.0001;
+            d.fill(x, y, 12.0, 4.0, if lit { *color } else { Color32::from_white_alpha(26) });
+        }
+    }
+    let px = 16.0 + pedals.len() as f32 * 17.0 + 14.0;
+    let gear = data.f("player.gear", 0.0) as i64;
+    let g = if gear < 0 { "R".to_string() } else if gear == 0 { "N".to_string() } else { gear.to_string() };
+    d.text(px + 24.0, 30.0, &g, 54.0, ACCENT, Font::Num, HAlign::Center);
+    let kmh = data.f("player.speed", 0.0);
+    let (v, unit) = if spec.flag("mph", false) { (kmh * 0.621371, "mph") } else { (kmh, "km/h") };
+    let sx = px + 62.0;
+    let vw = d.text(sx, 38.0, &format!("{v:.0}"), 24.0, TEXT, Font::Num, HAlign::Left);
+    d.text(sx + vw + 4.0, 48.0, unit, 11.0, MUTED, Font::Ui, HAlign::Left);
+
+    if graph {
+        // Historique glissant ; un point par image dessinée (le rythme est fixé par `fps`).
+        st.hist.push_back((now, [thr, brk, data.f("player.steering", 0.0) as f32, clu]));
+        while st.hist.front().is_some_and(|(t, _)| now - t > win + 0.2) {
+            st.hist.pop_front();
+        }
+        let (gx, gy, gw, gh) = (16.0, 120.0, w - 32.0, 52.0);
+        d.sep(16.0, 114.0, w - 32.0);
+        for k in [0.0, 0.5, 1.0] {
+            d.fill(gx, gy + k * (gh - 1.0), gw, 1.0, Color32::from_white_alpha(23));
+        }
+        let pts = |idx: usize, map: &dyn Fn(f32) -> f32| -> Vec<(f32, f32)> {
+            st.hist.iter().map(|(t, v)| (gx + gw - ((now - t) / win) as f32 * gw, map(v[idx]))).collect()
+        };
+        let pct = |v: f32| gy + gh - 2.0 - v.clamp(0.0, 1.0) * (gh - 4.0);
+        if steering {
+            d.line(&pts(2, &|v| gy + gh / 2.0 - (v / 100.0).clamp(-1.0, 1.0) * (gh / 2.0 - 2.0)), 1.5, Color32::from_white_alpha(140));
+        }
+        if clutch {
+            d.line(&pts(3, &pct), 2.0, BLUE);
+        }
+        d.line(&pts(0, &pct), 2.5, OK);
+        d.line(&pts(1, &pct), 2.5, BAD);
+    }
+    (w, h)
+}
+
+/* ---------- Classement ---------- */
+
+fn class_color(c: &str) -> Color32 {
+    let c = c.to_lowercase();
+    if c.contains("hyper") {
+        Color32::from_rgb(229, 57, 59)
+    } else if c.contains("lmp2") {
+        Color32::from_rgb(45, 127, 249)
+    } else if c.contains("gt3") {
+        Color32::from_rgb(47, 191, 113)
+    } else if c.contains("lmp3") {
+        Color32::from_rgb(168, 92, 242)
+    } else if c.contains("gte") {
+        Color32::from_rgb(242, 169, 59)
+    } else {
+        Color32::from_rgb(123, 132, 148)
+    }
+}
+
+struct Car {
+    place: i64,
+    name: String,
+    class: String,
+    laps: f64,
+    lead: f64,
+    pit: bool,
+    me: bool,
+}
+
+fn standings(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
+    let w = 300.0;
+    let ahead = spec.num("ahead", 3.0) as usize;
+    let behind = spec.num("behind", 3.0) as usize;
+    let rows = ahead + behind + 1;
+    let class_only = spec.flag("classOnly", false);
+    let h = 30.0 + rows as f32 * 24.0 + 10.0;
+    d.card(w, h);
+    d.label(16.0, 10.0, "Classement", MUTED);
+
+    let n = (data.f("session.vehicles", 0.0) as usize).min(104);
+    let mut cars: Vec<Car> = (0..n)
+        .filter_map(|i| {
+            let p = format!("grid.{i:03}");
+            let place = data.num(&format!("{p}.place"))? as i64;
+            Some(Car {
+                place,
+                name: data.text(&format!("{p}.driver")).to_string(),
+                class: data.text(&format!("{p}.class")).to_string(),
+                laps: data.f(&format!("{p}.laps"), 0.0),
+                lead: data.f(&format!("{p}.behind_leader"), 0.0),
+                pit: data.flag(&format!("{p}.in_pits")),
+                me: data.flag(&format!("{p}.is_player")),
+            })
+        })
+        .collect();
+    cars.sort_by_key(|c| c.place);
+    let me = cars.iter().find(|c| c.me).map(|c| (c.class.clone(), c.laps, c.lead));
+    if class_only {
+        if let Some((cls, _, _)) = &me {
+            cars.retain(|c| &c.class == cls);
+        }
+    }
+    let idx = cars.iter().position(|c| c.me).unwrap_or(0);
+    let mut start = idx.saturating_sub(ahead);
+    start = start.min(cars.len().saturating_sub(rows));
+    for (i, c) in cars.iter().skip(start).take(rows).enumerate() {
+        let y = 30.0 + i as f32 * 24.0;
+        if c.me {
+            d.fill(8.0, y, w - 8.0, 22.0, ACCENT.gamma_multiply(0.22));
+        }
+        d.fill(8.0, y + 2.0, 3.0, 18.0, class_color(&c.class));
+        let pos = if class_only { start + i + 1 } else { c.place as usize };
+        d.text(42.0, y + 3.0, &pos.to_string(), 14.0, TEXT, Font::Num, HAlign::Right);
+        let short = {
+            let parts: Vec<&str> = c.name.split_whitespace().collect();
+            if parts.len() > 1 {
+                format!("{}. {}", parts[0].chars().next().unwrap_or(' '), parts[1..].join(" "))
+            } else {
+                c.name.clone()
+            }
+        };
+        d.text(50.0, y + 3.0, &short, 14.0, if c.pit { MUTED } else { TEXT }, Font::Ui, HAlign::Left);
+        if let (Some((_, my_laps, my_lead)), false) = (&me, c.me) {
+            let dl = my_laps - c.laps;
+            let dt = c.lead - my_lead;
+            let gap = if dl.abs() >= 1.0 && dt.abs() > 30.0 {
+                format!("{}{} T", if dl > 0.0 { "+" } else { "−" }, dl.abs())
+            } else {
+                draw::signed(Some(dt), 1)
+            };
+            d.text(w - 16.0, y + 3.0, &gap, 13.0, MUTED, Font::Num, HAlign::Right);
+        }
+    }
+    (w, h)
+}
+
+/* ---------- Session et météo ---------- */
+
+fn session_name(t: i64) -> &'static str {
+    match t {
+        0 => "Test",
+        1..=4 => "Essais",
+        5..=8 => "Qualifs",
+        9 => "Warm-up",
+        10..=13 => "Course",
+        _ => "",
+    }
+}
+
+fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
+    let w = 280.0;
+    let weather = spec.flag("weather", true);
+    let phase = data.f("session.phase", 5.0) as i64;
+    let yellow = data.f("session.yellow", 0.0) as i64;
+    let flag = phase == 6 || yellow > 0;
+    let top = if flag { 36.0 } else { 0.0 };
+    let h = 10.0 + top + 16.0 + 46.0 + if weather { 52.0 } else { 6.0 };
+    d.card(w, h);
+    if flag {
+        d.fill(16.0, 10.0, w - 32.0, 24.0, WARN);
+        d.text(w / 2.0, 14.0, if phase == 6 { "FULL COURSE YELLOW / SAFETY CAR" } else { "JAUNE" }, 12.0, Color32::from_rgb(17, 17, 17), Font::Ui, HAlign::Center);
+    }
+    let y = 10.0 + top;
+    d.label(16.0, y, data.text("session.track"), MUTED);
+    d.label_right(w - 16.0, y, session_name(data.f("session.type", -1.0) as i64), ACCENT);
+    d.text(16.0, y + 16.0, &draw::hms(data.num("session.remaining")), 34.0, TEXT, Font::Num, HAlign::Left);
+    let max = data.f("session.max_laps", 0.0);
+    let left = data.num("strategy.race_laps_left");
+    let laps = if max > 0.0 && max < 10_000.0 {
+        format!("Tour {:.0} / {max:.0}", data.f("lap.number", 0.0))
+    } else if let Some(l) = left {
+        format!("≈ {l:.0} tours")
+    } else {
+        String::new()
+    };
+    d.text(w - 16.0, y + 30.0, &laps, 14.0, MUTED, Font::Num, HAlign::Right);
+    if weather {
+        let wy = y + 66.0;
+        d.sep(16.0, wy - 6.0, w - 32.0);
+        let rain = data.f("weather.rain", 0.0);
+        let cols = [
+            ("Air", draw::n(data.num("weather.ambient"), 0) + "°"),
+            ("Piste", draw::n(data.num("weather.track"), 0) + "°"),
+            ("Pluie", if rain > 1.0 { format!("{rain:.0} %") } else { "—".into() }),
+        ];
+        for (i, (l, v)) in cols.iter().enumerate() {
+            let x = 16.0 + i as f32 * 86.0;
+            d.label(x, wy, l, MUTED);
+            d.text(x, wy + 12.0, v, 15.0, TEXT, Font::Num, HAlign::Left);
+        }
+    }
+    (w, h)
+}

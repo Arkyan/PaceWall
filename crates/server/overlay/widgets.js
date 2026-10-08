@@ -167,8 +167,9 @@ PW.widgets.timing = {
 PW.widgets.inputs = {
   name: 'Pilotage',
   keys: ['player.speed', 'player.gear', 'player.rpm', 'player.throttle', 'player.brake', 'player.clutch', 'player.steering'],
-  hz: 30, size: [260, 180],
+  hz: o => +o.fps, size: [260, 180],
   options: [
+    { id: 'fps', label: 'Fluidité (images/s)', type: 'select', choices: [['10', '10'], ['15', '15'], ['20', '20'], ['30', '30']], def: '20' },
     { id: 'graph', label: 'Graphe des inputs', type: 'bool', def: true },
     { id: 'window', label: 'Durée du graphe', type: 'select', choices: [['5', '5 s'], ['10', '10 s'], ['20', '20 s']], def: '10' },
     { id: 'steering', label: 'Volant dans le graphe', type: 'bool', def: true },
@@ -209,7 +210,7 @@ PW.widgets.inputs = {
         if (o.clutch) line(now, 4, '#4f9dff', 2, pct);
         line(now, 1, '#38e07b', 3, pct);
         line(now, 2, '#ff4d5e', 3, pct);
-      }, 40);
+      }, Math.round(1000 / (+o.fps || 20)));
     }
 
     return {

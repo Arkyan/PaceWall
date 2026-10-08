@@ -19,7 +19,7 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 .pw-root { position: relative; width: 100vw; height: 100vh; overflow: hidden; font-family: var(--pw-ui); color: var(--pw-text); }
 .pw-root.pw-hidden .pw-w { opacity: 0 !important; }
 
-.pw-w { position: absolute; transform-origin: 0 0; transition: opacity .25s; will-change: transform; user-select: none; }
+.pw-w { position: absolute; transform-origin: 0 0; user-select: none; }
 .pw-root.editing .pw-w { cursor: grab; outline: 1px dashed rgba(255,255,255,.22); }
 .pw-root.editing .pw-w.sel { outline: 2px solid var(--pw-accent); z-index: 5; }
 .pw-root.editing .pw-w:active { cursor: grabbing; }
@@ -49,8 +49,7 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
           mask: repeating-linear-gradient(90deg, #000 0 6px, transparent 6px 8px);
 }
 .pw-rpm { margin: 0 0 8px; height: 6px; }
-.pw-bar i, .pw-rpm i { display: block; height: 100%; width: 100%; background: var(--pw-ok); transform-origin: 0 0; transform: scaleX(0); transition: transform .3s linear, background .3s; }
-.pw-rpm i { transition: none; }
+.pw-bar i, .pw-rpm i { display: block; height: 100%; width: 100%; background: var(--pw-ok); transform-origin: 0 0; transform: scaleX(0); }
 
 .pw-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .pw-stats small { display: block; font-size: 10px; color: var(--pw-muted); text-transform: uppercase; letter-spacing: .14em; }
@@ -60,11 +59,11 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 
 /* Pneus */
 .pw-tyres { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.pw-tyre { padding: 6px 8px 7px; text-align: center; background: rgba(255,255,255,.05); border-top: 3px solid var(--c, var(--pw-ok)); transition: border-color .3s; }
+.pw-tyre { padding: 6px 8px 7px; text-align: center; background: rgba(255,255,255,.05); border-top: 3px solid var(--c, var(--pw-ok)); }
 .pw-tyre b { font-family: var(--pw-num); font-size: 24px; font-weight: 600; display: block; line-height: 1.1; }
 .pw-tyre small { display: block; font-family: var(--pw-num); font-size: 11px; color: var(--pw-muted); }
 .pw-tyre .wear { height: 3px; background: rgba(255,255,255,.1); margin: 4px 0 3px; overflow: hidden; }
-.pw-tyre .wear i { display: block; height: 100%; width: 100%; background: var(--pw-ok); transform-origin: 0 0; transform: scaleX(1); transition: transform .5s linear, background .5s; }
+.pw-tyre .wear i { display: block; height: 100%; width: 100%; background: var(--pw-ok); transform-origin: 0 0; transform: scaleX(1); }
 .pw-brakes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 8px; font-size: 10px; text-align: center; color: var(--pw-muted); letter-spacing: .12em; }
 .pw-brakes b { display: block; font-family: var(--pw-num); color: var(--pw-text); font-size: 14px; letter-spacing: 0; font-weight: 600; }
 
@@ -108,3 +107,7 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 .pw-weather { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--pw-line); }
 .pw-weather small { display: block; font-size: 10px; color: var(--pw-muted); text-transform: uppercase; letter-spacing: .14em; }
 .pw-weather b { font-family: var(--pw-num); font-size: 15px; font-weight: 600; }
+
+/* Diagnostic de performance */
+.flat-nomask .pw-bar, .flat-nomask .pw-rpm, .flat-nomask .pw-pedal { -webkit-mask: none; mask: none; }
+.flat-noclip .pw-card { clip-path: none; }

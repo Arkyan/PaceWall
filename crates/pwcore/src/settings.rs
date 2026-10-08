@@ -1,0 +1,63 @@
+//! Réglages de l'application (`settings.json`). Lus et écrits par l'interface et par le processus de fond.
+
+use serde_json::{json, Map, Value};
+use std::path::PathBuf;
+
+pub fn path() -> PathBuf {
+    crate::db::path().with_file_name("settings.json")
+}
+
+fn defaults() -> Map<String, Value> {
+    let Value::Object(m) = json!({
+        "overlay_auto": true,          // ouvrir / fermer l'overlay avec le jeu
+        "overlay_monitor": 0,          // index de l'écran (0 = principal)
+        "autostart": false,            // lancer avec Windows
+        "obs_server": false,           // serveur web pour OBS (source navigateur)
+        "obs_port": 8470,
+    }) else { unreachable!() };
+    m
+}
+
+/// Réglages : valeurs par défaut complétées par le fichier.
+pub fn all() -> Value {
+    let mut merged = defaults();
+    if let Ok(text) = std::fs::read_to_string(path()) {
+        if let Ok(Value::Object(saved)) = serde_json::from_str::<Value>(&text) {
+            for (k, v) in saved {
+                if merged.get(&k).is_some_and(|d| std::mem::discriminant(d) == std::mem::discriminant(&v)) {
+                    merged.insert(k, v);
+                }
+            }
+        }
+    }
+    Value::Object(merged)
+}
+
+pub fn bool_of(key: &str, default: bool) -> bool {
+    all().get(key).and_then(Value::as_bool).unwrap_or(default)
+}
+
+pub fn int_of(key: &str, default: i64) -> i64 {
+    all().get(key).and_then(Value::as_i64).unwrap_or(default)
+}
+
+/// Enregistre une clé connue (les autres sont ignorées).
+pub fn set(key: &str, value: Value) -> std::io::Result<()> {
+    let mut current = match all() {
+        Value::Object(m) => m,
+        _ => defaults(),
+    };
+    if current.contains_key(key) {
+        current.insert(key.to_string(), value);
+    }
+    let p = path();
+    if let Some(dir) = p.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(p, serde_json::to_string_pretty(&Value::Object(current))?)
+}
+
+/// Date de dernière modification du fichier : le processus de fond s'en sert pour détecter un changement.
+pub fn modified() -> Option<std::time::SystemTime> {
+    std::fs::metadata(path()).and_then(|m| m.modified()).ok()
+}

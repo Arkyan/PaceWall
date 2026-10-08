@@ -143,7 +143,7 @@
 
     function subscribe() {
       const prefixes = [...new Set(items.flatMap(it => it.def.keys))];
-      const hz = Math.max(1, ...items.map(it => it.def.hz || 5));
+      const hz = Math.max(1, ...items.map(hzOf));
       Feed.use(prefixes, hz);
     }
 
@@ -152,12 +152,22 @@
       root.classList.toggle('pw-hidden', !(cfg.editing || Feed.game));
     }
 
+    // Chaque widget a sa cadence (`def.hz`) : la page peut recevoir des données à 20 Hz pour le graphe des
+    // inputs sans que le carburant ou le classement se redessinent à 20 Hz.
+    const hzOf = it => (typeof it.def.hz === 'function' ? it.def.hz(it.opts) : it.def.hz) || 5;
     const flush = () => {
       raf = 0;
       const keys = dirty; dirty = new Set();
+      const now = performance.now();
+      let wait = Infinity;
       for (const it of items) {
-        if (keys.has('*') || it.def.keys.some(p => { for (const k of keys) if (k.startsWith(p)) return true; return false; })) it.inst.update(g);
+        const hit = it.pending || keys.has('*') || it.def.keys.some(p => { for (const k of keys) if (k.startsWith(p)) return true; return false; });
+        if (!hit) continue;
+        const left = (it.last || 0) + 1000 / hzOf(it) - now;
+        if (left <= 4) { it.pending = false; it.last = now; it.inst.update(g); }
+        else { it.pending = true; wait = Math.min(wait, left); }
       }
+      if (wait < Infinity) setTimeout(() => { if (!raf) raf = requestAnimationFrame(flush); }, wait);
     };
     const off = Feed.on(changed => {
       if (changed.has('game.')) visibility();

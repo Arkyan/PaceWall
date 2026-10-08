@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/lmu", "crates/collector", "crates/fakegame", "crates/server"]
+members = ["crates/lmu", "crates/collector", "crates/fakegame", "crates/pwcore", "crates/server", "crates/pacewall"]
 
 [profile.release]
 opt-level = "s"

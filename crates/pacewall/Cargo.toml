@@ -1,0 +1,25 @@
+[package]
+name = "pacewall"
+version = "0.1.0"
+edition = "2021"
+description = "PaceWall : overlays de course natifs pour Le Mans Ultimate"
+
+[dependencies]
+pwcore = { path = "../pwcore" }
+server = { path = "../server" }
+lmu = { path = "../lmu" }
+eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts"] }
+egui_plot = "0.37"
+serde_json = "1"
+tiny-skia = "0.11"
+ab_glyph = "0.2"
+winreg = "0.56"
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_System_Threading",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_HiDpi",
+  "Win32_UI_WindowsAndMessaging",
+] }

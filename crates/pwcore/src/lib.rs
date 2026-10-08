@@ -1,0 +1,20 @@
+//! Cœur de PaceWall, partagé par le processus de fond, l'interface, l'overlay native et le serveur OBS.
+//!
+//! - `live` : lit la mémoire partagée de Le Mans Ultimate et produit des `Data` (clé → valeur, unités converties).
+//! - `strategy` : consommation moyenne, tours restants, quantité à ajouter.
+//! - `recorder` / `db` : historique des tours (SQLite).
+//! - `settings` / `layout` : réglages et mises en page des overlays.
+
+pub mod data;
+pub mod db;
+pub mod demo;
+pub mod flatten;
+pub mod layout;
+#[cfg(windows)]
+pub mod live;
+#[cfg(windows)]
+pub mod recorder;
+pub mod settings;
+pub mod strategy;
+
+pub use data::Data;
