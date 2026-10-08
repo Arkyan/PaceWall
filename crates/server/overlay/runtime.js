@@ -79,7 +79,7 @@
     widgets: [
       spec('standings', 'standings', 0.012, 0.05), spec('timing', 'timing', 0.012, 0.42),
       spec('fuel', 'fuel', 0.012, 0.66), spec('tyres', 'tyres', 0.18, 0.66),
-      spec('session', 'session', 0.42, 0.02), spec('inputs', 'inputs', 0.40, 0.82),
+      spec('session', 'session', 0.42, 0.02), spec('inputs', 'inputs', 0.40, 0.76),
     ],
   });
 
@@ -119,7 +119,7 @@
     const g = (k, d) => Feed.get(k, d);
 
     function mount() {
-      for (const it of items) it.el.remove();
+      for (const it of items) { it.inst.destroy && it.inst.destroy(); it.el.remove(); }
       items = [];
       for (const s of layout.widgets) {
         if (cfg.only && !cfg.only.includes(s.id) && !cfg.only.includes(s.type)) continue;
@@ -199,7 +199,7 @@
       refresh(id) { const it = items.find(i => i.spec.id === id); if (it) { it.opts = PW.resolveOpts(it.def, it.spec.opts); place(it); } },
       // Options : le widget doit être reconstruit.
       remount() { mount(); },
-      destroy() { off(); ro.disconnect(); root.remove(); },
+      destroy() { off(); ro.disconnect(); items.forEach(it => it.inst.destroy && it.inst.destroy()); root.remove(); },
     };
     mount();
     return api;

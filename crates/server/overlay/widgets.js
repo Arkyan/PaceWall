@@ -167,10 +167,12 @@ PW.widgets.timing = {
 PW.widgets.inputs = {
   name: 'Pilotage',
   keys: ['player.speed', 'player.gear', 'player.rpm', 'player.throttle', 'player.brake', 'player.clutch', 'player.steering'],
-  hz: 30, size: [260, 130],
+  hz: 30, size: [260, 180],
   options: [
+    { id: 'graph', label: 'Graphe des inputs', type: 'bool', def: true },
+    { id: 'window', label: 'Durée du graphe', type: 'select', choices: [['5', '5 s'], ['10', '10 s'], ['20', '20 s']], def: '10' },
+    { id: 'steering', label: 'Volant dans le graphe', type: 'bool', def: true },
     { id: 'clutch', label: 'Embrayage', type: 'bool', def: false },
-    { id: 'wheel', label: 'Barre de volant', type: 'bool', def: true },
     { id: 'mph', label: 'Vitesse en mph', type: 'bool', def: false },
   ],
   mount(root, o) {
@@ -179,11 +181,40 @@ PW.widgets.inputs = {
         <div class="pw-pedals"><div class="pw-pedal b"><i data-k="brake"></i></div><div class="pw-pedal t"><i data-k="thr"></i></div>${o.clutch ? '<div class="pw-pedal c"><i data-k="clu"></i></div>' : ''}</div>
         <div class="pw-gear" data-k="gear">N</div>
         <div><div class="pw-speed"><span data-k="speed">0</span><small>${o.mph ? 'mph' : 'km/h'}</small></div></div>
-      </div>${o.wheel ? '<div class="pw-wheel"><i data-k="wheel"></i></div>' : ''}</div>`).firstChild;
+      </div>${o.graph ? '<canvas class="pw-graph" width="460" height="112"></canvas>' : ''}</div>`).firstChild;
     root.appendChild(card);
     const b = PW.bind(card);
+    let get = null, timer = 0;
+
+    // Graphe : défilement continu, échantillonné à 25 Hz (la courbe avance même si les inputs ne bougent pas).
+    const canvas = card.querySelector('canvas');
+    if (canvas) {
+      const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height, win = (+o.window || 10) * 1000;
+      const buf = [];
+      const line = (now, i, color, width, map) => {
+        ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round';
+        buf.forEach((p, n) => { const x = W - (now - p[0]) / win * W, y = map(p[i]); n ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+        ctx.stroke();
+      };
+      timer = setInterval(() => {
+        if (!get || !PW.feed.game) return;
+        const now = performance.now();
+        buf.push([now, get('player.throttle', 0), get('player.brake', 0), get('player.steering', 0), get('player.clutch', 0)]);
+        while (buf.length && buf[0][0] < now - win - 100) buf.shift();
+        ctx.clearRect(0, 0, W, H);
+        ctx.strokeStyle = 'rgba(255,255,255,.09)'; ctx.lineWidth = 1;
+        for (const f of [0, .5, 1]) { const y = Math.round(2 + f * (H - 4)) + .5; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+        const pct = v => H - 3 - Math.max(0, Math.min(100, v)) / 100 * (H - 6);
+        if (o.steering) line(now, 3, 'rgba(232,237,244,.55)', 2, v => H / 2 - Math.max(-100, Math.min(100, v)) / 100 * (H / 2 - 3));
+        if (o.clutch) line(now, 4, '#4f9dff', 2, pct);
+        line(now, 1, '#38e07b', 3, pct);
+        line(now, 2, '#ff4d5e', 3, pct);
+      }, 40);
+    }
+
     return {
       update(g) {
+        get = g;
         const rpm = g('player.rpm', 0), max = g('player.rpm_max', 8000) || 8000, f = rpm / max;
         b.scaleX('rpm', f);
         b.css('rpm', 'background', f > 0.95 ? 'var(--pw-bad)' : f > 0.85 ? 'var(--pw-warn)' : 'var(--pw-ok)');
@@ -194,8 +225,8 @@ PW.widgets.inputs = {
         b.text('gear', gear < 0 ? 'R' : gear === 0 ? 'N' : String(gear));
         const kmh = g('player.speed', 0);
         b.text('speed', String(Math.round(o.mph ? kmh * 0.621371 : kmh)));
-        if (b.el.wheel) b.css('wheel', 'left', 'calc(' + (50 + g('player.steering', 0) / 2).toFixed(1) + '% - 2px)');
       },
+      destroy() { clearInterval(timer); },
     };
   },
 };

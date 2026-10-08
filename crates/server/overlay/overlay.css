@@ -87,8 +87,8 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 .pw-gear { font-family: var(--pw-num); font-size: 58px; font-weight: 700; line-height: .95; min-width: 44px; text-align: center; color: var(--pw-accent); }
 .pw-speed { font-family: var(--pw-num); font-size: 24px; font-weight: 600; }
 .pw-speed small { font-family: var(--pw-ui); font-size: 11px; color: var(--pw-muted); margin-left: 4px; letter-spacing: .12em; text-transform: uppercase; }
-.pw-wheel { height: 3px; background: rgba(255,255,255,.12); position: relative; margin-top: 10px; }
-.pw-wheel i { position: absolute; top: -4px; width: 3px; height: 11px; background: var(--pw-accent); left: 50%; }
+
+.pw-graph { display: block; width: 100%; height: 56px; margin-top: 10px; border-top: 1px solid var(--pw-line); padding-top: 8px; box-sizing: content-box; }
 
 /* Classement */
 .pw-board { width: 100%; border-collapse: collapse; font-size: 14px; }
