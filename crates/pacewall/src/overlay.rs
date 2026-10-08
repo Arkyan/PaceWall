@@ -180,6 +180,19 @@ fn pick_monitor() -> Option<win::Monitor> {
     monitors.get(idx).or(monitors.first()).cloned()
 }
 
+/// Journal des apparitions et disparitions de l'overlay (%TEMP%\pw-overlay-events.log) : sert à comprendre un clignotement.
+fn log_event(text: &str) {
+    use std::io::Write;
+    let path = std::env::temp_dir().join("pw-overlay-events.log");
+    if std::fs::metadata(&path).map(|m| m.len() > 100_000).unwrap_or(false) {
+        let _ = std::fs::remove_file(&path);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let _ = writeln!(f, "{:02}:{:02}:{:02} {}", secs / 3600 % 24, secs / 60 % 60, secs % 60, text);
+    }
+}
+
 pub fn run() {
     if !win::single_instance("PaceWallOverlay") {
         return;
@@ -254,10 +267,16 @@ pub fn run() {
             Update::Data(d) => {
                 polls += 1;
                 data = d;
+                if !game {
+                    log_event("jeu détecté : overlay affichée");
+                }
                 game = true;
                 data_version += 1;
             }
             Update::NoGame => {
+                if game {
+                    log_event("jeu perdu : overlay masquée");
+                }
                 game = false;
                 data = Data::default();
             }

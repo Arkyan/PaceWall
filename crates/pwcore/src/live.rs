@@ -19,6 +19,8 @@ pub struct Live {
     reader: Option<Reader>,
     strategy: Strategy,
     last_events: u32,
+    /// Temps de session du dernier passage : second témoin de vie si le compteur d'événements ne bouge pas.
+    last_et: f64,
     last_change: Instant,
     last_open: Instant,
     reported_absent: bool,
@@ -36,6 +38,7 @@ impl Live {
             reader: None,
             strategy: Strategy::default(),
             last_events: u32::MAX,
+            last_et: f64::NAN,
             last_change: Instant::now(),
             last_open: Instant::now() - Duration::from_secs(10),
             reported_absent: false,
@@ -52,6 +55,7 @@ impl Live {
             self.last_open = Instant::now();
             self.reader = Reader::open();
             self.last_events = u32::MAX;
+            self.last_et = f64::NAN;
             self.strategy = Strategy::default();
             if self.reader.is_none() {
                 return self.absent();
@@ -59,8 +63,12 @@ impl Live {
         }
         let reader = self.reader.as_ref().unwrap();
         let events = reader.events().SME_UPDATE_TELEMETRY;
-        if events != self.last_events {
+        // Le compteur d'événements peut rester figé selon la version du jeu : le temps de session sert alors de témoin.
+        // Sans lui, le jeu serait déclaré absent au bout de 3 s, puis retrouvé 2 s plus tard, et l'overlay clignoterait.
+        let et = reader.scoring_info().mCurrentET;
+        if events != self.last_events || et != self.last_et {
             self.last_events = events;
+            self.last_et = et;
             self.last_change = Instant::now();
             self.reported_absent = false;
             let mut fields = flatten::read_all(reader, with_grid);

@@ -138,8 +138,11 @@ fn main() {
                 addr_of_mut!((*base).scoring.vehScoringInfo).cast::<VehicleScoring>().add(i).write_unaligned(s);
             }
 
-            addr_of_mut!((*base).generic.events.SME_UPDATE_TELEMETRY).write_unaligned(telem_count);
-            addr_of_mut!((*base).generic.events.SME_UPDATE_SCORING).write_unaligned(scor_count);
+            // FAKE_FROZEN_EVENTS=1 : le compteur d'événements ne bouge jamais (cas supposé du vrai jeu, pour tester l'overlay).
+            if std::env::var_os("FAKE_FROZEN_EVENTS").is_none() {
+                addr_of_mut!((*base).generic.events.SME_UPDATE_TELEMETRY).write_unaligned(telem_count);
+                addr_of_mut!((*base).generic.events.SME_UPDATE_SCORING).write_unaligned(scor_count);
+            }
         }
         thread::sleep(Duration::from_millis(16));
     }
