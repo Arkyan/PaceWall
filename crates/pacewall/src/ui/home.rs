@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 
 #[derive(Default)]
 pub struct State {
+    /// Largeur d'une carte, recalculée à chaque image selon la largeur disponible.
+    w: f32,
     last: Option<LastSession>,
     checked: Option<Instant>,
 }
@@ -44,19 +46,32 @@ impl State {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::NONE.inner_margin(Margin::symmetric(30, 26)).show(ui, |ui| {
                 kit::page_title(ui, "Accueil", "Overlays de course pour Le Mans Ultimate.");
-                ui.horizontal_wrapped(|ui| {
-                    self.game_card(ui, feed);
-                    self.overlay_card(ui);
-                    self.obs_card(ui);
-                    self.last_card(ui);
-                });
+                // Les cartes se répartissent sur 1 à 4 colonnes selon la largeur : jamais de débordement.
+                let gap = 14.0;
+                let avail = ui.available_width();
+                let cols = (((avail + gap) / (300.0 + gap)).floor() as usize).clamp(1, 4);
+                self.w = (avail - gap * (cols as f32 - 1.0)) / cols as f32;
+                ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
+                let rows = 4_usize.div_ceil(cols);
+                for row in 0..rows {
+                    ui.horizontal_top(|ui| {
+                        for i in (row * cols)..((row + 1) * cols).min(4) {
+                            match i {
+                                0 => self.game_card(ui, feed),
+                                1 => self.overlay_card(ui),
+                                2 => self.obs_card(ui),
+                                _ => self.last_card(ui),
+                            }
+                        }
+                    });
+                }
             });
         });
     }
 
-    fn card(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
+    fn card(ui: &mut Ui, w: f32, title: &str, add: impl FnOnce(&mut Ui)) {
         kit::panel_frame().show(ui, |ui| {
-            ui.set_width(330.0);
+            ui.set_width((w - 30.0).max(200.0));
             ui.set_min_height(190.0);
             ui.vertical(|ui| {
                 kit::section(ui, title);
@@ -67,7 +82,7 @@ impl State {
     }
 
     fn game_card(&mut self, ui: &mut Ui, feed: &Feed) {
-        Self::card(ui, "Jeu", |ui| {
+        Self::card(ui, self.w, "Jeu", |ui| {
             if feed.game {
                 ui.label(RichText::new("Jeu connecté").font(num_font(22.0)).color(OK));
                 ui.add_space(8.0);
@@ -86,7 +101,7 @@ impl State {
     }
 
     fn overlay_card(&mut self, ui: &mut Ui) {
-        Self::card(ui, "Overlay joueur", |ui| {
+        Self::card(ui, self.w, "Overlay joueur", |ui| {
             let on = win::overlay_running();
             ui.label(RichText::new(if on { "Affichée" } else { "Fermée" }).font(num_font(22.0)).color(if on { OK } else { TEXT }));
             ui.add_space(8.0);
@@ -109,7 +124,7 @@ impl State {
     }
 
     fn obs_card(&mut self, ui: &mut Ui) {
-        Self::card(ui, "OBS", |ui| {
+        Self::card(ui, self.w, "OBS", |ui| {
             let on = settings::bool_of("obs_server", false);
             if on {
                 let url = format!("http://127.0.0.1:{}/overlay/obs", settings::int_of("obs_port", 8470));
@@ -133,7 +148,7 @@ impl State {
     }
 
     fn last_card(&mut self, ui: &mut Ui) {
-        Self::card(ui, "Dernière session", |ui| {
+        Self::card(ui, self.w, "Dernière session", |ui| {
             match &self.last {
                 Some(s) => {
                     kit::kv(ui, "Circuit", &s.track);

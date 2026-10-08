@@ -115,6 +115,11 @@ pub fn run(minimized: bool) {
     let mut next_watch = Instant::now();
 
     // Boucle de messages (nécessaire à l'icône et au raccourci), réveillée une fois par seconde.
+    // Lancement normal : on ouvre la fenêtre principale. Au démarrage de Windows (`--minimized`), on reste dans l'icône.
+    if !minimized {
+        win::open_ui(None);
+    }
+
     'main: loop {
         unsafe {
             let mut msg = MSG::default();

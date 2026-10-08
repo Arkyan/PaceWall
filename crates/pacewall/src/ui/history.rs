@@ -155,7 +155,7 @@ impl State {
             ui.label(RichText::new(e).color(BAD));
             return;
         }
-        egui::Panel::left("history_list").exact_size(310.0).resizable(false).frame(egui::Frame::NONE.fill(PANEL).stroke(egui::Stroke::new(1.0, LINE))).show(ui, |ui| {
+        egui::Panel::left("history_list").exact_size(if ui.available_width() >= 1000.0 { 310.0 } else { 240.0 }).resizable(false).frame(egui::Frame::NONE.fill(PANEL).stroke(egui::Stroke::new(1.0, LINE))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.add_space(14.0);
                 ui.label(RichText::new("SESSIONS").size(12.0).color(MUTED));
@@ -171,7 +171,7 @@ impl State {
             let mut pick = None;
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 for s in &self.sessions {
-                    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 58.0), Sense::click());
+                    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 74.0), Sense::click());
                     let on = self.selected == Some(s.id);
                     if on || resp.hovered() {
                         ui.painter().rect_filled(rect, 0.0, ACCENT.gamma_multiply(0.10));
@@ -181,8 +181,9 @@ impl State {
                     }
                     let p = ui.painter();
                     p.text(rect.min + vec2(16.0, 10.0), egui::Align2::LEFT_TOP, &s.track, egui::FontId::proportional(14.5), TEXT);
-                    let line = format!("{} · {} tours{} · {}", session_name(s.kind), s.laps, s.best.map(|b| format!(" · {}", draw::lap(Some(b)))).unwrap_or_default(), date(s.started));
+                    let line = format!("{} · {} tours{}", session_name(s.kind), s.laps, s.best.map(|b| format!(" · {}", draw::lap(Some(b)))).unwrap_or_default());
                     p.text(rect.min + vec2(16.0, 32.0), egui::Align2::LEFT_TOP, line, num_font(11.0), MUTED);
+                    p.text(rect.min + vec2(16.0, 49.0), egui::Align2::LEFT_TOP, date(s.started), num_font(11.0), MUTED);
                     if resp.clicked() {
                         pick = Some(s.id);
                     }
@@ -271,11 +272,14 @@ impl State {
             ("Usure des pneus (%)", series(&|l| Some(l.wear_end)), OK),
             ("Température des pneus (°C)", series(&|l| Some(l.tyre_temp)), BAD),
         ];
-        let w = ((ui.available_width() - 12.0) / 2.0).max(280.0);
+        // Deux courbes côte à côte si la place le permet, une seule sinon.
+        let avail = ui.available_width();
+        let cols = if avail >= 760.0 { 2.0 } else { 1.0 };
+        let w = (avail - 12.0 * (cols - 1.0)) / cols;
         ui.horizontal_wrapped(|ui| {
             for (i, (title, pts, color)) in charts.iter().enumerate() {
                 kit::panel_frame().show(ui, |ui| {
-                    ui.set_width(w - 30.0);
+                    ui.set_width((w - 30.0).max(200.0));
                     kit::section(ui, title);
                     Plot::new(("plot", i))
                         .height(150.0)
@@ -300,6 +304,7 @@ impl State {
         kit::panel_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             kit::section(ui, "Tours");
+            egui::ScrollArea::horizontal().show(ui, |ui| {
             egui::Grid::new("laps").num_columns(12).spacing([18.0, 4.0]).striped(true).show(ui, |ui| {
                 for h in ["Tour", "Temps", "Carbu (L)", "Énergie (%)", "Usure/tour", "Usure (%)", "Pneus °C", "Freins °C", "Piste °C", "Pluie", "Pos.", "Gomme"] {
                     ui.label(RichText::new(h.to_uppercase()).size(10.5).color(MUTED));
@@ -327,6 +332,7 @@ impl State {
                     cell(ui, l.compound.clone());
                     ui.end_row();
                 }
+            });
             });
         });
     }

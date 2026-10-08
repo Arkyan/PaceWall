@@ -21,11 +21,14 @@ pub struct State {
     live: bool,
     states: HashMap<String, WState>,
     status: String,
+    /// Panneaux latéraux : `None` = automatique selon la largeur de la fenêtre.
+    left_open: Option<bool>,
+    right_open: Option<bool>,
 }
 
 impl Default for State {
     fn default() -> Self {
-        Self { layouts: layout::load(), target: "player".into(), selected: None, dirty: false, live: false, states: HashMap::new(), status: String::new() }
+        Self { layouts: layout::load(), target: "player".into(), selected: None, dirty: false, live: false, states: HashMap::new(), status: String::new(), left_open: None, right_open: None }
     }
 }
 
@@ -56,44 +59,81 @@ impl State {
         let live_missing = self.live && !feed.game;
 
         let bar = Frame::NONE.fill(PANEL).stroke(Stroke::new(1.0, LINE)).inner_margin(Margin::symmetric(14, 8));
-        egui::Panel::top("ed_top").frame(bar).show(ui, |ui| self.top_bar(ui, live_missing));
-        egui::Panel::left("ed_left").exact_size(210.0).resizable(false).frame(Frame::NONE.fill(PANEL).stroke(Stroke::new(1.0, LINE)).inner_margin(Margin::same(14))).show(ui, |ui| self.left(ui));
-        egui::Panel::right("ed_right").exact_size(264.0).resizable(false).frame(Frame::NONE.fill(PANEL).stroke(Stroke::new(1.0, LINE)).inner_margin(Margin::same(14))).show(ui, |ui| self.inspector(ui));
+        // Sur une petite fenêtre, l'aperçu garde la priorité : les panneaux se masquent (et se rouvrent depuis la barre du haut).
+        let width = ui.available_width();
+        let show_left = self.left_open.unwrap_or(width >= 1000.0);
+        let show_right = self.right_open.unwrap_or(width >= 880.0 || self.selected.is_some());
+        let (lw, rw) = if width >= 1200.0 { (210.0, 264.0) } else { (190.0, 240.0) };
+        egui::Panel::top("ed_top").frame(bar).show(ui, |ui| self.top_bar(ui, live_missing, show_left, show_right));
+        if show_left {
+            egui::Panel::left("ed_left").exact_size(lw).resizable(false).frame(Frame::NONE.fill(PANEL).stroke(Stroke::new(1.0, LINE)).inner_margin(Margin::same(14))).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.left(ui));
+            });
+        }
+        if show_right {
+            egui::Panel::right("ed_right").exact_size(rw).resizable(false).frame(Frame::NONE.fill(PANEL).stroke(Stroke::new(1.0, LINE)).inner_margin(Margin::same(14))).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.inspector(ui));
+            });
+        }
         egui::CentralPanel::default().frame(Frame::NONE.fill(BG).inner_margin(Margin::same(16))).show(ui, |ui| self.stage(ui, data, now));
     }
 
-    fn top_bar(&mut self, ui: &mut Ui, live_missing: bool) {
-        ui.horizontal(|ui| {
+    fn top_bar(&mut self, ui: &mut Ui, live_missing: bool, show_left: bool, show_right: bool) {
+        // Une seule ligne si la fenêtre est large ; sinon les réglages et l'enregistrement passent sur une seconde ligne.
+        let one_line = ui.available_width() >= 1040.0;
+        let controls = |this: &mut Self, ui: &mut Ui| {
             ui.label(RichText::new("CIBLE").size(11.0).color(MUTED));
             for t in ["player", "obs"] {
-                if ui.selectable_label(self.target == t, target_label(t).to_uppercase()).clicked() && self.target != t {
-                    self.target = t.into();
-                    self.selected = None;
+                if ui.selectable_label(this.target == t, target_label(t).to_uppercase()).clicked() && this.target != t {
+                    this.target = t.into();
+                    this.selected = None;
                 }
             }
-            ui.add_space(18.0);
+            ui.add_space(14.0);
             ui.label(RichText::new("DONNÉES").size(11.0).color(MUTED));
-            ui.selectable_value(&mut self.live, false, "DÉMO");
-            ui.selectable_value(&mut self.live, true, "JEU EN DIRECT");
+            ui.selectable_value(&mut this.live, false, "DÉMO");
+            ui.selectable_value(&mut this.live, true, "JEU EN DIRECT");
             if live_missing {
                 ui.label(RichText::new("jeu absent : démo").size(12.0).color(WARN));
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_enabled_ui(self.dirty, |ui| {
-                    if kit::primary(ui, "Enregistrer").clicked() {
-                        self.status = match layout::save(&self.layouts) {
-                            Ok(()) => {
-                                self.dirty = false;
-                                "Enregistré".into()
-                            }
-                            Err(e) => format!("Échec : {e}"),
-                        };
-                    }
-                });
-                let (text, color) = if self.dirty { ("Modifications non enregistrées".to_string(), WARN) } else { (if self.status.is_empty() { "Enregistré".to_string() } else { self.status.clone() }, MUTED) };
-                ui.label(RichText::new(text).size(12.5).color(color));
+            ui.add_space(14.0);
+            if ui.selectable_label(show_left, "WIDGETS").clicked() {
+                this.left_open = Some(!show_left);
+            }
+            if ui.selectable_label(show_right, "RÉGLAGES").clicked() {
+                this.right_open = Some(!show_right);
+            }
+        };
+        let save_area = |this: &mut Self, ui: &mut Ui| {
+            ui.add_enabled_ui(this.dirty, |ui| {
+                if kit::primary(ui, "Enregistrer").clicked() {
+                    this.status = match layout::save(&this.layouts) {
+                        Ok(()) => {
+                            this.dirty = false;
+                            "Enregistré".into()
+                        }
+                        Err(e) => format!("Échec : {e}"),
+                    };
+                }
             });
-        });
+            let (text, color) = if this.dirty {
+                ("Modifications non enregistrées".to_string(), WARN)
+            } else {
+                (if this.status.is_empty() { "Enregistré".to_string() } else { this.status.clone() }, MUTED)
+            };
+            ui.label(RichText::new(text).size(12.5).color(color));
+        };
+        if one_line {
+            ui.horizontal(|ui| {
+                controls(self, ui);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| save_area(self, ui));
+            });
+        } else {
+            ui.horizontal_wrapped(|ui| controls(self, ui));
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| save_area(self, ui));
+            });
+        }
     }
 
     fn left(&mut self, ui: &mut Ui) {
