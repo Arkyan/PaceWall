@@ -68,7 +68,7 @@ pub fn options(kind: &str) -> &'static [Opt] {
         ],
         "session" => &[Opt { id: "weather", label: "Météo", kind: Bool(true) }],
         "trackmap" => &[
-            Opt { id: "size", label: "Taille de la carte", kind: Num { min: 160.0, max: 420.0, step: 10.0, def: 260.0 } },
+            Opt { id: "size", label: "Taille de la carte", kind: Num { min: 160.0, max: 460.0, step: 10.0, def: 300.0 } },
             Opt { id: "rotate", label: "Rotation", kind: Choice(&[("0", "0°"), ("90", "90°"), ("180", "180°"), ("270", "270°")], "0") },
             Opt { id: "others", label: "Afficher les autres voitures", kind: Bool(true) },
         ],
@@ -560,16 +560,30 @@ struct MapCar {
     pit: bool,
 }
 
-fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
-    let size = spec.num("size", 260.0).clamp(160.0, 420.0) as f32;
-    let (w, h) = (size, size + 16.0);
-    if d.measuring() {
-        return (w, h);
+/// Lissage de Chaikin d'une boucle fermée : adoucit les angles des points enregistrés.
+fn smooth_loop(p: &[[f32; 2]], rounds: u32) -> Vec<[f32; 2]> {
+    let mut cur = p.to_vec();
+    for _ in 0..rounds {
+        let n = cur.len();
+        if n < 3 {
+            break;
+        }
+        let mut next = Vec::with_capacity(n * 2);
+        for i in 0..n {
+            let (a, b) = (cur[i], cur[(i + 1) % n]);
+            next.push([0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]]);
+            next.push([0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]]);
+        }
+        cur = next;
     }
-    d.card(w, h);
+    cur
+}
+
+fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
+    let size = spec.num("size", 300.0).clamp(160.0, 460.0) as f32;
+    let k = (size / 300.0).clamp(0.7, 1.4); // épaisseur du tracé et taille des voitures suivent la taille
+    let w = size;
     let track = data.text("session.track").to_string();
-    d.label(16.0, 10.0, "Carte", MUTED);
-    d.label_right(w - 16.0, 10.0, &track, ACCENT);
 
     // Carte : enregistrée pendant un tour propre (voir pwcore::trackmap), lue sur le disque.
     let demo = data.flag("demo.map");
@@ -584,6 +598,31 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         st.map = Some((key, loaded));
     }
     let map = st.map.as_ref().and_then(|(_, m)| m.as_ref());
+
+    let angle = (spec.num("rotate", 0.0) as f32).to_radians();
+    let (sin, cos) = angle.sin_cos();
+    let rot = |p: [f32; 2]| [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos];
+    let pts: Vec<[f32; 2]> = map.map(|m| m.points.iter().map(|&p| rot(p)).collect()).unwrap_or_default();
+    let (mut min, mut max) = ([f32::MAX; 2], [f32::MIN; 2]);
+    for p in &pts {
+        for a in 0..2 {
+            min[a] = min[a].min(p[a]);
+            max[a] = max[a].max(p[a]);
+        }
+    }
+    let (bw, bh) = ((max[0] - min[0]).max(1.0), (max[1] - min[1]).max(1.0));
+
+    // La carte prend la forme du circuit : plus de grand vide pour un tracé allongé.
+    let (ax, ay, aw) = (14.0, 32.0, w - 28.0);
+    let aspect = if pts.is_empty() { 1.0 } else { (bh / bw).clamp(0.5, 1.15) };
+    let ah = aw * aspect;
+    let h = ay + ah + 16.0;
+    if d.measuring() {
+        return (w, h);
+    }
+    d.card(w, h);
+    d.label(16.0, 10.0, "Carte", MUTED);
+    d.label_right(w - 16.0, 10.0, &track, ACCENT);
 
     let n = (data.f("session.vehicles", 0.0) as usize).min(104);
     let show_others = spec.flag("others", true);
@@ -602,75 +641,66 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         })
         .collect();
 
-    let (ax, ay, aw, ah) = (16.0, 32.0, w - 32.0, h - 32.0 - 14.0);
-    let angle = (spec.num("rotate", 0.0) as f32).to_radians();
-    let (sin, cos) = angle.sin_cos();
-    let rot = |p: [f32; 2]| [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos];
-
+    let outline = Color32::from_rgba_unmultiplied(6, 8, 12, 230);
     let dot = |c: &MapCar, x: f32, y: f32| {
         if c.me {
-            d.circle(x, y, 6.5, ACCENT, Some((1.5, TEXT)));
+            d.circle(x, y, 11.0 * k, Color32::from_rgba_unmultiplied(25, 211, 243, 55), None);
+            d.circle(x, y, 6.5 * k, ACCENT, Some((2.0 * k, TEXT)));
         } else {
             let col = if c.pit { MUTED } else { class_color(&c.class) };
-            d.fill(x - 3.5, y - 3.5, 7.0, 7.0, col);
+            d.circle(x, y, 4.6 * k, col, Some((1.4, outline)));
         }
     };
+    // Route : liseré clair, asphalte sombre, filet central.
+    let road = |line: &[(f32, f32)]| {
+        d.line(line, 12.0 * k, Color32::from_rgb(112, 125, 146));
+        d.line(line, 8.0 * k, Color32::from_rgb(30, 36, 46));
+        d.line(line, 1.2, Color32::from_white_alpha(38));
+    };
+    // Ligne de départ en travers de la route, et chevron pour le sens de roulage.
+    let start = |at: (f32, f32), dir: (f32, f32)| {
+        let len = (dir.0 * dir.0 + dir.1 * dir.1).sqrt().max(0.001);
+        let (tx, ty) = (dir.0 / len, dir.1 / len);
+        let (nx, ny) = (-ty * 8.0 * k, tx * 8.0 * k);
+        d.line(&[(at.0 - nx, at.1 - ny), (at.0 + nx, at.1 + ny)], 3.5 * k, TEXT);
+        let tip = (at.0 + tx * 15.0 * k, at.1 + ty * 15.0 * k);
+        let back = 5.0 * k;
+        d.line(&[(tip.0 - tx * back - ty * back, tip.1 - ty * back + tx * back), tip, (tip.0 - tx * back + ty * back, tip.1 - ty * back - tx * back)], 2.0, ACCENT);
+    };
 
-    match map {
-        Some(map) => {
-            let pts: Vec<[f32; 2]> = map.points.iter().map(|&p| rot(p)).collect();
-            let (mut min, mut max) = ([f32::MAX; 2], [f32::MIN; 2]);
-            for p in &pts {
-                for k in 0..2 {
-                    min[k] = min[k].min(p[k]);
-                    max[k] = max[k].max(p[k]);
-                }
-            }
-            let (bw, bh) = ((max[0] - min[0]).max(1.0), (max[1] - min[1]).max(1.0));
-            let scale = (aw / bw).min(ah / bh);
-            let (ox, oy) = (ax + (aw - bw * scale) / 2.0, ay + (ah - bh * scale) / 2.0);
-            let to_screen = |p: [f32; 2]| (ox + (p[0] - min[0]) * scale, oy + (p[1] - min[1]) * scale);
+    if map.is_some() && pts.len() > 2 {
+        let scale = (aw / bw).min(ah / bh);
+        let (ox, oy) = (ax + (aw - bw * scale) / 2.0, ay + (ah - bh * scale) / 2.0);
+        let to_screen = |p: [f32; 2]| (ox + (p[0] - min[0]) * scale, oy + (p[1] - min[1]) * scale);
 
-            let mut line: Vec<(f32, f32)> = pts.iter().map(|&p| to_screen(p)).collect();
-            if let Some(&first) = line.first() {
-                line.push(first);
-            }
-            d.line(&line, 9.0, Color32::from_white_alpha(18));
-            d.line(&line, 2.5, Color32::from_rgb(190, 200, 215));
-            // Ligne de départ : perpendiculaire au premier segment.
-            if line.len() > 2 {
-                let (a, b) = (line[0], line[2]);
-                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-                let len = (dx * dx + dy * dy).sqrt().max(0.001);
-                let (nx, ny) = (-dy / len * 8.0, dx / len * 8.0);
-                d.line(&[(a.0 - nx, a.1 - ny), (a.0 + nx, a.1 + ny)], 3.0, TEXT);
-            }
-            // Les autres d'abord, le joueur par-dessus.
-            for c in cars.iter().filter(|c| !c.me).chain(cars.iter().filter(|c| c.me)) {
-                let (x, y) = to_screen(rot(c.xy));
-                dot(c, x, y);
-            }
+        let mut line: Vec<(f32, f32)> = smooth_loop(&pts, 2).into_iter().map(to_screen).collect();
+        line.push(line[0]);
+        road(&line);
+        let (a, b) = (to_screen(pts[0]), to_screen(pts[1]));
+        start(a, (b.0 - a.0, b.1 - a.1));
+        // Les autres d'abord, le joueur par-dessus.
+        for c in cars.iter().filter(|c| !c.me).chain(cars.iter().filter(|c| c.me)) {
+            let (x, y) = to_screen(rot(c.xy));
+            dot(c, x, y);
         }
-        None => {
-            // Pas encore de carte : un cercle, avec les voitures placées selon leur distance dans le tour.
-            let r = (aw.min(ah) / 2.0 - 6.0).max(20.0);
-            let (cx, cy) = (ax + aw / 2.0, ay + ah / 2.0);
-            let circle: Vec<(f32, f32)> = (0..=72)
-                .map(|i| {
-                    let a = i as f32 / 72.0 * std::f32::consts::TAU;
-                    (cx + r * a.cos(), cy + r * a.sin())
-                })
-                .collect();
-            d.line(&circle, 9.0, Color32::from_white_alpha(18));
-            d.line(&circle, 2.5, Color32::from_rgb(190, 200, 215));
-            d.line(&[(cx - 8.0, cy - r), (cx + 8.0, cy - r)], 3.0, TEXT);
-            let length = data.f("session.track_length", 0.0).max(1.0);
-            for c in cars.iter().filter(|c| !c.me).chain(cars.iter().filter(|c| c.me)) {
-                let a = -std::f32::consts::FRAC_PI_2 + (c.lap_dist / length) as f32 * std::f32::consts::TAU;
-                dot(c, cx + r * a.cos(), cy + r * a.sin());
-            }
-            d.text(w / 2.0, h - 20.0, "Un tour propre trace la carte", 10.5, MUTED, Font::Ui, HAlign::Center);
+    } else {
+        // Pas encore de carte : un cercle, avec les voitures placées selon leur distance dans le tour.
+        let r = (aw.min(ah) / 2.0 - 8.0).max(20.0);
+        let (cx, cy) = (ax + aw / 2.0, ay + ah / 2.0);
+        let circle: Vec<(f32, f32)> = (0..=72)
+            .map(|i| {
+                let a = i as f32 / 72.0 * std::f32::consts::TAU;
+                (cx + r * a.cos(), cy + r * a.sin())
+            })
+            .collect();
+        road(&circle);
+        start((cx, cy - r), (1.0, 0.0));
+        let length = data.f("session.track_length", 0.0).max(1.0);
+        for c in cars.iter().filter(|c| !c.me).chain(cars.iter().filter(|c| c.me)) {
+            let a = -std::f32::consts::FRAC_PI_2 + (c.lap_dist / length) as f32 * std::f32::consts::TAU;
+            dot(c, cx + r * a.cos(), cy + r * a.sin());
         }
+        d.text(w / 2.0, h - 20.0, "Un tour propre trace la carte", 10.5, MUTED, Font::Ui, HAlign::Center);
     }
     (w, h)
 }

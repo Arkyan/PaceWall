@@ -339,16 +339,17 @@ PW.widgets.session = {
 PW.widgets.trackmap = {
   name: 'Carte du circuit',
   keys: ['grid.', 'session.track', 'session.vehicles', 'demo.map'],
-  hz: 5, size: [260, 276],
+  hz: 5, size: [300, 330],
   options: [
-    { id: 'size', label: 'Taille de la carte', type: 'number', min: 160, max: 420, step: 10, def: 260 },
+    { id: 'size', label: 'Taille de la carte', type: 'number', min: 160, max: 460, step: 10, def: 300 },
     { id: 'rotate', label: 'Rotation', type: 'select', choices: [['0', '0°'], ['90', '90°'], ['180', '180°'], ['270', '270°']], def: '0' },
     { id: 'others', label: 'Afficher les autres voitures', type: 'bool', def: true },
   ],
   mount(root, o) {
-    const S = +o.size || 260, W = S, H = S + 16, R = 2;
-    const card = PW.tpl(`<div class="pw-card" style="width:${W}px;height:${H}px;padding:0">
-      <canvas width="${W * R}" height="${H * R}" style="width:${W}px;height:${H}px;position:absolute;left:0;top:0"></canvas>
+    const W = +o.size || 300, K = Math.min(1.4, Math.max(0.7, W / 300)), R = 2;
+    const ax = 14, ay = 32, aw = W - 28, maxH = ay + aw * 1.15 + 16;
+    const card = PW.tpl(`<div class="pw-card" style="width:${W}px;height:${maxH}px;padding:0">
+      <canvas width="${W * R}" height="${maxH * R}" style="width:${W}px;height:${maxH}px;position:absolute;left:0;top:0"></canvas>
       <div class="pw-title" style="position:absolute;left:16px;right:16px;top:10px"><span>Carte</span><em data-k="trk"></em></div></div>`).firstChild;
     root.appendChild(card);
     const b = PW.bind(card), ctx = card.querySelector('canvas').getContext('2d');
@@ -358,6 +359,8 @@ PW.widgets.trackmap = {
 
     const demoMap = () => Array.from({ length: 360 }, (_, i) => { const a = i / 360 * Math.PI * 2; return [520 * Math.cos(a) + 130 * Math.cos(3 * a), 300 * Math.sin(a) + 90 * Math.sin(2 * a)]; });
     const colorOf = c => /hyper/i.test(c) ? '#e5393b' : /lmp2/i.test(c) ? '#2d7ff9' : /gt3/i.test(c) ? '#2fbf71' : /lmp3/i.test(c) ? '#a85cf2' : /gte/i.test(c) ? '#f2a93b' : '#7b8494';
+    // Lissage de Chaikin d'une boucle fermée.
+    const smooth = (p, rounds) => { let c = p; for (let r = 0; r < rounds && c.length > 2; r++) { const n = []; for (let i = 0; i < c.length; i++) { const a = c[i], d = c[(i + 1) % c.length]; n.push([.75 * a[0] + .25 * d[0], .75 * a[1] + .25 * d[1]], [.25 * a[0] + .75 * d[0], .25 * a[1] + .75 * d[1]]); } c = n; } return c; };
 
     return {
       update(g) {
@@ -375,28 +378,45 @@ PW.widgets.trackmap = {
           const me = !!g(p + '.is_player'); if (!me && !o.others) continue;
           cars.push({ xy: [x, -z], d: g(p + '.lap_dist', 0), cls: g(p + '.class', ''), me, pit: !!g(p + '.in_pits') });
         }
-        const ax = 16, ay = 32, aw = W - 32, ah = H - 32 - 14;
-        ctx.setTransform(R, 0, 0, R, 0, 0); ctx.clearRect(0, 0, W, H);
+        const pts = map ? map.map(rot) : [];
+        let minx = 0, miny = 0, bw = 1, bh = 1;
+        if (pts.length) { const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); minx = Math.min(...xs); miny = Math.min(...ys); bw = Math.max(1, Math.max(...xs) - minx); bh = Math.max(1, Math.max(...ys) - miny); }
+        const ah = aw * (pts.length ? Math.min(1.15, Math.max(0.5, bh / bw)) : 1), H = ay + ah + 16;
+        card.style.height = H + 'px';
+        ctx.setTransform(R, 0, 0, R, 0, 0); ctx.clearRect(0, 0, W, maxH);
         const dot = (c, x, y) => {
-          if (c.me) { ctx.beginPath(); ctx.arc(x, y, 6.5, 0, 7); ctx.fillStyle = '#19d3f3'; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#e8edf4'; ctx.stroke(); }
-          else { ctx.fillStyle = c.pit ? '#7f8a9a' : colorOf(c.cls); ctx.fillRect(x - 3.5, y - 3.5, 7, 7); }
+          if (c.me) {
+            ctx.beginPath(); ctx.arc(x, y, 11 * K, 0, 7); ctx.fillStyle = 'rgba(25,211,243,.22)'; ctx.fill();
+            ctx.beginPath(); ctx.arc(x, y, 6.5 * K, 0, 7); ctx.fillStyle = '#19d3f3'; ctx.fill(); ctx.lineWidth = 2 * K; ctx.strokeStyle = '#e8edf4'; ctx.stroke();
+          } else {
+            ctx.beginPath(); ctx.arc(x, y, 4.6 * K, 0, 7); ctx.fillStyle = c.pit ? '#7f8a9a' : colorOf(c.cls); ctx.fill(); ctx.lineWidth = 1.4; ctx.strokeStyle = 'rgba(6,8,12,.9)'; ctx.stroke();
+          }
         };
         const order = cars.filter(c => !c.me).concat(cars.filter(c => c.me));
-        const path = pts => { ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); };
-        const stroke = pts => { path(pts); ctx.lineJoin = 'round'; ctx.lineWidth = 9; ctx.strokeStyle = 'rgba(255,255,255,.07)'; ctx.stroke(); ctx.lineWidth = 2.5; ctx.strokeStyle = '#bec8d7'; ctx.stroke(); };
-        if (map) {
-          const pts = map.map(rot);
-          const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
-          const minx = Math.min(...xs), miny = Math.min(...ys), bw = Math.max(1, Math.max(...xs) - minx), bh = Math.max(1, Math.max(...ys) - miny);
+        const road = pts2 => {
+          ctx.beginPath(); pts2.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath();
+          ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+          ctx.lineWidth = 12 * K; ctx.strokeStyle = '#707d92'; ctx.stroke();
+          ctx.lineWidth = 8 * K; ctx.strokeStyle = '#1e242e'; ctx.stroke();
+          ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(255,255,255,.15)'; ctx.stroke();
+        };
+        const start = (a, dir) => {
+          const l = Math.hypot(dir[0], dir[1]) || 1, tx = dir[0] / l, ty = dir[1] / l, nx = -ty * 8 * K, ny = tx * 8 * K;
+          ctx.lineCap = 'butt'; ctx.beginPath(); ctx.moveTo(a[0] - nx, a[1] - ny); ctx.lineTo(a[0] + nx, a[1] + ny); ctx.lineWidth = 3.5 * K; ctx.strokeStyle = '#e8edf4'; ctx.stroke();
+          const t = [a[0] + tx * 15 * K, a[1] + ty * 15 * K], bk = 5 * K;
+          ctx.beginPath(); ctx.moveTo(t[0] - tx * bk - ty * bk, t[1] - ty * bk + tx * bk); ctx.lineTo(t[0], t[1]); ctx.lineTo(t[0] - tx * bk + ty * bk, t[1] - ty * bk - tx * bk);
+          ctx.lineWidth = 2; ctx.strokeStyle = '#19d3f3'; ctx.stroke();
+        };
+        if (pts.length > 2) {
           const s = Math.min(aw / bw, ah / bh), ox = ax + (aw - bw * s) / 2, oy = ay + (ah - bh * s) / 2;
           const to = p => [ox + (p[0] - minx) * s, oy + (p[1] - miny) * s];
-          const sp = pts.map(to); stroke(sp);
-          if (sp.length > 2) { const [a, c] = [sp[0], sp[2]], dx = c[0] - a[0], dy = c[1] - a[1], l = Math.hypot(dx, dy) || 1, nx = -dy / l * 8, ny = dx / l * 8; ctx.beginPath(); ctx.moveTo(a[0] - nx, a[1] - ny); ctx.lineTo(a[0] + nx, a[1] + ny); ctx.lineWidth = 3; ctx.strokeStyle = '#e8edf4'; ctx.stroke(); }
+          road(smooth(pts, 2).map(to));
+          const a = to(pts[0]), c = to(pts[1]); start(a, [c[0] - a[0], c[1] - a[1]]);
           order.forEach(c => { const p = to(rot(c.xy)); dot(c, p[0], p[1]); });
         } else {
-          const r = Math.max(20, Math.min(aw, ah) / 2 - 6), cx = ax + aw / 2, cy = ay + ah / 2;
-          stroke(Array.from({ length: 72 }, (_, i) => [cx + r * Math.cos(i / 72 * 6.2832), cy + r * Math.sin(i / 72 * 6.2832)]));
-          ctx.beginPath(); ctx.moveTo(cx - 8, cy - r); ctx.lineTo(cx + 8, cy - r); ctx.lineWidth = 3; ctx.strokeStyle = '#e8edf4'; ctx.stroke();
+          const r = Math.max(20, Math.min(aw, ah) / 2 - 8), cx = ax + aw / 2, cy = ay + ah / 2;
+          road(Array.from({ length: 72 }, (_, i) => [cx + r * Math.cos(i / 72 * 6.2832), cy + r * Math.sin(i / 72 * 6.2832)]));
+          start([cx, cy - r], [1, 0]);
           const len = Math.max(1, g('session.track_length', 1));
           order.forEach(c => { const a = -Math.PI / 2 + c.d / len * 6.2832; dot(c, cx + r * Math.cos(a), cy + r * Math.sin(a)); });
           ctx.fillStyle = '#7f8a9a'; ctx.font = '10.5px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Un tour propre trace la carte', W / 2, H - 14);
