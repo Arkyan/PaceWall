@@ -5,6 +5,7 @@
 //! moment où on se branche est ignoré (« partiel »), sauf si on démarre dans les premiers mètres.
 
 use crate::db::{self, NewLap, NewSession};
+use crate::live::AliveCheck;
 use crate::pulse::Pulse;
 use crate::trackmap::{self, Builder, SectorLearner};
 use lmu::reader::{c_str, Reader};
@@ -48,12 +49,14 @@ pub fn run() {
     let mut map: Option<MapState> = None;
     let mut building = false;
     let mut pulse = Pulse::new();
+    let mut alive = AliveCheck::default();
     let mut last_change = Instant::now();
 
     loop {
         if reader.is_none() {
             reader = Reader::open();
             pulse.reset();
+            alive.reset();
             if reader.is_none() {
                 std::thread::sleep(Duration::from_secs(3));
                 continue;
@@ -63,8 +66,8 @@ pub fn run() {
         if pulse.changed(r) {
             last_change = Instant::now();
             building = sample(&conn, r, r.events().SME_START_SESSION, &mut session, &mut map);
-        } else if last_change.elapsed() > Duration::from_secs(3) {
-            // Jeu fermé ou en pause longue : on clôt la session.
+        } else if last_change.elapsed() > Duration::from_secs(3) && !alive.alive() {
+            // Jeu fermé : on clôt la session. (En pause, la session reste ouverte : le jeu reprendra où il en était.)
             if let Some(s) = session.take() {
                 db::end_session(&conn, s.id);
             }

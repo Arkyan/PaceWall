@@ -16,10 +16,66 @@ pub enum Update {
     Unchanged,
 }
 
+/// Le programme du jeu tourne-t-il ? Un jeu en pause ne publie plus rien mais n'est pas absent : c'est ce qui les distingue.
+/// Si la liste des processus est illisible, on suppose qu'il tourne.
+pub fn process_alive() -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return true };
+        let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut found = false;
+        if Process32FirstW(snap, &mut entry).is_ok() {
+            loop {
+                let len = entry.szExeFile.iter().position(|c| *c == 0).unwrap_or(entry.szExeFile.len());
+                let name = String::from_utf16_lossy(&entry.szExeFile[..len]).to_lowercase();
+                // « fakegame » : le faux jeu des essais de développement.
+                if name == "le mans ultimate.exe" || name == "lmu.exe" || name == "fakegame.exe" {
+                    found = true;
+                    break;
+                }
+                if Process32NextW(snap, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+        let _ = CloseHandle(snap);
+        found
+    }
+}
+
+/// Vérifie `process_alive` au plus une fois par seconde.
+pub struct AliveCheck {
+    last: Instant,
+    alive: bool,
+}
+
+impl Default for AliveCheck {
+    fn default() -> Self {
+        Self { last: Instant::now(), alive: true }
+    }
+}
+
+impl AliveCheck {
+    pub fn alive(&mut self) -> bool {
+        if self.last.elapsed() >= Duration::from_secs(1) {
+            self.last = Instant::now();
+            self.alive = process_alive();
+        }
+        self.alive
+    }
+
+    /// À appeler quand le jeu vient d'être (re)trouvé.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 pub struct Live {
     reader: Option<Reader>,
     strategy: Strategy,
     pulse: Pulse,
+    alive: AliveCheck,
     /// Le jeu a publié du neuf que personne n'a encore lu (la lecture complète n'est faite que sur demande).
     pending: bool,
     last_change: Instant,
@@ -39,6 +95,7 @@ impl Live {
             reader: None,
             strategy: Strategy::default(),
             pulse: Pulse::new(),
+            alive: AliveCheck::default(),
             pending: false,
             last_change: Instant::now(),
             last_open: Instant::now() - Duration::from_secs(10),
@@ -62,6 +119,7 @@ impl Live {
             self.last_open = Instant::now();
             self.reader = Reader::open();
             self.pulse.reset();
+            self.alive.reset();
             self.strategy = Strategy::default();
             if self.reader.is_none() {
                 return self.absent();
@@ -79,7 +137,8 @@ impl Live {
             self.strategy.update(&mut fields);
             return Update::Data(Data::new(fields));
         }
-        if self.last_change.elapsed() > Duration::from_secs(3) {
+        // Plus rien ne bouge : jeu en pause (on garde la zone et les dernières données) ou jeu fermé (on la lâche).
+        if self.last_change.elapsed() > Duration::from_secs(3) && !self.alive.alive() {
             self.reader = None;
             self.pending = false;
             return self.absent();
@@ -105,5 +164,5 @@ impl Live {
 
 /// Le jeu a-t-il créé sa zone mémoire ? (test d'existence, quasi gratuit)
 pub fn game_running() -> bool {
-    Reader::open().is_some()
+    process_alive() && Reader::open().is_some()
 }
