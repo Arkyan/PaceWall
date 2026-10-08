@@ -62,11 +62,24 @@ pub struct D<'a> {
     a: f32,
     /// Opacité du fond de la carte (0..1).
     bg: f32,
+    /// Couleur d'accent du widget et présence de la barre latérale de la carte.
+    accent: Color32,
+    bar: bool,
 }
 
 impl<'a> D<'a> {
     pub fn new(canvas: &'a mut dyn Canvas, origin: (f32, f32), scale: f32, opacity: f32, bg: f32) -> Self {
-        Self { c: RefCell::new(canvas), o: origin, s: scale, a: opacity, bg }
+        Self { c: RefCell::new(canvas), o: origin, s: scale, a: opacity, bg, accent: ACCENT, bar: true }
+    }
+
+    pub fn styled(mut self, accent: Color32, bar: bool) -> Self {
+        self.accent = accent;
+        self.bar = bar;
+        self
+    }
+
+    pub fn accent(&self) -> Color32 {
+        self.accent
     }
 
     fn col(&self, c: Color32) -> Color32 {
@@ -123,7 +136,9 @@ impl<'a> D<'a> {
         let pts: Vec<(f32, f32)> = [(0.0, 0.0), (w - cut, 0.0), (w, cut), (w, h), (0.0, h)].iter().map(|&(x, y)| self.pt(x, y)).collect();
         let fill = Color32::from_rgba_unmultiplied(8, 11, 16, (self.bg * 255.0) as u8);
         self.c.borrow_mut().polygon(&pts, self.col(fill), Some((1.0, self.col(Color32::from_white_alpha(23)))));
-        self.fill(0.0, 0.0, 3.0, h, ACCENT);
+        if self.bar {
+            self.fill(0.0, 0.0, 3.0, h, self.accent);
+        }
     }
 
     /// Jauge segmentée de `w` × `h`, remplie à `frac` (0..1).

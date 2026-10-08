@@ -90,6 +90,8 @@
   PW.saveLayouts = async layouts => (await fetch('/api/layouts', { method: 'PUT', body: JSON.stringify(layouts) })).ok;
 
   PW.optionDefs = def => [...(def.options || []), ...PW.commonOptions];
+  PW.ACCENTS = { cyan: '#19d3f3', white: '#e8edf4', orange: '#ff9628', green: '#38e07b', red: '#ff4d5e', violet: '#a870ff', pink: '#ff6abe', yellow: '#ffd633' };
+  PW.accentHex = id => PW.ACCENTS[id] || PW.ACCENTS.cyan;
   PW.resolveOpts = (def, saved) => {
     const o = {};
     for (const d of PW.optionDefs(def)) o[d.id] = saved && saved[d.id] !== undefined ? saved[d.id] : d.def;
@@ -129,6 +131,8 @@
         el.className = 'pw-w' + (selected === s.id ? ' sel' : '');
         el.dataset.id = s.id;
         const opts = PW.resolveOpts(def, s.opts);
+        el.style.setProperty('--pw-accent', PW.accentHex(s.opts && s.opts.accent));
+        if (s.opts && s.opts.bar === false) el.classList.add('nobar');
         const inst = def.mount(el, opts);
         const it = { spec: s, def, el, inst, opts };
         place(it);

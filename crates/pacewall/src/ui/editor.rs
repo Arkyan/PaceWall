@@ -225,7 +225,7 @@ impl State {
             let st = self.states.entry(spec.id.clone()).or_default();
             let (bw, bh) = {
                 let mut canvas = EguiCanvas { painter: &painter };
-                let d = D::new(&mut canvas, (origin.x, origin.y), scale, spec.opacity, widgets::bg(&spec));
+                let d = D::new(&mut canvas, (origin.x, origin.y), scale, spec.opacity, widgets::bg(&spec)).styled(widgets::accent(&spec), widgets::bar(&spec));
                 widgets::draw(&spec.kind, &d, &spec, data, st, now)
             };
             let rect = Rect::from_min_size(origin, vec2(bw, bh) * scale);
@@ -269,7 +269,7 @@ impl State {
         };
 
         let mut changed = false;
-        let (mut duplicate, mut remove) = (false, false);
+        let (mut duplicate, mut remove, mut apply_all) = (false, false, false);
         {
             let spec = &mut layout.widgets[idx];
             kit::section(ui, widgets::name(&spec.kind));
@@ -281,6 +281,29 @@ impl State {
                 spec.opts.insert("bg".into(), json!(bg.round()));
                 changed = true;
             }
+            ui.add_space(8.0);
+            ui.label(RichText::new("Couleur d'accent").size(12.0).color(MUTED));
+            let cur = spec.choice("accent", "cyan").to_string();
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                for (id, label, col) in widgets::ACCENTS {
+                    let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+                    ui.painter().rect_filled(rect, 0.0, *col);
+                    if cur == *id {
+                        ui.painter().rect_stroke(rect.expand(2.0), 0.0, Stroke::new(1.5, TEXT), StrokeKind::Outside);
+                    }
+                    if resp.on_hover_text(*label).clicked() {
+                        spec.opts.insert("accent".into(), json!(id));
+                        changed = true;
+                    }
+                }
+            });
+            let mut bar = spec.flag("bar", true);
+            if ui.checkbox(&mut bar, "Barre d'accent sur le côté").changed() {
+                spec.opts.insert("bar".into(), json!(bar));
+                changed = true;
+            }
+            apply_all = ui.button("Appliquer le style à tous").clicked();
             ui.add_space(6.0);
             for opt in widgets::options(&spec.kind) {
                 match &opt.kind {
@@ -323,6 +346,22 @@ impl State {
             ui.label(RichText::new(format!("Position : {:.0} % × {:.0} %", spec.x * 100.0, spec.y * 100.0)).size(12.0).color(MUTED));
         }
 
+        if apply_all {
+            let style: Vec<(&str, Option<serde_json::Value>)> = ["accent", "bar"].iter().map(|k| (*k, layout.widgets[idx].opts.get(*k).cloned())).collect();
+            for w in layout.widgets.iter_mut() {
+                for (k, v) in &style {
+                    match v {
+                        Some(v) => {
+                            w.opts.insert((*k).into(), v.clone());
+                        }
+                        None => {
+                            w.opts.remove(*k);
+                        }
+                    }
+                }
+            }
+            changed = true;
+        }
         if duplicate {
             let mut copy = layout.widgets[idx].clone();
             let mut new_id = format!("{}-copie", copy.id);

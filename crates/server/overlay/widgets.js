@@ -347,7 +347,7 @@ PW.widgets.trackmap = {
     { id: 'numbers', label: 'Numéro dans les pastilles', type: 'select', choices: [['class', 'Place en classe'], ['overall', 'Place au général'], ['none', 'Aucun']], def: 'class' },
   ],
   mount(root, o) {
-    const W = +o.size || 300, K = Math.min(1.4, Math.max(0.7, W / 300)), R = 2;
+    const AC = (getComputedStyle(root).getPropertyValue('--pw-accent') || '').trim() || '#19d3f3', W = +o.size || 300, K = Math.min(1.4, Math.max(0.7, W / 300)), R = 2;
     const ax = 14, ay = 32, aw = W - 28, maxH = ay + aw * 1.15 + 34;
     const card = PW.tpl(`<div class="pw-card" style="width:${W}px;height:${maxH}px;padding:0">
       <canvas width="${W * R}" height="${maxH * R}" style="width:${W}px;height:${maxH}px;position:absolute;left:0;top:0"></canvas>
@@ -393,8 +393,8 @@ PW.widgets.trackmap = {
           const num = mode === 'none' ? 0 : mode === 'overall' ? c.place : c.rank;
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           if (c.me) {
-            ctx.beginPath(); ctx.arc(x, y, 14 * K, 0, 7); ctx.fillStyle = 'rgba(25,211,243,.22)'; ctx.fill();
-            ctx.beginPath(); ctx.arc(x, y, 9 * K, 0, 7); ctx.fillStyle = '#19d3f3'; ctx.fill(); ctx.lineWidth = 2 * K; ctx.strokeStyle = '#e8edf4'; ctx.stroke();
+            ctx.beginPath(); ctx.arc(x, y, 14 * K, 0, 7); ctx.globalAlpha = .22; ctx.fillStyle = AC; ctx.fill(); ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(0,0,0,0)'; ctx.fill();
+            ctx.beginPath(); ctx.arc(x, y, 9 * K, 0, 7); ctx.fillStyle = AC; ctx.fill(); ctx.lineWidth = 2 * K; ctx.strokeStyle = '#e8edf4'; ctx.stroke();
             if (num > 0) { ctx.fillStyle = '#031014'; ctx.font = `700 ${12 * K}px Consolas, monospace`; ctx.fillText(num, x, y + 0.5); }
           } else {
             ctx.beginPath(); ctx.arc(x, y, (num > 0 ? 7 : 4.6) * K, 0, 7); ctx.fillStyle = c.pit ? '#7f8a9a' : colorOf(c.cls); ctx.fill(); ctx.lineWidth = 1.4; ctx.strokeStyle = 'rgba(6,8,12,.9)'; ctx.stroke();
@@ -415,7 +415,7 @@ PW.widgets.trackmap = {
           ctx.lineCap = 'butt'; ctx.beginPath(); ctx.moveTo(a[0] - nx, a[1] - ny); ctx.lineTo(a[0] + nx, a[1] + ny); ctx.lineWidth = 3.5 * K; ctx.strokeStyle = '#e8edf4'; ctx.stroke();
           const t = [a[0] + tx * 15 * K, a[1] + ty * 15 * K], bk = 5 * K;
           ctx.beginPath(); ctx.moveTo(t[0] - tx * bk - ty * bk, t[1] - ty * bk + tx * bk); ctx.lineTo(t[0], t[1]); ctx.lineTo(t[0] - tx * bk + ty * bk, t[1] - ty * bk - tx * bk);
-          ctx.lineWidth = 2; ctx.strokeStyle = '#19d3f3'; ctx.stroke();
+          ctx.lineWidth = 2; ctx.strokeStyle = AC; ctx.stroke();
         };
         if (pts.length > 2) {
           const s = Math.min(aw / bw, ah / bh), ox = ax + (aw - bw * s) / 2, oy = ay + (ah - bh * s) / 2;
@@ -432,7 +432,7 @@ PW.widgets.trackmap = {
           ctx.fillStyle = '#7f8a9a'; ctx.font = '10.5px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Un tour propre trace la carte', W / 2, cy);
         }
         if (mine && mine.place > 0) {
-          ctx.textAlign = 'left'; ctx.fillStyle = '#19d3f3'; ctx.font = '700 16px Consolas, monospace'; ctx.fillText('P' + mine.place, 16, H - 12);
+          ctx.textAlign = 'left'; ctx.fillStyle = AC; ctx.font = '700 16px Consolas, monospace'; ctx.fillText('P' + mine.place, 16, H - 12);
           ctx.textAlign = 'right'; ctx.fillStyle = colorOf(mine.cls); ctx.font = '600 11px sans-serif'; ctx.fillText(mine.cls.toUpperCase() + ' · P' + mine.rank, W - 16, H - 12);
         }
       },

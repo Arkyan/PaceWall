@@ -77,6 +77,28 @@ pub fn options(kind: &str) -> &'static [Opt] {
     }
 }
 
+/// Couleurs d'accent proposées : (identifiant enregistré, libellé, couleur). Les mêmes sont dans runtime.js.
+pub const ACCENTS: &[(&str, &str, Color32)] = &[
+    ("cyan", "Cyan", Color32::from_rgb(25, 211, 243)),
+    ("white", "Blanc", Color32::from_rgb(232, 237, 244)),
+    ("orange", "Orange", Color32::from_rgb(255, 150, 40)),
+    ("green", "Vert", Color32::from_rgb(56, 224, 123)),
+    ("red", "Rouge", Color32::from_rgb(255, 77, 94)),
+    ("violet", "Violet", Color32::from_rgb(168, 112, 255)),
+    ("pink", "Rose", Color32::from_rgb(255, 106, 190)),
+    ("yellow", "Jaune", Color32::from_rgb(255, 214, 51)),
+];
+
+pub fn accent(spec: &WidgetSpec) -> Color32 {
+    let id = spec.choice("accent", "cyan");
+    ACCENTS.iter().find(|a| a.0 == id).map(|a| a.2).unwrap_or(ACCENT)
+}
+
+/// Barre latérale d'accent de la carte (réglage commun).
+pub fn bar(spec: &WidgetSpec) -> bool {
+    spec.flag("bar", true)
+}
+
 /// Opacité du fond en pourcentage : réglage commun à tous les widgets.
 pub fn bg(spec: &WidgetSpec) -> f32 {
     (spec.num("bg", 78.0) / 100.0) as f32
@@ -156,7 +178,7 @@ fn resource(
     let x0 = 16.0;
     d.label(x0, y0 + 10.0, title, MUTED);
     if limiting {
-        d.label_right(w - 16.0, y0 + 10.0, "limitant", ACCENT);
+        d.label_right(w - 16.0, y0 + 10.0, "limitant", d.accent());
     }
     let bw = d.text(x0, y0 + 24.0, &draw::n(level, 1), 34.0, TEXT, Font::Num, HAlign::Left);
     d.text(x0 + bw + 6.0, y0 + 42.0, unit, 13.0, MUTED, Font::Ui, HAlign::Left);
@@ -231,7 +253,7 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     d.card(w, h);
     d.label(16.0, 10.0, "Pneus", MUTED);
     let comp = if !data.text("tyre.front.compound").is_empty() { data.text("tyre.front.compound") } else { data.text("tyre.rear.compound") };
-    d.label_right(w - 16.0, 10.0, comp, ACCENT);
+    d.label_right(w - 16.0, 10.0, comp, d.accent());
 
     let names = ["fl", "fr", "rl", "rr"];
     let cw = (w - 30.0 - 8.0) / 2.0;
@@ -289,7 +311,7 @@ fn timing(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let rows = if gaps { 5 } else { 3 };
     let h = 66.0 + rows as f32 * 22.0 + 8.0;
     d.card(w, h);
-    d.fill(16.0, 10.0, 56.0, 38.0, ACCENT);
+    d.fill(16.0, 10.0, 56.0, 38.0, d.accent());
     let place = data.num("position.place").map(|p| format!("P{p:.0}")).unwrap_or_else(|| "P—".into());
     d.text(44.0, 14.0, &place, 28.0, ACCENT_INK, Font::Num, HAlign::Center);
     let delta = data.num("lap.delta_best");
@@ -362,7 +384,7 @@ fn inputs(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (
     let px = 16.0 + pedals.len() as f32 * 17.0 + 14.0;
     let gear = data.f("player.gear", 0.0) as i64;
     let g = if gear < 0 { "R".to_string() } else if gear == 0 { "N".to_string() } else { gear.to_string() };
-    d.text(px + 24.0, 30.0, &g, 54.0, ACCENT, Font::Num, HAlign::Center);
+    d.text(px + 24.0, 30.0, &g, 54.0, d.accent(), Font::Num, HAlign::Center);
     let kmh = data.f("player.speed", 0.0);
     let (v, unit) = if spec.flag("mph", false) { (kmh * 0.621371, "mph") } else { (kmh, "km/h") };
     let sx = px + 62.0;
@@ -464,7 +486,7 @@ fn standings(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     for (i, c) in cars.iter().skip(start).take(rows).enumerate() {
         let y = 30.0 + i as f32 * 24.0;
         if c.me {
-            d.fill(8.0, y, w - 8.0, 22.0, ACCENT.gamma_multiply(0.22));
+            d.fill(8.0, y, w - 8.0, 22.0, d.accent().gamma_multiply(0.22));
         }
         d.fill(8.0, y + 2.0, 3.0, 18.0, class_color(&c.class));
         let pos = if class_only { start + i + 1 } else { c.place as usize };
@@ -520,7 +542,7 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     }
     let y = 10.0 + top;
     d.label(16.0, y, data.text("session.track"), MUTED);
-    d.label_right(w - 16.0, y, session_name(data.f("session.type", -1.0) as i64), ACCENT);
+    d.label_right(w - 16.0, y, session_name(data.f("session.type", -1.0) as i64), d.accent());
     d.text(16.0, y + 16.0, &draw::hms(data.num("session.remaining")), 34.0, TEXT, Font::Num, HAlign::Left);
     let max = data.f("session.max_laps", 0.0);
     let left = data.num("strategy.race_laps_left");
@@ -625,7 +647,7 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
     }
     d.card(w, h);
     d.label(16.0, 10.0, "Carte", MUTED);
-    d.label_right(w - 16.0, 10.0, &track, ACCENT);
+    d.label_right(w - 16.0, 10.0, &track, d.accent());
 
     let n = (data.f("session.vehicles", 0.0) as usize).min(104);
     let show_others = spec.flag("others", true);
@@ -669,7 +691,7 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         let label = (num > 0).then(|| num.to_string());
         if c.me {
             d.circle(x, y, 14.0 * k, Color32::from_rgba_unmultiplied(25, 211, 243, 55), None);
-            d.circle(x, y, 9.0 * k, ACCENT, Some((2.0 * k, TEXT)));
+            d.circle(x, y, 9.0 * k, d.accent(), Some((2.0 * k, TEXT)));
             if let Some(l) = &label {
                 d.text(x, y - 6.0 * k, l, 12.0 * k, ACCENT_INK, Font::Num, HAlign::Center);
             }
@@ -696,7 +718,7 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         d.line(&[(at.0 - nx, at.1 - ny), (at.0 + nx, at.1 + ny)], 3.5 * k, TEXT);
         let tip = (at.0 + tx * 15.0 * k, at.1 + ty * 15.0 * k);
         let back = 5.0 * k;
-        d.line(&[(tip.0 - tx * back - ty * back, tip.1 - ty * back + tx * back), tip, (tip.0 - tx * back + ty * back, tip.1 - ty * back - tx * back)], 2.0, ACCENT);
+        d.line(&[(tip.0 - tx * back - ty * back, tip.1 - ty * back + tx * back), tip, (tip.0 - tx * back + ty * back, tip.1 - ty * back - tx * back)], 2.0, d.accent());
     };
 
     if map.is_some() && pts.len() > 2 {
@@ -736,7 +758,7 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
     // Pied : ma place au général et dans ma classe.
     if let Some((place, rank, class)) = me_info {
         if place > 0 {
-            d.text(16.0, h - 24.0, &format!("P{place}"), 16.0, ACCENT, Font::Num, HAlign::Left);
+            d.text(16.0, h - 24.0, &format!("P{place}"), 16.0, d.accent(), Font::Num, HAlign::Left);
             d.text(w - 16.0, h - 21.0, &format!("{} · P{rank}", class.to_uppercase()), 11.0, class_color(&class), Font::Ui, HAlign::Right);
         }
     }

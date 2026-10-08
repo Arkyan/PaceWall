@@ -97,7 +97,7 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 .pw-board td.n { font-weight: 500; letter-spacing: .02em; }
 .pw-board td.g { text-align: right; font-family: var(--pw-num); color: var(--pw-muted); }
 .pw-board tr { border-bottom: 1px solid rgba(255,255,255,.04); }
-.pw-board tr.me { background: linear-gradient(90deg, rgba(25,211,243,.22), rgba(25,211,243,.05)); font-weight: 700; }
+.pw-board tr.me { background: linear-gradient(90deg, color-mix(in srgb, var(--pw-accent) 22%, transparent), color-mix(in srgb, var(--pw-accent) 5%, transparent)); font-weight: 700; }
 .pw-board tr.me td.n { font-weight: 700; }
 .pw-board tr.pit td.n { color: var(--pw-muted); }
 
@@ -111,3 +111,5 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 /* Diagnostic de performance */
 .flat-nomask .pw-bar, .flat-nomask .pw-rpm, .flat-nomask .pw-pedal { -webkit-mask: none; mask: none; }
 .flat-noclip .pw-card { clip-path: none; }
+
+.pw-w.nobar .pw-card { border-left: 1px solid var(--pw-line); }

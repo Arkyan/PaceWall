@@ -298,7 +298,7 @@ pub fn run() {
                 let mut probe = widgets::WState::default();
                 let (bw, bh) = {
                     let mut measure = Measure;
-                    let d = D::new(&mut measure, (0.0, 0.0), scale, spec.opacity, bg);
+                    let d = D::new(&mut measure, (0.0, 0.0), scale, spec.opacity, bg).styled(widgets::accent(spec), widgets::bar(spec));
                     widgets::draw(&spec.kind, &d, spec, &data, &mut probe, time)
                 };
                 t_measure += t.elapsed();
@@ -316,7 +316,7 @@ pub fn run() {
                     bytes.fill(0);
                     if let Some(pm) = PixmapMut::from_bytes(bytes, pw as u32, ph as u32) {
                         let mut canvas = SoftCanvas { pm, fonts: &mut fonts };
-                        let d = D::new(&mut canvas, (0.0, 0.0), scale, spec.opacity, bg);
+                        let d = D::new(&mut canvas, (0.0, 0.0), scale, spec.opacity, bg).styled(widgets::accent(spec), widgets::bar(spec));
                         widgets::draw(&spec.kind, &d, spec, &data, &mut panel.state, time);
                     }
                     // tiny-skia écrit en RGBA prémultiplié ; la fenêtre attend du BGRA prémultiplié.
