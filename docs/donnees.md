@@ -37,7 +37,7 @@ Deux canaux, qui ne servent pas aux mêmes choses.
 | `scoring` | 1 632 | 126 832 | Session, météo, classement des 104 voitures, flux de résultats (64 Ko) |
 | `telemetry` | 128 464 | 196 356 | Télémétrie détaillée des 104 voitures |
 
-- **Quand ça change** : le jeu incrémente les compteurs de `generic.events`.
+- **Quand ça change** : ⚠️ relevé réel (LMU 14200, `pacewall.exe --probe`) : les compteurs de `generic.events` **restent figés** (valeur 16, 0 changement en 20 s). Les vrais témoins sont le temps de session `mCurrentET` (≈ 5 Hz) et le temps de la voiture `mElapsedTime` (≈ 20 Hz) : voir `pwcore::pulse`. Ancienne hypothèse, fausse : le jeu incrémente les compteurs de `generic.events`.
   `SME_UPDATE_TELEMETRY` et `SME_UPDATE_SCORING` augmentent à chaque publication. Si le compteur
   ne bouge plus, le jeu est en pause, fermé ou dans les menus. C'est le signal pour ralentir la lecture.
 - **Autres événements** : `SME_START_SESSION`, `SME_END_SESSION`, `SME_ENTER_REALTIME`,

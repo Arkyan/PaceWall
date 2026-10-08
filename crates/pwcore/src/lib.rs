@@ -13,6 +13,7 @@ pub mod layout;
 #[cfg(windows)]
 pub mod live;
 #[cfg(windows)]
+pub mod pulse;
 pub mod recorder;
 pub mod settings;
 pub mod strategy;

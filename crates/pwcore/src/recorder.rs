@@ -5,6 +5,7 @@
 //! moment où on se branche est ignoré (« partiel »), sauf si on démarre dans les premiers mètres.
 
 use crate::db::{self, NewLap, NewSession};
+use crate::pulse::Pulse;
 use crate::trackmap::{self, Builder};
 use lmu::reader::{c_str, Reader};
 use lmu::{ScoringInfo, VehicleScoring, VehicleTelemetry};
@@ -46,25 +47,22 @@ pub fn run() {
     // Carte du circuit : (circuit, constructeur tant qu'elle n'existe pas encore).
     let mut map: Option<(String, Option<Builder>)> = None;
     let mut building = false;
-    let mut last_update = u32::MAX;
+    let mut pulse = Pulse::new();
     let mut last_change = Instant::now();
 
     loop {
         if reader.is_none() {
             reader = Reader::open();
-            last_update = u32::MAX;
+            pulse.reset();
             if reader.is_none() {
                 std::thread::sleep(Duration::from_secs(3));
                 continue;
             }
         }
         let r = reader.as_ref().unwrap();
-        let events = r.events();
-        let update = events.SME_UPDATE_TELEMETRY;
-        if update != last_update {
-            last_update = update;
+        if pulse.changed(r) {
             last_change = Instant::now();
-            building = sample(&conn, r, events.SME_START_SESSION, &mut session, &mut map);
+            building = sample(&conn, r, r.events().SME_START_SESSION, &mut session, &mut map);
         } else if last_change.elapsed() > Duration::from_secs(3) {
             // Jeu fermé ou en pause longue : on clôt la session.
             if let Some(s) = session.take() {
