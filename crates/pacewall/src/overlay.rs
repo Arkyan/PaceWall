@@ -8,6 +8,8 @@
 //!
 //! Le jeu doit être en fenêtré ou sans bordure pour qu'elle s'affiche par-dessus.
 
+use crate::alerts;
+use crate::speech;
 use crate::draw::{Measure, D};
 use crate::soft::{Fonts, SoftCanvas};
 use crate::{widgets, win};
@@ -223,6 +225,10 @@ pub fn run() {
     let mut hide_idle = settings::bool_of("overlay_hide_idle", true);
     let mut fg_ok = true;
     let mut was_visible = false;
+    // Alertes vocales : règles (alerts) et voix (speech) ; relues avec les autres réglages toutes les 2 s.
+    let mut voice = alerts::Config::load();
+    let mut alerts = alerts::Alerts::default();
+    let mut next_alert = Instant::now();
     let mut next_fg = Instant::now();
     let start = Instant::now();
     // Diagnostic : PACEWALL_DEBUG=1 écrit des compteurs dans %TEMP%\pw-overlay.log.
@@ -265,6 +271,7 @@ pub fn run() {
             mon = pick_monitor();
             fg_only = settings::bool_of("overlay_fg_only", true);
             hide_idle = settings::bool_of("overlay_hide_idle", true);
+            voice = alerts::Config::load();
             let mtime = layout::modified();
             if mtime != layout_mtime {
                 layout_mtime = mtime;
@@ -276,7 +283,9 @@ pub fn run() {
 
         let with_grid = layout.widgets.iter().any(|w| w.kind == "standings" || w.kind == "trackmap");
         // On ne lit le jeu en entier que si un widget doit être redessiné (le jeu publie plus vite que les widgets n'en ont besoin).
-        let want = panels.len() < layout.widgets.len()
+        let alert_due = voice.enabled && now >= next_alert;
+        let want = alert_due
+            || panels.len() < layout.widgets.len()
             || layout.widgets.iter().zip(panels.iter()).any(|(spec, panel)| {
                 now.duration_since(panel.last) >= Duration::from_secs_f32(1.0 / widgets::hz(&spec.kind, spec).max(0.2))
             });
@@ -292,6 +301,13 @@ pub fn run() {
                 }
                 game = true;
                 data_version += 1;
+                if voice.enabled {
+                    next_alert = now + Duration::from_millis(250);
+                    for phrase in alerts.update(&data, &voice, now) {
+                        log_event(&format!("alerte vocale : {phrase}"));
+                        speech::Speaker::global().say(&phrase, voice.volume);
+                    }
+                }
             }
             Update::NoGame => {
                 if game {
@@ -324,6 +340,9 @@ pub fn run() {
         }
 
         let mut sleep = Duration::from_millis(if game { 250 } else { 500 });
+        if voice.enabled && game {
+            sleep = sleep.min(next_alert.saturating_duration_since(now).max(Duration::from_millis(20)));
+        }
         if let (true, Some(mon)) = (visible, mon.clone()) {
             while panels.len() < layout.widgets.len() {
                 match Panel::new() {

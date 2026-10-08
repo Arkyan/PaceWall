@@ -8,11 +8,13 @@
 //! - `--probe` : relevé de 20 s de ce que le jeu publie (diagnostic).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod alerts;
 mod daemon;
 mod draw;
 mod overlay;
 mod probe;
 mod soft;
+mod speech;
 mod ui;
 mod theme;
 mod widgets;
@@ -21,7 +23,12 @@ mod win;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let has = |f: &str| args.iter().any(|a| a == f);
-    if has("--probe") {
+    if has("--say") {
+        // `pacewall.exe --say "texte"` : essai de la voix des alertes.
+        let text = args.iter().skip_while(|a| *a != "--say").nth(1).cloned().unwrap_or_else(|| "Alertes vocales PaceWall".into());
+        speech::Speaker::global().say(&text, pwcore::settings::int_of("voice_volume", 80) as u32);
+        std::thread::sleep(std::time::Duration::from_secs(6));
+    } else if has("--probe") {
         probe::run();
     } else if has("--overlay") {
         overlay::run();

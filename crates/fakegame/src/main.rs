@@ -110,6 +110,8 @@ fn main() {
             info.mLapDist = 4000.0;
             info.mNumVehicles = drivers.len() as i32;
             info.mGamePhase = 5;
+            // FAKE_YELLOW=1 : drapeau jaune 4 s toutes les 12 s (essai des alertes vocales).
+            info.mYellowFlagState = (std::env::var_os("FAKE_YELLOW").is_some() && (t as u64 % 12) >= 8) as i8;
             info.mInRealtime = 1;
             put(&mut info.mPlayerName, "Toi");
             info.mRaining = 0.0;

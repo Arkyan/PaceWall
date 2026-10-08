@@ -12,6 +12,12 @@ fn defaults() -> Map<String, Value> {
         "overlay_auto": true,          // ouvrir / fermer l'overlay avec le jeu
         "overlay_fg_only": true,       // masquer l'overlay quand le jeu n'est pas au premier plan
         "overlay_hide_idle": true,     // masquer l'overlay en pause, au menu ou hors piste
+        "voice_enabled": true,         // alertes vocales
+        "voice_volume": 80,            // volume de la voix (0 à 100)
+        "voice_fuel": true,            // carburant et énergie
+        "voice_tyres": true,           // pneus froids, chauds, usés, crevés
+        "voice_flags": true,           // drapeau jaune, full course jaune
+        "voice_weather": true,         // pluie
         "overlay_monitor": 0,          // index de l'écran (0 = principal)
         "autostart": false,            // lancer avec Windows
         "obs_server": false,           // serveur web pour OBS (source navigateur)

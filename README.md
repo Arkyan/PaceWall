@@ -53,6 +53,13 @@ Inspirée de TinyPedal. Au premier tour propre sur un circuit, PaceWall enregist
 - Tant qu'il n'y a pas de carte, le widget affiche un cercle avec les voitures placées selon leur distance dans le tour.
 - Voitures : carré à la couleur de leur classe, ma voiture en cyan, voitures aux stands grisées.
 
+## Alertes vocales
+
+La voix intégrée à Windows (hors ligne, voix française si elle est installée) prévient pendant que tu roules, uniquement
+en piste : carburant et énergie (5, 3, 2 puis 1 tour restant), pneus (froids, trop chauds, usés, crevaison), drapeau jaune,
+full course jaune et reprise, pluie. Chaque alerte a un délai de relance. Réglages > Alertes vocales : cases, volume, essai
+de la voix (`pacewall.exe --say "texte"` en ligne de commande). Problèmes de voix : `%TEMP%\pw-speech.log`.
+
 ## Développement sans le jeu
 
 ```bash

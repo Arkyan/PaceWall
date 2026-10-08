@@ -24,12 +24,53 @@ impl State {
                 ui.set_max_width(760.0);
                 self.overlay(ui);
                 ui.add_space(14.0);
+                self.voice(ui);
+                ui.add_space(14.0);
                 self.obs(ui);
                 ui.add_space(14.0);
                 self.app(ui);
                 ui.add_space(14.0);
                 self.files(ui);
             });
+        });
+    }
+
+    /// Alertes vocales : quoi dire, à quel volume, et un bouton pour entendre la voix.
+    fn voice(&mut self, ui: &mut Ui) {
+        kit::panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            kit::section(ui, "Alertes vocales");
+            ui.add_space(6.0);
+            let mut on = settings::bool_of("voice_enabled", true);
+            if ui.checkbox(&mut on, "Activer les alertes vocales (pendant que tu roules)").changed() {
+                let _ = settings::set("voice_enabled", json!(on));
+            }
+            ui.add_enabled_ui(on, |ui| {
+                for (key, label) in [
+                    ("voice_fuel", "Carburant et énergie : 5, 3, 2 puis 1 tour restant"),
+                    ("voice_tyres", "Pneus : froids, trop chauds, usés, crevaison"),
+                    ("voice_flags", "Drapeau jaune, full course jaune et reprise"),
+                    ("voice_weather", "Pluie détectée"),
+                ] {
+                    let mut v = settings::bool_of(key, true);
+                    if ui.checkbox(&mut v, label).changed() {
+                        let _ = settings::set(key, json!(v));
+                    }
+                }
+                ui.add_space(6.0);
+                let mut volume = settings::int_of("voice_volume", 80).clamp(0, 100) as f32;
+                ui.label(RichText::new("Volume de la voix").size(12.0).color(MUTED));
+                ui.spacing_mut().slider_width = (ui.available_width() - 200.0).clamp(100.0, 320.0);
+                if ui.add(egui::Slider::new(&mut volume, 0.0..=100.0).step_by(5.0).suffix(" %")).changed() {
+                    let _ = settings::set("voice_volume", json!(volume.round() as i64));
+                }
+                ui.add_space(6.0);
+                if kit::button(ui, "Tester la voix").clicked() {
+                    crate::speech::Speaker::global().say("Carburant : trois tours. Pneus froids.", volume.round() as u32);
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(RichText::new("La voix est celle de Windows (hors ligne). Pour une voix française, installe-la dans Paramètres > Heure et langue > Voix.").size(11.5).color(MUTED));
         });
     }
 
