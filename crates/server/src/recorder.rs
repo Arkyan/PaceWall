@@ -1,0 +1,194 @@
+//! Enregistreur d'historique. Tourne en permanence (même sans overlay ouverte), mais très peu :
+//! 2 lectures par seconde de quelques champs, une écriture SQLite par tour terminé.
+//!
+//! Un tour est enregistré quand le nombre de tours terminés du joueur augmente. Le tour en cours au
+//! moment où on se branche est ignoré (« partiel »), sauf si on démarre dans les premiers mètres.
+
+use crate::db::{self, NewLap, NewSession};
+use lmu::reader::{c_str, Reader};
+use lmu::{ScoringInfo, VehicleScoring, VehicleTelemetry};
+use rusqlite::Connection;
+use std::time::{Duration, Instant};
+
+struct Session {
+    id: i64,
+    track: String,
+    session_type: i32,
+    start_event: u32,
+    last_et: f64,
+    last_laps: i16,
+    partial: bool,
+    // Au début du tour courant
+    fuel0: f64,
+    energy0: f64,
+    wear0: f64,
+    // Cumuls sur le tour courant
+    tyre_sum: f64,
+    brake_sum: f64,
+    samples: u32,
+    pit: bool,
+    invalid: bool,
+}
+
+pub fn run() {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Historique désactivé : base inaccessible ({e})");
+            return;
+        }
+    };
+    db::close_stale(&conn);
+
+    let mut reader: Option<Reader> = None;
+    let mut session: Option<Session> = None;
+    let mut last_update = u32::MAX;
+    let mut last_change = Instant::now();
+
+    loop {
+        if reader.is_none() {
+            reader = Reader::open();
+            last_update = u32::MAX;
+            if reader.is_none() {
+                std::thread::sleep(Duration::from_secs(3));
+                continue;
+            }
+        }
+        let r = reader.as_ref().unwrap();
+        let events = r.events();
+        let update = events.SME_UPDATE_TELEMETRY;
+        if update != last_update {
+            last_update = update;
+            last_change = Instant::now();
+            sample(&conn, r, events.SME_START_SESSION, &mut session);
+        } else if last_change.elapsed() > Duration::from_secs(3) {
+            // Jeu fermé ou en pause longue : on clôt la session.
+            if let Some(s) = session.take() {
+                db::end_session(&conn, s.id);
+            }
+            reader = None;
+            std::thread::sleep(Duration::from_secs(2));
+            continue;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+fn averages(t: &VehicleTelemetry) -> (f64, f64, f64) {
+    let wheels = t.mWheels;
+    let (mut tyre, mut brake, mut wear) = (0.0, 0.0, 0.0);
+    for w in &wheels {
+        let temps = w.mTemperature;
+        tyre += (temps[0] + temps[1] + temps[2]) / 3.0 - 273.15;
+        brake += w.mBrakeTemp;
+        wear += w.mWear * 100.0;
+    }
+    (tyre / 4.0, brake / 4.0, wear / 4.0)
+}
+
+fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<Session>) {
+    let Some((si, ti)) = r.player_indexes() else { return };
+    let (Some(s), Some(t)) = (r.vehicle_scoring(si), r.telemetry(ti)) else { return };
+    let info = r.scoring_info();
+    let track = c_str(&info.mTrackName);
+    let session_type = info.mSession;
+    let et = info.mCurrentET;
+
+    let changed = session.as_ref().is_none_or(|x| {
+        x.track != track || x.session_type != session_type || x.start_event != start_event || et < x.last_et - 5.0
+    });
+    if changed {
+        if let Some(old) = session.take() {
+            db::end_session(conn, old.id);
+        }
+        *session = begin(conn, &track, &info, &s, &t, start_event);
+    }
+    let Some(cur) = session.as_mut() else { return };
+    cur.last_et = et;
+
+    let (tyre, brake, wear) = averages(&t);
+    cur.tyre_sum += tyre;
+    cur.brake_sum += brake;
+    cur.samples += 1;
+    cur.pit |= s.mInPits != 0;
+    cur.invalid |= t.mLapInvalidated != 0;
+
+    let laps = s.mTotalLaps;
+    if laps < cur.last_laps {
+        cur.last_laps = laps; // retour au stand / remise à zéro
+        return;
+    }
+    if laps > cur.last_laps {
+        let time = s.mLastLapTime;
+        if !cur.partial && time > 0.0 && cur.samples > 0 {
+            let n = cur.samples as f64;
+            let fuel = t.mFuel;
+            let energy = t.mVirtualEnergy as f64 * 100.0;
+            let clean = !cur.pit;
+            let lap = NewLap {
+                session_id: cur.id,
+                lap: laps as i32,
+                time,
+                valid: !cur.invalid,
+                pit: cur.pit,
+                // Après un arrêt, carburant et usure ne sont plus comparables : on ne les garde pas.
+                fuel_used: clean.then(|| cur.fuel0 - fuel).filter(|v| *v >= 0.0),
+                energy_used: clean.then(|| cur.energy0 - energy).filter(|v| *v >= 0.0),
+                wear_used: clean.then(|| wear - cur.wear0).filter(|v| *v >= 0.0),
+                wear_end: wear,
+                tyre_temp: cur.tyre_sum / n,
+                brake_temp: cur.brake_sum / n,
+                ambient: info.mAmbientTemp,
+                track_temp: info.mTrackTemp,
+                rain: info.mRaining,
+                place: s.mPlace as i32,
+                compound: &c_str(&t.mFrontTireCompoundName),
+            };
+            if let Err(e) = db::add_lap(conn, &lap) {
+                eprintln!("Tour non enregistré : {e}");
+            }
+        }
+        cur.last_laps = laps;
+        cur.partial = false;
+        cur.fuel0 = t.mFuel;
+        cur.energy0 = t.mVirtualEnergy as f64 * 100.0;
+        cur.wear0 = wear;
+        cur.tyre_sum = 0.0;
+        cur.brake_sum = 0.0;
+        cur.samples = 0;
+        cur.pit = s.mInPits != 0;
+        cur.invalid = false;
+    }
+}
+
+fn begin(
+    conn: &Connection,
+    track: &str,
+    info: &ScoringInfo,
+    s: &VehicleScoring,
+    t: &VehicleTelemetry,
+    start_event: u32,
+) -> Option<Session> {
+    let car = c_str(&t.mVehicleName);
+    let class = c_str(&s.mVehicleClass);
+    let id = db::begin_session(conn, &NewSession { track, car: &car, class: &class, session_type: info.mSession }).ok()?;
+    let (_, _, wear) = averages(t);
+    Some(Session {
+        id,
+        track: track.to_string(),
+        session_type: info.mSession,
+        start_event,
+        last_et: info.mCurrentET,
+        last_laps: s.mTotalLaps,
+        // On se branche en cours de tour, sauf dans les premiers mètres : ce tour-là est incomplet.
+        partial: s.mLapDist > 300.0,
+        fuel0: t.mFuel,
+        energy0: t.mVirtualEnergy as f64 * 100.0,
+        wear0: wear,
+        tyre_sum: 0.0,
+        brake_sum: 0.0,
+        samples: 0,
+        pit: s.mInPits != 0,
+        invalid: false,
+    })
+}

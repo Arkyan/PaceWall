@@ -6,6 +6,7 @@ description = "Serveur local PaceWall : lit LMU et diffuse les données en WebSo
 
 [dependencies]
 lmu = { path = "../lmu" }
-axum = { version = "0.7", default-features = false, features = ["http1", "tokio", "ws"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio", "ws"] }
 tokio = { version = "1", default-features = false, features = ["rt", "macros", "net", "time", "sync"] }
 serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }

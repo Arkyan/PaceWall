@@ -3,14 +3,19 @@
 //! - Un thread lit la mémoire partagée de LMU, seulement quand au moins un client écoute, à la cadence
 //!   du client le plus exigeant, et sans lire le classement si personne ne s'y abonne.
 //! - Chaque client WebSocket s'abonne à des préfixes de clés et ne reçoit que les valeurs qui ont changé.
-//! - La page `/` est l'explorateur de données (voir `explorer.html`).
+//! - La page `/` est l'explorateur de données (`explorer.html`), `/history` l'historique des sessions.
+//! - Un second thread (`recorder`) enregistre les tours dans SQLite, overlay ouverte ou non.
 
+mod db;
 mod flatten;
+mod recorder;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::Json;
 use axum::response::Html;
-use axum::routing::get;
+use axum::routing::{delete, get};
 use axum::Router;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -40,25 +45,38 @@ struct Shared {
     tx: watch::Sender<Arc<Snapshot>>,
     demands: Mutex<HashMap<u64, Demand>>,
     next_id: AtomicU64,
+    db: Mutex<Option<rusqlite::Connection>>,
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let port = std::env::var("PACEWALL_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
     let (tx, _) = watch::channel(Arc::new(Snapshot { game: false, fields: Vec::new() }));
-    let shared = Arc::new(Shared { tx, demands: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1) });
+    let shared = Arc::new(Shared {
+        tx,
+        demands: Mutex::new(HashMap::new()),
+        next_id: AtomicU64::new(1),
+        db: Mutex::new(db::open().ok()),
+    });
 
     let producer = shared.clone();
     std::thread::spawn(move || produce(producer));
+    #[cfg(windows)]
+    std::thread::spawn(recorder::run);
 
     let app = Router::new()
         .route("/", get(|| async { Html(include_str!("explorer.html")) }))
+        .route("/history", get(|| async { Html(include_str!("history.html")) }))
         .route("/ws", get(upgrade))
+        .route("/api/sessions", get(api_sessions))
+        .route("/api/sessions/:id/laps", get(api_laps))
+        .route("/api/sessions/:id", delete(api_delete))
         .with_state(shared);
 
     let addr = format!("127.0.0.1:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("port déjà utilisé ?");
-    println!("PaceWall : http://{addr}  (explorateur de données)");
+    println!("PaceWall : http://{addr}  (explorateur)  http://{addr}/history  (historique)
+  base : {}", db::path().display());
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -122,6 +140,29 @@ fn publish(shared: &Shared, game: bool, fields: Vec<Field>, live: &mut bool) {
     }
     *live = game;
     shared.tx.send_replace(Arc::new(Snapshot { game, fields }));
+}
+
+type ApiResult = Result<Json<Value>, StatusCode>;
+
+fn with_db<T>(shared: &Shared, f: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>) -> Result<T, StatusCode> {
+    let guard = shared.db.lock().unwrap();
+    let conn = guard.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    f(conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+async fn api_sessions(State(shared): State<Arc<Shared>>) -> ApiResult {
+    with_db(&shared, db::list_sessions).map(|v| Json(Value::Array(v)))
+}
+
+async fn api_laps(State(shared): State<Arc<Shared>>, Path(id): Path<i64>) -> ApiResult {
+    with_db(&shared, |c| db::laps(c, id)).map(|v| Json(Value::Array(v)))
+}
+
+async fn api_delete(State(shared): State<Arc<Shared>>, Path(id): Path<i64>) -> StatusCode {
+    match with_db(&shared, |c| db::delete_session(c, id)) {
+        Ok(_) => StatusCode::NO_CONTENT,
+        Err(code) => code,
+    }
 }
 
 async fn upgrade(ws: WebSocketUpgrade, State(shared): State<Arc<Shared>>) -> axum::response::Response {

@@ -18,6 +18,8 @@
            padding:12px 16px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
   h1 { font-size:16px; margin:0 8px 0 0; letter-spacing:.3px; }
   h1 b { color:var(--accent); }
+  nav a { color:var(--muted); text-decoration:none; margin-right:10px; padding-bottom:3px; }
+  nav a.on { color:var(--text); border-bottom:2px solid var(--accent); }
   .pill { padding:2px 10px; border-radius:99px; font-size:12px; border:1px solid var(--line); color:var(--muted); }
   .pill.ok { color:var(--ok); border-color:var(--ok); }
   .pill.bad { color:var(--bad); border-color:var(--bad); }
@@ -43,7 +45,8 @@
 </head>
 <body>
 <header>
-  <h1>Pace<b>Wall</b> · Données</h1>
+  <h1>Pace<b>Wall</b></h1>
+  <nav><a href="/" class="on">Données en direct</a><a href="/history">Historique</a></nav>
   <span id="conn" class="pill bad">Serveur</span>
   <span id="game" class="pill">Jeu</span>
   <input id="q" type="search" placeholder="Filtrer (ex. tyre, fuel, 'temp')…" autocomplete="off">

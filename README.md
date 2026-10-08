@@ -29,14 +29,15 @@ Voir [docs/donnees.md](docs/donnees.md).
 3. [x] Serveur WebSocket (différences seulement, abonnement par préfixe) et explorateur de données
 4. [ ] Overlay minimal (carburant, pneus) dans OBS et en fenêtre Tauri
 5. [ ] Moteur de stratégie et alertes
-6. [ ] Historique SQLite
+6. [x] Historique SQLite (enregistrement automatique des tours) et page de consultation `/history`
 
 ## Développer sans le jeu
 
 ```bash
 cargo run -p fakegame     # faux LMU : crée LMU_Data avec une course simulée
 cargo run -p collector    # lit la zone et affiche vitesse, carburant, énergie, pneus (console)
-cargo run -p server       # serveur local + explorateur de données : http://127.0.0.1:8470
+cargo run -p server       # serveur local : explorateur http://127.0.0.1:8470, historique /history
+FAKE_LAP_SECONDS=6 cargo run -p fakegame   # tours courts pour tester l'historique
 cargo test -p lmu         # vérifie que les structures ont la même disposition que le jeu
 ```
 
@@ -60,3 +61,12 @@ Réponses (seules les valeurs modifiées sont envoyées, `m` donne unité et lib
 Clés : `session.*`, `weather.*`, `player.*`, `fuel.*`, `energy.*`, `lap.*`, `gap.*`, `aids.*`, `car.*`,
 `pit.*`, `position.*`, `tyre.{fl,fr,rl,rr}.*`, `brake.{fl,fr,rl,rr}.*`, `grid.NNN.*` (classement complet,
 lu uniquement si demandé). Unités déjà converties : km/h, °C, %, secondes.
+
+## Historique
+
+- Enregistré en continu par un thread séparé (2 lectures/s, une écriture SQLite par tour), même sans overlay.
+- Base : `%APPDATA%\PaceWall\history.db` (variable `PACEWALL_DB` pour la changer).
+- Par tour : temps, validité, passage aux stands, carburant / énergie / usure consommés (hors tours avec arrêt),
+  températures moyennes pneus et freins, météo, position, gomme.
+- Le tour en cours au moment où PaceWall se branche est ignoré (il serait incomplet).
+- API : `GET /api/sessions`, `GET /api/sessions/{id}/laps`, `DELETE /api/sessions/{id}`.

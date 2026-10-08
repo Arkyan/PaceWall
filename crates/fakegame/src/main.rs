@@ -37,13 +37,15 @@ fn main() {
     };
 
     println!("fakegame : LMU_Data créée ({size} octets). Ctrl+C pour arrêter.");
+    // FAKE_LAP_SECONDS=15 pour des tours courts pendant les tests.
+    let lap_seconds: f64 = std::env::var("FAKE_LAP_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(100.0);
     let start = Instant::now();
     let (mut telem_count, mut scor_count) = (0u32, 0u32);
     let drivers = ["Toi", "A. Martin", "B. Dupont", "C. Rossi", "D. Keller"];
 
     loop {
         let t = start.elapsed().as_secs_f64();
-        let lap_time = 100.0;
+        let lap_time = lap_seconds;
         let lap = (t / lap_time) as i32;
         let progress = (t % lap_time) / lap_time;
         telem_count += 1;
@@ -124,8 +126,8 @@ fn main() {
                 put(&mut s.mVehicleClass, "Hypercar");
                 s.mTotalLaps = lap as i16;
                 s.mLapDist = progress * 13626.0 - i as f64 * 40.0;
-                s.mBestLapTime = 99.4 + i as f64 * 0.3;
-                s.mLastLapTime = 99.8 + i as f64 * 0.3;
+                s.mBestLapTime = lap_seconds - 0.6 + i as f64 * 0.3;
+                s.mLastLapTime = lap_seconds - 0.2 + i as f64 * 0.3 + 0.4 * (lap as f64 * 1.7).sin();
                 s.mIsPlayer = (i == 0) as u8;
                 s.mPlace = i as u8 + 1;
                 s.mTimeBehindNext = 1.5;
