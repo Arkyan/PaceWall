@@ -108,7 +108,7 @@ Chaque voiture de la grille a une entrée (adversaires compris). Pour un overlay
 |---|---|---|
 | `mFuel` | litres | |
 | `mFuelCapacity` | litres | |
-| `mVirtualEnergy` | fraction restante | Énergie virtuelle (Hypercar notamment) ⚠️ plage exacte (0-1 ou 0-100) |
+| `mVirtualEnergy` | fraction restante | Énergie virtuelle (Hypercar notamment) ⚠️ plage exacte (0-100) |
 | `mBatteryChargeFraction` | 0 à 1 | Batterie hybride |
 | `mStateOfCharge` | pourcentage | |
 | `mRegen` | kW | Récupération |
@@ -217,7 +217,7 @@ Les noms de composés sont aussi dans `mFrontTireCompoundName` / `mRearTireCompo
 | `mStartLight`, `mNumRedLights` | Feux de départ |
 | `mCurrentET`, `mEndET` | Temps de session, fin de session (s) |
 | `mSessionTimeRemaining` | s |
-| `mMaxLaps` | Tours max (0 si course au temps) ⚠️ |
+| `mMaxLaps` | Tours max (Calculer en fonction de la durée de la session) |
 | `mLapDist` | Longueur du tour (m) |
 | `mNumVehicles` | Voitures dans la session |
 | `mInRealtime` | En piste (pas dans le moniteur) |

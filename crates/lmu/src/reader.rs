@@ -67,12 +67,38 @@ impl Reader {
         }
     }
 
-    pub fn player_index(&self) -> Option<usize> {
+    /// Index du joueur dans le classement : la ligne dont `mIsPlayer` vaut 1.
+    /// Ne lit que ce octet pour chaque ligne (pas de copie de 584 octets).
+    pub fn player_scoring_index(&self) -> Option<usize> {
+        let count = (self.scoring_info_count() as usize).min(MAX_MAPPED_VEHICLES);
         unsafe {
-            let has = addr_of!((*self.base()).telemetry.playerHasVehicle).read_unaligned();
-            let idx = addr_of!((*self.base()).telemetry.playerVehicleIdx).read_unaligned() as usize;
-            (has != 0 && idx < MAX_MAPPED_VEHICLES).then_some(idx)
+            let first = addr_of!((*self.base()).scoring.vehScoringInfo) as *const VehicleScoring;
+            (0..count).find(|&i| addr_of!((*first.add(i)).mIsPlayer).read_unaligned() != 0)
         }
+    }
+
+    fn scoring_info_count(&self) -> i32 {
+        unsafe { addr_of!((*self.base()).scoring.scoringInfo.mNumVehicles).read_unaligned() }
+    }
+
+    /// Index de télémétrie de la voiture dont l'identifiant (`mID`) est `id`.
+    /// Les index du classement et de la télémétrie peuvent différer : on associe par `mID`.
+    pub fn telemetry_index_by_id(&self, id: i32) -> Option<usize> {
+        let count = (self.active_vehicles() as usize).min(MAX_MAPPED_VEHICLES);
+        unsafe {
+            let first = addr_of!((*self.base()).telemetry.telemInfo) as *const VehicleTelemetry;
+            (0..count).find(|&i| addr_of!((*first.add(i)).mID).read_unaligned() == id)
+        }
+    }
+
+    /// Joueur local : (index classement, index télémétrie).
+    pub fn player_indexes(&self) -> Option<(usize, usize)> {
+        let scoring = self.player_scoring_index()?;
+        let id = unsafe {
+            let first = addr_of!((*self.base()).scoring.vehScoringInfo) as *const VehicleScoring;
+            addr_of!((*first.add(scoring)).mID).read_unaligned()
+        };
+        Some((scoring, self.telemetry_index_by_id(id)?))
     }
 
     pub fn active_vehicles(&self) -> u8 {
@@ -91,7 +117,7 @@ impl Reader {
     }
 
     pub fn player_telemetry(&self) -> Option<VehicleTelemetry> {
-        self.telemetry(self.player_index()?)
+        self.telemetry(self.player_indexes()?.1)
     }
 }
 

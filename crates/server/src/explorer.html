@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PaceWall · Données</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e9ef; --muted: #8b93a3;
+    --accent: #ff7a1a; --ok: #3ecf8e; --bad: #ef5350; --flash: rgba(255,122,26,.28);
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f5f6f8; --panel:#fff; --line:#dfe3ea; --text:#1b1f27; --muted:#6a7282; --flash: rgba(255,122,26,.25); }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,Segoe UI,sans-serif; }
+  header { position:sticky; top:0; z-index:2; background:var(--bg); border-bottom:1px solid var(--line);
+           padding:12px 16px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  h1 { font-size:16px; margin:0 8px 0 0; letter-spacing:.3px; }
+  h1 b { color:var(--accent); }
+  .pill { padding:2px 10px; border-radius:99px; font-size:12px; border:1px solid var(--line); color:var(--muted); }
+  .pill.ok { color:var(--ok); border-color:var(--ok); }
+  .pill.bad { color:var(--bad); border-color:var(--bad); }
+  input, select, button { background:var(--panel); color:var(--text); border:1px solid var(--line);
+           border-radius:8px; padding:6px 10px; font:inherit; }
+  input[type=search] { flex:1 1 200px; min-width:140px; }
+  button { cursor:pointer; } button:hover { border-color:var(--accent); }
+  main { padding:12px 16px 40px; max-width:1100px; margin:0 auto; }
+  details { background:var(--panel); border:1px solid var(--line); border-radius:10px; margin:10px 0; }
+  summary { cursor:pointer; padding:10px 14px; font-weight:600; display:flex; justify-content:space-between; }
+  summary span { color:var(--muted); font-weight:400; }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:5px 14px; border-top:1px solid var(--line); vertical-align:baseline; }
+  td.k { color:var(--muted); font:12px ui-monospace,Consolas,monospace; width:42%; word-break:break-all; cursor:copy; }
+  td.v { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
+  td.v small { color:var(--muted); font-weight:400; margin-left:4px; }
+  td.v.flash { animation:f .6s ease-out; }
+  @keyframes f { from { background:var(--flash); } to { background:transparent; } }
+  .empty { text-align:center; color:var(--muted); padding:60px 0; }
+  .grid-row td { font-size:13px; }
+  @media (max-width:560px) { td.k { width:auto; } td { padding:5px 10px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pace<b>Wall</b> · Données</h1>
+  <span id="conn" class="pill bad">Serveur</span>
+  <span id="game" class="pill">Jeu</span>
+  <input id="q" type="search" placeholder="Filtrer (ex. tyre, fuel, 'temp')…" autocomplete="off">
+  <select id="hz" title="Fréquence de mise à jour">
+    <option value="2">2 Hz</option><option value="5" selected>5 Hz</option>
+    <option value="10">10 Hz</option><option value="30">30 Hz</option><option value="60">60 Hz</option>
+  </select>
+  <label class="pill"><input id="grid" type="checkbox"> Classement</label>
+  <button id="freeze">Figer</button>
+  <span id="count" class="pill">0 valeurs</span>
+</header>
+<main id="main"><div class="empty" id="empty">En attente de données…<br><small>Lance Le Mans Ultimate (ou <code>cargo run -p fakegame</code>).</small></div></main>
+
+<script>
+const GROUP_LABELS = {
+  game:'Jeu', session:'Session', weather:'Météo', player:'Pilote', fuel:'Carburant', energy:'Énergie',
+  lap:'Tour', gap:'Écarts', aids:'Aides', car:'Voiture', pit:'Stands', tyre:'Pneus', brake:'Freins',
+  position:'Classement du joueur', grid:'Classement complet'
+};
+const state = new Map();   // clé -> {value, unit, label, el, td}
+const groups = new Map();  // groupe -> {details, tbody, count}
+let ws, frozen = false, filter = '';
+const $ = id => document.getElementById(id);
+const main = $('main');
+
+function fmt(v, unit) {
+  if (typeof v === 'boolean') return v ? 'oui' : 'non';
+  if (typeof v === 'number') {
+    const abs = Math.abs(v);
+    const s = unit === 's' && abs >= 60 ? clock(v) : (Number.isInteger(v) ? String(v) : v.toFixed(abs >= 100 ? 1 : 2));
+    return s;
+  }
+  return v === '' ? '—' : String(v);
+}
+function clock(s) { const m = Math.floor(s / 60); return m + ':' + (s - m * 60).toFixed(3).padStart(6, '0'); }
+
+function group(key) {
+  const name = key.split('.')[0];
+  let g = groups.get(name);
+  if (g) return g;
+  const details = document.createElement('details');
+  details.open = name !== 'grid';
+  details.dataset.group = name;
+  details.innerHTML = '<summary>' + (GROUP_LABELS[name] || name) + '<span></span></summary><table><tbody></tbody></table>';
+  g = { details, tbody: details.querySelector('tbody'), span: details.querySelector('span') };
+  groups.set(name, g);
+  // ordre stable : par ordre d'apparition dans GROUP_LABELS
+  const order = Object.keys(GROUP_LABELS);
+  const rank = n => { const i = order.indexOf(n); return i < 0 ? 99 : i; };
+  const after = [...main.querySelectorAll('details')].find(d => rank(d.dataset.group) > rank(name));
+  main.insertBefore(details, after || null);
+  return g;
+}
+
+function visible(key, label) {
+  return !filter || key.toLowerCase().includes(filter) || (label || '').toLowerCase().includes(filter);
+}
+
+function apply(msg) {
+  if (msg.t !== 'u') return;
+  const g = $('game');
+  g.textContent = msg.game ? 'Jeu connecté' : 'Jeu absent';
+  g.className = 'pill ' + (msg.game ? 'ok' : 'bad');
+  for (const k of msg.x || []) {
+    const s = state.get(k); if (s) { s.tr.remove(); state.delete(k); }
+  }
+  for (const [k, v] of Object.entries(msg.d || {})) {
+    let s = state.get(k);
+    if (!s) {
+      const [unit, label] = (msg.m && msg.m[k]) || ['', k];
+      const tr = document.createElement('tr');
+      if (k.startsWith('grid.')) tr.className = 'grid-row';
+      tr.innerHTML = '<td class="k" title="Cliquer pour copier"></td><td class="v"></td>';
+      const kt = tr.children[0], vt = tr.children[1];
+      kt.textContent = k + (label && label !== k ? '  ·  ' + label : '');
+      kt.onclick = () => navigator.clipboard && navigator.clipboard.writeText(k);
+      s = { value: v, unit, label, tr, vt };
+      state.set(k, s);
+      group(k).tbody.appendChild(tr);
+      tr.hidden = !visible(k, label);
+    } else {
+      s.value = v;
+    }
+    s.vt.innerHTML = '';
+    s.vt.append(fmt(v, s.unit));
+    if (s.unit) { const u = document.createElement('small'); u.textContent = s.unit; s.vt.append(u); }
+    s.vt.classList.remove('flash'); void s.vt.offsetWidth; s.vt.classList.add('flash');
+  }
+  refreshCounts();
+}
+
+function refreshCounts() {
+  $('empty').hidden = state.size > 0;
+  $('count').textContent = state.size + ' valeurs';
+  for (const [name, g] of groups) {
+    const rows = [...g.tbody.children];
+    const shown = rows.filter(r => !r.hidden).length;
+    g.span.textContent = shown + (shown !== rows.length ? ' / ' + rows.length : '');
+    g.details.hidden = rows.length === 0 || shown === 0;
+  }
+}
+
+function subscribe() {
+  if (!ws || ws.readyState !== 1) return;
+  const prefixes = ['game.', 'session.', 'weather.', 'player.', 'fuel.', 'energy.', 'lap.', 'gap.', 'aids.',
+                    'car.', 'pit.', 'tyre.', 'brake.', 'position.'];
+  if ($('grid').checked) prefixes.push('grid.');
+  for (const [k, s] of [...state]) if (!prefixes.some(p => k.startsWith(p))) { s.tr.remove(); state.delete(k); }
+  ws.send(JSON.stringify({ sub: prefixes, hz: +$('hz').value }));
+}
+
+function connect() {
+  ws = new WebSocket('ws://' + location.host + '/ws');
+  ws.onopen = () => { $('conn').textContent = 'Serveur connecté'; $('conn').className = 'pill ok'; subscribe(); };
+  ws.onclose = () => { $('conn').textContent = 'Serveur absent'; $('conn').className = 'pill bad'; setTimeout(connect, 1500); };
+  ws.onmessage = e => { if (!frozen) apply(JSON.parse(e.data)); };
+}
+
+$('q').oninput = e => {
+  filter = e.target.value.trim().toLowerCase();
+  for (const [k, s] of state) s.tr.hidden = !visible(k, s.label);
+  refreshCounts();
+};
+$('hz').onchange = subscribe;
+$('grid').onchange = subscribe;
+$('freeze').onclick = () => { frozen = !frozen; $('freeze').textContent = frozen ? 'Reprendre' : 'Figer'; };
+connect();
+</script>
+</body>
+</html>

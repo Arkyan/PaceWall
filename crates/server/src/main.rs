@@ -1,0 +1,229 @@
+//! Serveur local PaceWall.
+//!
+//! - Un thread lit la mémoire partagée de LMU, seulement quand au moins un client écoute, à la cadence
+//!   du client le plus exigeant, et sans lire le classement si personne ne s'y abonne.
+//! - Chaque client WebSocket s'abonne à des préfixes de clés et ne reçoit que les valeurs qui ont changé.
+//! - La page `/` est l'explorateur de données (voir `explorer.html`).
+
+mod flatten;
+
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::State;
+use axum::response::Html;
+use axum::routing::get;
+use axum::Router;
+use serde_json::{json, Map, Value};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tokio::sync::watch;
+
+use flatten::Field;
+
+const DEFAULT_PORT: u16 = 8470;
+const MAX_HZ: u32 = 60;
+
+struct Snapshot {
+    game: bool,
+    fields: Vec<Field>,
+}
+
+/// Ce que veut un client : des préfixes de clés et une cadence.
+#[derive(Clone, Default)]
+struct Demand {
+    prefixes: Vec<String>,
+    hz: u32,
+}
+
+struct Shared {
+    tx: watch::Sender<Arc<Snapshot>>,
+    demands: Mutex<HashMap<u64, Demand>>,
+    next_id: AtomicU64,
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    let port = std::env::var("PACEWALL_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
+    let (tx, _) = watch::channel(Arc::new(Snapshot { game: false, fields: Vec::new() }));
+    let shared = Arc::new(Shared { tx, demands: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1) });
+
+    let producer = shared.clone();
+    std::thread::spawn(move || produce(producer));
+
+    let app = Router::new()
+        .route("/", get(|| async { Html(include_str!("explorer.html")) }))
+        .route("/ws", get(upgrade))
+        .with_state(shared);
+
+    let addr = format!("127.0.0.1:{port}");
+    let listener = tokio::net::TcpListener::bind(&addr).await.expect("port déjà utilisé ?");
+    println!("PaceWall : http://{addr}  (explorateur de données)");
+    axum::serve(listener, app).await.unwrap();
+}
+
+/// Lecture du jeu. Ne tourne que si quelqu'un écoute.
+#[cfg(windows)]
+fn produce(shared: Arc<Shared>) {
+    use lmu::reader::Reader;
+
+    let mut reader: Option<Reader> = None;
+    let mut last_events = u32::MAX;
+    let mut last_change = Instant::now();
+    let mut game_live = false;
+
+    loop {
+        let (hz, want_grid) = {
+            let d = shared.demands.lock().unwrap();
+            let hz = d.values().map(|d| d.hz).max().unwrap_or(0);
+            let grid = d.values().any(|d| d.prefixes.iter().any(|p| "grid.".starts_with(p.as_str()) || p.starts_with("grid.")));
+            (hz.min(MAX_HZ), grid)
+        };
+        if hz == 0 {
+            // Personne n'écoute : on ne touche pas à la mémoire du jeu.
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+
+        if reader.is_none() {
+            reader = Reader::open();
+            last_events = u32::MAX;
+            if reader.is_none() {
+                publish(&shared, false, Vec::new(), &mut game_live);
+                std::thread::sleep(Duration::from_secs(2));
+                continue;
+            }
+        }
+        let r = reader.as_ref().unwrap();
+
+        let events = r.events().SME_UPDATE_TELEMETRY;
+        if events != last_events {
+            last_events = events;
+            last_change = Instant::now();
+            publish(&shared, true, flatten::read_all(r, want_grid), &mut game_live);
+        } else if last_change.elapsed() > Duration::from_secs(3) {
+            // Jeu en pause, dans les menus ou fermé : on ralentit, et on referme si la zone a disparu.
+            publish(&shared, false, Vec::new(), &mut game_live);
+            reader = None;
+            std::thread::sleep(Duration::from_secs(1));
+            continue;
+        }
+        std::thread::sleep(Duration::from_millis(1000 / hz as u64));
+    }
+}
+
+#[cfg(not(windows))]
+fn produce(_shared: Arc<Shared>) {}
+
+fn publish(shared: &Shared, game: bool, fields: Vec<Field>, live: &mut bool) {
+    if !game && !*live && fields.is_empty() && shared.tx.borrow().fields.is_empty() {
+        // Rien n'a changé depuis le dernier « jeu absent » : on évite de réveiller les clients.
+        return;
+    }
+    *live = game;
+    shared.tx.send_replace(Arc::new(Snapshot { game, fields }));
+}
+
+async fn upgrade(ws: WebSocketUpgrade, State(shared): State<Arc<Shared>>) -> axum::response::Response {
+    ws.on_upgrade(move |socket| client(socket, shared))
+}
+
+async fn client(mut socket: WebSocket, shared: Arc<Shared>) {
+    let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
+    let mut rx = shared.tx.subscribe();
+    let mut demand = Demand::default();
+    let mut sent: HashMap<String, Value> = HashMap::new();
+    let mut last_game: Option<bool> = None;
+    let mut last_send = Instant::now() - Duration::from_secs(1);
+    let mut dirty = false;
+
+    loop {
+        let period = Duration::from_millis(1000 / demand.hz.clamp(1, MAX_HZ) as u64);
+        let deadline = dirty.then(|| tokio::time::Instant::from_std(last_send + period));
+
+        tokio::select! {
+            msg = socket.recv() => {
+                let Some(Ok(Message::Text(text))) = msg else {
+                    match msg { Some(Ok(_)) => continue, _ => break }
+                };
+                if let Ok(v) = serde_json::from_str::<Value>(&text) {
+                    demand.prefixes = v["sub"].as_array().map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()).unwrap_or_default();
+                    demand.hz = v["hz"].as_u64().unwrap_or(10).clamp(1, MAX_HZ as u64) as u32;
+                    shared.demands.lock().unwrap().insert(id, demand.clone());
+                    sent.clear();
+                    last_game = None;
+                    dirty = true;
+                }
+            }
+            changed = rx.changed() => {
+                if changed.is_err() { break; }
+                dirty = true;
+            }
+            _ = async { match deadline { Some(t) => tokio::time::sleep_until(t).await, None => std::future::pending().await } } => {}
+        }
+
+        if dirty && last_send.elapsed() >= period && !demand.prefixes.is_empty() {
+            let snap = rx.borrow().clone();
+            if let Some(text) = diff(&snap, &demand, &mut sent, &mut last_game) {
+                if socket.send(Message::Text(text)).await.is_err() {
+                    break;
+                }
+            }
+            last_send = Instant::now();
+            dirty = false;
+        }
+    }
+    shared.demands.lock().unwrap().remove(&id);
+}
+
+/// Message de mise à jour : seulement ce qui a changé depuis le dernier envoi à ce client.
+fn diff(snap: &Snapshot, demand: &Demand, sent: &mut HashMap<String, Value>, last_game: &mut Option<bool>) -> Option<String> {
+    let mut changed = Map::new();
+    let mut meta = Map::new();
+    let mut seen: Vec<&str> = Vec::with_capacity(snap.fields.len());
+
+    for f in &snap.fields {
+        if !demand.prefixes.iter().any(|p| f.key.starts_with(p.as_str())) {
+            continue;
+        }
+        seen.push(&f.key);
+        match sent.get(&f.key) {
+            Some(old) if *old == f.value => {}
+            Some(_) => {
+                changed.insert(f.key.clone(), f.value.clone());
+                sent.insert(f.key.clone(), f.value.clone());
+            }
+            None => {
+                meta.insert(f.key.clone(), json!([f.unit, f.label]));
+                changed.insert(f.key.clone(), f.value.clone());
+                sent.insert(f.key.clone(), f.value.clone());
+            }
+        }
+    }
+
+    let removed: Vec<String> = if snap.fields.is_empty() {
+        let all = sent.keys().cloned().collect();
+        sent.clear();
+        all
+    } else {
+        let gone: Vec<String> = sent.keys().filter(|k| !seen.contains(&k.as_str())).cloned().collect();
+        for k in &gone {
+            sent.remove(k);
+        }
+        gone
+    };
+
+    let game_changed = *last_game != Some(snap.game);
+    *last_game = Some(snap.game);
+    if changed.is_empty() && removed.is_empty() && !game_changed {
+        return None;
+    }
+    let mut msg = json!({ "t": "u", "game": snap.game, "d": changed });
+    if !meta.is_empty() {
+        msg["m"] = Value::Object(meta);
+    }
+    if !removed.is_empty() {
+        msg["x"] = json!(removed);
+    }
+    Some(msg.to_string())
+}
