@@ -1,0 +1,15 @@
+[package]
+name = "fakegame"
+version = "0.1.0"
+edition = "2021"
+description = "Faux Le Mans Ultimate : crée LMU_Data avec des valeurs qui bougent, pour développer sans le jeu"
+
+[dependencies]
+lmu = { path = "../lmu" }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Memory",
+] }

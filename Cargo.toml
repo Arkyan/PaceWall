@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/collector"]
+members = ["crates/lmu", "crates/collector", "crates/fakegame"]
 
 [profile.release]
 opt-level = "s"

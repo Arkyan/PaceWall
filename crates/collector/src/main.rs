@@ -1,36 +1,49 @@
-//! Premier jalon : vérifier que la mémoire partagée « LMU_Data » est ouverte par le jeu.
-//! Les structures complètes (télémétrie, scoring) viennent ensuite, en `#[repr(C, packed(4))]`.
+//! Collecteur : lit `LMU_Data` et affiche l'essentiel de la voiture du joueur.
+//! Sans jeu, il dort longtemps entre deux essais (coût quasi nul).
 
 #[cfg(windows)]
 fn main() {
+    use lmu::reader::{c_str, Reader};
     use std::{thread, time::Duration};
-    use windows::core::w;
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Memory::{
-        MapViewOfFile, OpenFileMappingW, UnmapViewOfFile, FILE_MAP_READ,
-    };
 
     println!("PaceWall collector : en attente de Le Mans Ultimate (Ctrl+C pour quitter)");
     loop {
-        // Le jeu crée la zone ; tant qu'elle n'existe pas on dort longtemps (coût quasi nul).
-        let handle = unsafe { OpenFileMappingW(FILE_MAP_READ.0, false, w!("LMU_Data")) };
-        match handle {
-            Ok(h) => {
-                let view = unsafe { MapViewOfFile(h, FILE_MAP_READ, 0, 0, 0) };
-                if view.Value.is_null() {
-                    println!("Zone ouverte mais illisible");
-                } else {
-                    println!("LMU_Data ouverte : le jeu partage ses données");
-                    unsafe {
-                        let _ = UnmapViewOfFile(view);
-                    }
+        let Some(reader) = Reader::open() else {
+            thread::sleep(Duration::from_secs(3));
+            continue;
+        };
+        println!("LMU_Data ouverte (version du jeu {})", reader.game_version());
+        let mut last_update = u32::MAX;
+        let mut idle = 0;
+        loop {
+            let update = reader.events().SME_UPDATE_TELEMETRY;
+            if update == last_update {
+                // Le jeu ne publie plus : fermé ou en pause. On referme la zone après ~5 s.
+                idle += 1;
+                if idle > 50 {
+                    println!("Plus de données, retour à l'attente");
+                    break;
                 }
-                unsafe {
-                    let _ = CloseHandle(h);
-                }
-                thread::sleep(Duration::from_secs(2));
+                thread::sleep(Duration::from_millis(100));
+                continue;
             }
-            Err(_) => thread::sleep(Duration::from_secs(3)),
+            idle = 0;
+            last_update = update;
+
+            if let Some(v) = reader.player_telemetry() {
+                let info = reader.scoring_info();
+                let speed = v.mLocalVel.z.abs() * 3.6;
+                // Champs d'une structure `packed` : toujours copiés dans des locales avant affichage.
+                let (gear, rpm, fuel) = (v.mGear, v.mEngineRPM, v.mFuel);
+                let energy = v.mVirtualEnergy * 100.0;
+                let wear = v.mWheels[0].mWear * 100.0;
+                let (track, tyre) = (c_str(&info.mTrackName), c_str(&v.mFrontTireCompoundName));
+                println!(
+                    "{track} | {speed:>3.0} km/h | rapport {gear} | {rpm:>5.0} tr/min | carbu {fuel:>5.1} L | énergie {energy:>5.1} % | usure pneus {wear:.1} % | {tyre}"
+                );
+            }
+            // 4 fois par seconde suffit pour ce test ; les overlays choisiront leur cadence par widget.
+            thread::sleep(Duration::from_millis(250));
         }
     }
 }

@@ -6,6 +6,21 @@ version = 4
 name = "collector"
 version = "0.1.0"
 dependencies = [
+ "lmu",
+]
+
+[[package]]
+name = "fakegame"
+version = "0.1.0"
+dependencies = [
+ "lmu",
+ "windows",
+]
+
+[[package]]
+name = "lmu"
+version = "0.1.0"
+dependencies = [
  "windows",
 ]
 
