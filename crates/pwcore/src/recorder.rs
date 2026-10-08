@@ -84,7 +84,7 @@ fn averages(t: &VehicleTelemetry) -> (f64, f64, f64) {
         let temps = w.mTemperature;
         tyre += (temps[0] + temps[1] + temps[2]) / 3.0 - 273.15;
         brake += w.mBrakeTemp;
-        wear += (1.0 - w.mWear) * 100.0;
+        wear += w.mWear * 100.0;
     }
     (tyre / 4.0, brake / 4.0, wear / 4.0)
 }
@@ -181,7 +181,7 @@ fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<
                 // Après un arrêt, carburant et usure ne sont plus comparables : on ne les garde pas.
                 fuel_used: clean.then(|| cur.fuel0 - fuel).filter(|v| *v >= 0.0),
                 energy_used: clean.then(|| cur.energy0 - energy).filter(|v| *v >= 0.0),
-                wear_used: clean.then(|| wear - cur.wear0).filter(|v| *v >= 0.0),
+                wear_used: clean.then(|| cur.wear0 - wear).filter(|v| *v >= 0.0),
                 wear_end: wear,
                 tyre_temp: cur.tyre_sum / n,
                 brake_temp: cur.brake_sum / n,

@@ -93,7 +93,7 @@ PW.widgets.tyres = {
     { id: 'brakes', label: 'Températures des freins', type: 'bool', def: false },
     { id: 'tempsrc', label: 'Température affichée', type: 'select', choices: [['carcass', 'Carcasse'], ['inner', 'Couche interne'], ['surface', 'Surface (moyenne)']], def: 'carcass' },
     { id: 'tempoffset', label: 'Décalage de température (°C)', type: 'number', min: -10, max: 10, step: 0.5, def: 0 },
-    { id: 'wearmode', label: 'Usure', type: 'select', choices: [['used', 'Usée (0 → 100 %)'], ['left', 'Restante (100 → 0 %)']], def: 'used' },
+    { id: 'wearmode', label: "Affichage de l'usure", type: 'select', choices: [['state', 'État du pneu (100 → 0 %)'], ['used', 'Usure (0 → 100 %)']], def: 'state' },
     { id: 'unit', label: 'Unité de température', type: 'select', choices: [['c', '°C'], ['f', '°F']], def: 'c' },
   ],
   mount(root, o) {
@@ -118,11 +118,11 @@ PW.widgets.tyres = {
           const wear = g(`tyre.${n}.wear`, 0);
           b.text(n + 't', isFinite(t) ? Math.round(temp(t)) + '°' : '—');
           b.css(n, '--c', isFinite(t) ? `hsl(${hue(t - opt)} 70% 52%)` : '#666');
-          const worn = o.wearmode !== 'left';
-          b.scaleX(n + 'w', worn ? wear / 100 : 1 - wear / 100);
-          b.css(n + 'w', 'background', wear > 70 ? 'var(--pw-bad)' : wear > 45 ? 'var(--pw-warn)' : 'var(--pw-ok)');
+          const shown = o.wearmode === 'used' ? 100 - wear : wear;
+          b.scaleX(n + 'w', shown / 100);
+          b.css(n + 'w', 'background', wear < 30 ? 'var(--pw-bad)' : wear < 55 ? 'var(--pw-warn)' : 'var(--pw-ok)');
           const p = g(`tyre.${n}.pressure`);
-          b.text(n + 'i', (o.pressure === 'off' ? '' : (p ? press(p) + ' · ' : '')) + F.n(worn ? wear : 100 - wear, 0) + ' %');
+          b.text(n + 'i', (o.pressure === 'off' ? '' : (p ? press(p) + ' · ' : '')) + F.n(shown, 0) + ' %');
           if (b.el[n + 'b']) b.text(n + 'b', Math.round(temp(g(`brake.${n}.temp`, 0))) + '°');
         }
       },
@@ -468,7 +468,7 @@ PW.demo = (() => {
   };
   ['fl', 'fr', 'rl', 'rr'].forEach((n, i) => {
     Object.assign(d, { [`tyre.${n}.temp_left`]: 80 + i, [`tyre.${n}.temp_center`]: 86 + i, [`tyre.${n}.temp_right`]: 92 + i, [`tyre.${n}.carcass`]: 84 + i, [`tyre.${n}.optimal`]: 88,
-      [`tyre.${n}.pressure`]: 165 + i, [`tyre.${n}.wear`]: 12 + i * 2, [`brake.${n}.temp`]: 420 + i * 20 });
+      [`tyre.${n}.pressure`]: 165 + i, [`tyre.${n}.wear`]: 88 - i * 2, [`brake.${n}.temp`]: 420 + i * 20 });
   });
   const names = ['A. Martin', 'B. Dupont', 'C. Rossi', 'Toi', 'E. Keller', 'F. Sato', 'G. Novak', 'H. Silva', 'I. Moreau', 'J. Weber', 'K. Costa', 'L. Berg'];
   const cls = ['Hypercar', 'Hypercar', 'Hypercar', 'Hypercar', 'LMP2', 'Hypercar', 'LMGT3', 'LMP2', 'LMGT3', 'LMGT3', 'LMP2', 'LMGT3'];

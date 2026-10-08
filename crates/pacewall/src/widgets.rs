@@ -52,7 +52,7 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "brakes", label: "Températures des freins", kind: Bool(false) },
             Opt { id: "tempsrc", label: "Température affichée", kind: Choice(&[("carcass", "Carcasse"), ("inner", "Couche interne"), ("surface", "Surface (moyenne)")], "carcass") },
             Opt { id: "tempoffset", label: "Décalage de température (°C)", kind: Num { min: -10.0, max: 10.0, step: 0.5, def: 0.0 } },
-            Opt { id: "wearmode", label: "Usure", kind: Choice(&[("used", "Usée (0 → 100 %)"), ("left", "Restante (100 → 0 %)")], "used") },
+            Opt { id: "wearmode", label: "Affichage de l'usure", kind: Choice(&[("state", "État du pneu (100 → 0 %)"), ("used", "Usure (0 → 100 %)")], "state") },
             Opt { id: "unit", label: "Unité de température", kind: Choice(&[("c", "°C"), ("f", "°F")], "c") },
         ],
         "timing" => &[Opt { id: "gaps", label: "Écarts devant / derrière", kind: Bool(true) }],
@@ -255,7 +255,7 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let pressure = spec.choice("pressure", "kpa");
     let source = spec.choice("tempsrc", "carcass");
     let offset = spec.num("tempoffset", 0.0);
-    let worn = spec.choice("wearmode", "used") == "used";
+    let worn = spec.choice("wearmode", "state") == "used";
     let h = 28.0 + 134.0 + 12.0 + if brakes { 40.0 } else { 0.0 };
     d.card(w, h);
     d.label(16.0, 10.0, "Pneus", MUTED);
@@ -291,10 +291,11 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         d.fill(x, y, cw, 3.0, tint);
         let ttxt = if t.is_finite() { format!("{:.0}°", temp(t)) } else { "—".into() };
         d.text(x + cw / 2.0, y + 8.0, &ttxt, 24.0, TEXT, Font::Num, HAlign::Center);
-        // `wear` = usure en % (0 = neuve) ; la barre et le chiffre montrent l'usure ou ce qu'il reste, au choix.
-        let wf = if worn { wear / 100.0 } else { 1.0 - wear / 100.0 } as f32;
+        // `wear` = état du pneu en % comme le donne le jeu (100 = neuf) ; on peut aussi l'afficher en usure (0 = neuf).
+        let shown = if worn { 100.0 - wear } else { wear };
+        let wf = (shown / 100.0) as f32;
         d.fill(x + 8.0, y + 42.0, cw - 16.0, 3.0, Color32::from_white_alpha(26));
-        d.fill(x + 8.0, y + 42.0, (cw - 16.0) * wf.clamp(0.0, 1.0), 3.0, if wear > 70.0 { BAD } else if wear > 45.0 { WARN } else { OK });
+        d.fill(x + 8.0, y + 42.0, (cw - 16.0) * wf.clamp(0.0, 1.0), 3.0, if wear < 30.0 { BAD } else if wear < 55.0 { WARN } else { OK });
         let p = data.f(&format!("tyre.{n}.pressure"), 0.0);
         let ptxt = match pressure {
             "off" => String::new(),
@@ -303,7 +304,7 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
             "psi" => format!("{:.1} psi · ", p * 0.145038),
             _ => format!("{p:.0} kPa · "),
         };
-        d.text(x + cw / 2.0, y + 49.0, &format!("{ptxt}{:.0} %", if worn { wear } else { 100.0 - wear }), 11.0, MUTED, Font::Num, HAlign::Center);
+        d.text(x + cw / 2.0, y + 49.0, &format!("{ptxt}{shown:.0} %"), 11.0, MUTED, Font::Num, HAlign::Center);
     }
     if brakes {
         let bw = (w - 30.0) / 4.0;

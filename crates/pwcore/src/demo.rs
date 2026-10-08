@@ -67,7 +67,7 @@ pub fn data(t: f64) -> Data {
         put(&format!("tyre.{n}.inner"), json!(82.0 + i));
         put(&format!("tyre.{n}.optimal"), json!(88.0));
         put(&format!("tyre.{n}.pressure"), json!(165.0 + i));
-        put(&format!("tyre.{n}.wear"), json!(12.0 + i * 2.0));
+        put(&format!("tyre.{n}.wear"), json!(88.0 - i * 2.0));
         put(&format!("brake.{n}.temp"), json!(420.0 + i * 20.0));
     }
     let names = ["A. Martin", "B. Dupont", "C. Rossi", "Toi", "E. Keller", "F. Sato", "G. Novak", "H. Silva", "I. Moreau", "J. Weber", "K. Costa", "L. Berg"];

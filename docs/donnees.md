@@ -288,8 +288,10 @@ orientation de la carte (l'option de rotation corrige un décalage).
 
 ## 6 ter. Pneus et secteurs
 
-- **Usure** : `mWear` est la bande de gomme **restante** (1 = neuve, comme l'appelle TinyPedal « tread »). PaceWall expose
-  `tyre.*.wear` = `(1 − mWear) × 100` : 0 % neuve, la valeur monte. ⚠️ Déduit du comportement observé, à confirmer.
+- **État du pneu** : `mWear` est la bande de gomme **restante** (1 = neuve, « tread » chez TinyPedal). PaceWall expose
+  `tyre.*.wear` = `mWear × 100` : 100 % neuf, tombe vers 0 % quand le pneu est usé. Le widget peut aussi l'afficher en
+  usure (0 → 100 %). L'historique garde l'état et calcule l'usure par tour comme la baisse d'un tour à l'autre.
+  ⚠️ Sens de `mWear` déduit de TinyPedal, à confirmer sur le jeu (la valeur doit partir de ~100 et descendre).
 - **Températures** : `tyre.*.carcass` (`mTireCarcassTemperature`, la plus proche de l'affichage du jeu d'après TinyPedal),
   `tyre.*.inner` (moyenne de `mTireInnerLayerTemperature`), `temp_left/center/right` (surface). Le widget propose les trois
   sources et un décalage en °C.

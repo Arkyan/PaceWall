@@ -289,7 +289,7 @@ impl State {
         let charts: [(&str, Vec<[f64; 2]>, egui::Color32); 4] = [
             ("Temps au tour (s)", series(&|l| (l.valid && !l.pit).then_some(l.time)), ACCENT),
             ("Carburant par tour (L)", series(&|l| l.fuel), BLUE),
-            ("Usure des pneus (%)", series(&|l| Some(l.wear_end)), OK),
+            ("État des pneus (%)", series(&|l| Some(l.wear_end)), OK),
             ("Température des pneus (°C)", series(&|l| Some(l.tyre_temp)), BAD),
         ];
         // Deux courbes côte à côte si la place le permet, une seule sinon.
@@ -337,7 +337,7 @@ impl State {
             kit::section(ui, "Tours");
             egui::ScrollArea::horizontal().show(ui, |ui| {
             egui::Grid::new("laps").num_columns(12).spacing([18.0, 4.0]).striped(true).show(ui, |ui| {
-                for h in ["Tour", "Temps", "Carbu (L)", "Énergie (%)", "Usure/tour", "Usure (%)", "Pneus °C", "Freins °C", "Piste °C", "Pluie", "Pos.", "Gomme"] {
+                for h in ["Tour", "Temps", "Carbu (L)", "Énergie (%)", "Usure/tour", "État (%)", "Pneus °C", "Freins °C", "Piste °C", "Pluie", "Pos.", "Gomme"] {
                     ui.label(RichText::new(h.to_uppercase()).size(10.5).color(MUTED));
                 }
                 ui.end_row();
