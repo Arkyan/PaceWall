@@ -75,6 +75,7 @@ async fn main() {
         .route("/editor", get(|| async { Html(include_str!("../overlay/editor.html")) }))
         .route("/assets/runtime.js", get(|| async { asset("text/javascript", include_str!("../overlay/runtime.js")) }))
         .route("/assets/widgets.js", get(|| async { asset("text/javascript", include_str!("../overlay/widgets.js")) }))
+        .route("/assets/theme.css", get(|| async { asset("text/css", include_str!("../overlay/theme.css")) }))
         .route("/assets/overlay.css", get(|| async { asset("text/css", include_str!("../overlay/overlay.css")) }))
         .route("/api/layouts", get(api_layouts_get).put(api_layouts_put))
         .route("/ws", get(upgrade))

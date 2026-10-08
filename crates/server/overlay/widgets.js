@@ -39,7 +39,7 @@ const barColor = f => f < 0.15 ? 'var(--pw-bad)' : f < 0.3 ? 'var(--pw-warn)' : 
 
 /* ---------- Carburant et énergie ---------- */
 function resourceBlock(id, title, unit, decimals) {
-  return `<div class="pw-title">${title}<em data-k="${id}lim"></em></div>
+  return `<div class="pw-title"><span>${title}</span><em data-k="${id}lim"></em></div>
     <div class="pw-row"><span class="pw-big" data-k="${id}">—</span><span class="pw-unit">${unit}</span><span class="pw-sub" data-k="${id}pct"></span></div>
     <div class="pw-bar"><i data-k="${id}bar"></i></div>
     <div class="pw-stats">
@@ -96,7 +96,7 @@ PW.widgets.tyres = {
   mount(root, o) {
     const names = ['fl', 'fr', 'rl', 'rr'];
     const tyre = n => `<div class="pw-tyre" data-k="${n}" data-base="pw-tyre"><b data-k="${n}t">—</b><div class="wear"><i data-k="${n}w"></i></div><small data-k="${n}i">—</small></div>`;
-    const card = PW.tpl(`<div class="pw-card"><div class="pw-title">Pneus<em data-k="cmp"></em></div>
+    const card = PW.tpl(`<div class="pw-card"><div class="pw-title"><span>Pneus</span><em data-k="cmp"></em></div>
       <div class="pw-tyres">${names.map(tyre).join('')}</div>
       ${o.brakes ? '<div class="pw-brakes">' + names.map(n => `<div>${n.toUpperCase()}<b data-k="${n}b">—</b></div>`).join('') + '</div>' : ''}</div>`).firstChild;
     root.appendChild(card);
@@ -215,7 +215,7 @@ PW.widgets.standings = {
   ],
   mount(root, o) {
     const rows = o.ahead + o.behind + 1;
-    const card = PW.tpl(`<div class="pw-card"><div class="pw-title">Classement<em data-k="cls"></em></div><table class="pw-board"><tbody data-k="body"></tbody></table></div>`).firstChild;
+    const card = PW.tpl(`<div class="pw-card"><div class="pw-title"><span>Classement</span><em data-k="cls"></em></div><table class="pw-board"><tbody data-k="body"></tbody></table></div>`).firstChild;
     root.appendChild(card);
     const body = card.querySelector('tbody');
     const trs = [];
