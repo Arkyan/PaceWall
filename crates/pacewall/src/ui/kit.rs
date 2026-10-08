@@ -48,9 +48,10 @@ pub fn dot(ui: &mut Ui, color: Color32, label: &str, value: &str) {
 }
 
 /// Carte de chiffre : libellé et grande valeur.
-pub fn stat(ui: &mut Ui, label: &str, value: &str, unit: &str) {
+/// Cadre de statistique de largeur extérieure `width` (marges et contour compris) : permet de les ranger en grille.
+pub fn stat_sized(ui: &mut Ui, width: f32, label: &str, value: &str, unit: &str) {
     Frame::NONE.fill(PANEL).stroke(Stroke::new(1.0, LINE)).inner_margin(Margin::symmetric(14, 10)).show(ui, |ui| {
-        ui.set_min_width(120.0);
+        ui.set_width((width - 30.0).max(60.0));
         ui.label(RichText::new(label.to_uppercase()).size(10.5).color(MUTED));
         ui.horizontal(|ui| {
             ui.label(RichText::new(value).font(num_font(21.0)));

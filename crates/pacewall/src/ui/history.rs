@@ -1,4 +1,4 @@
-//! Historique : sessions enregistrées, statistiques, courbes et tableau des tours.
+﻿//! Historique : sessions enregistrées, statistiques, courbes et tableau des tours.
 
 use super::kit;
 use crate::draw;
@@ -156,6 +156,7 @@ impl State {
             return;
         }
         egui::Panel::left("history_list").exact_size(if ui.available_width() >= 1000.0 { 310.0 } else { 240.0 }).resizable(false).frame(egui::Frame::NONE.fill(PANEL).stroke(egui::Stroke::new(1.0, LINE))).show(ui, |ui| {
+            ui.add_space(22.0);
             ui.horizontal(|ui| {
                 ui.add_space(14.0);
                 ui.label(RichText::new("SESSIONS").size(12.0).color(MUTED));
@@ -204,8 +205,13 @@ impl State {
             let Some(found) = self.sessions.iter().find(|s| s.id == id) else { return };
             // Copie des champs affichés : la fermeture ci-dessous modifie `self`.
             let session = Session { id: found.id, started: found.started, ended: found.ended, track: found.track.clone(), car: found.car.clone(), class: found.class.clone(), kind: found.kind, laps: found.laps, best: found.best };
+            // Largeur du panneau mesurée avant le défilement : sert de limite au contenu (marges et barre déduites).
+            let page_w = ui.available_width();
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                egui::Frame::NONE.inner_margin(Margin::symmetric(24, 18)).show(ui, |ui| {
+                egui::Frame::NONE.inner_margin(Margin::symmetric(30, 26)).show(ui, |ui| {
+                    // Rien ne doit élargir la page au-delà de la fenêtre : le contenu a une largeur imposée, les blocs passent à la ligne.
+                    let rect = egui::Rect::from_min_size(ui.cursor().min, vec2(page_w - 60.0 - 14.0, ui.available_height()));
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                     let mut delete = false;
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
@@ -239,6 +245,7 @@ impl State {
                     self.charts(ui);
                     ui.add_space(12.0);
                     self.table(ui);
+                    });
                 });
             });
         });
@@ -253,15 +260,28 @@ impl State {
             let v: Vec<f64> = self.laps.iter().filter_map(f).collect();
             if v.is_empty() { None } else { Some(v.iter().sum::<f64>() / v.len() as f64) }
         };
-        ui.horizontal_wrapped(|ui| {
-            kit::stat(ui, "Tours", &self.laps.len().to_string(), "");
-            kit::stat(ui, "Meilleur", &draw::lap(best.is_finite().then_some(best)), "");
-            kit::stat(ui, "Moyenne", &draw::lap(mean), "");
-            kit::stat(ui, "Régularité", &sd.map(|s| format!("± {s:.2}")).unwrap_or_else(|| "—".into()), "s");
-            kit::stat(ui, "Carburant / tour", &draw::n(avg(&|l| l.fuel), 2), "L");
-            kit::stat(ui, "Énergie / tour", &draw::n(avg(&|l| l.energy), 1), "%");
-            kit::stat(ui, "Usure pneus / tour", &draw::n(avg(&|l| l.wear), 2), "%");
-        });
+        let items: [(&str, String, &str); 7] = [
+            ("Tours", self.laps.len().to_string(), ""),
+            ("Meilleur", draw::lap(best.is_finite().then_some(best)), ""),
+            ("Moyenne", draw::lap(mean), ""),
+            ("Régularité", sd.map(|s| format!("± {s:.2}")).unwrap_or_else(|| "—".into()), "s"),
+            ("Carburant / tour", draw::n(avg(&|l| l.fuel), 2), "L"),
+            ("Énergie / tour", draw::n(avg(&|l| l.energy), 1), "%"),
+            ("Usure pneus / tour", draw::n(avg(&|l| l.wear), 2), "%"),
+        ];
+        // Grille à largeur fixe : autant de colonnes que la place le permet, les autres passent à la ligne.
+        let gap = 10.0;
+        let avail = ui.available_width();
+        let cols = (((avail + gap) / (170.0 + gap)).floor() as usize).clamp(1, items.len());
+        let cw = ((avail - gap * (cols as f32 - 1.0)) / cols as f32).floor();
+        ui.spacing_mut().item_spacing = vec2(gap, gap);
+        for row in items.chunks(cols) {
+            ui.horizontal(|ui| {
+                for (label, value, unit) in row {
+                    kit::stat_sized(ui, cw, label, value, unit);
+                }
+            });
+        }
     }
 
     fn charts(&self, ui: &mut Ui) {
@@ -275,13 +295,22 @@ impl State {
         // Deux courbes côte à côte si la place le permet, une seule sinon.
         let avail = ui.available_width();
         let cols = if avail >= 760.0 { 2.0 } else { 1.0 };
-        let w = (avail - 12.0 * (cols - 1.0)) / cols;
-        ui.horizontal_wrapped(|ui| {
-            for (i, (title, pts, color)) in charts.iter().enumerate() {
+        let gap = 12.0;
+        ui.spacing_mut().item_spacing.x = gap;
+        // Largeur utile d'un bloc : colonne moins marges (2 × 14) et traits de contour.
+        let w = ((avail - gap * (cols - 1.0)) / cols - 30.0).floor().max(160.0);
+        ui.spacing_mut().item_spacing.y = gap;
+        for (r, row) in charts.chunks(cols as usize).enumerate() {
+          ui.horizontal(|ui| {
+            for (j, (title, pts, color)) in row.iter().enumerate() {
+                let i = r * cols as usize + j;
                 kit::panel_frame().show(ui, |ui| {
-                    ui.set_width((w - 30.0).max(200.0));
+                  // Dans une ligne horizontale : le contenu du bloc doit rester empilé (titre au-dessus de la courbe).
+                  ui.vertical(|ui| {
+                    ui.set_width(w);
                     kit::section(ui, title);
                     Plot::new(("plot", i))
+                        .width(w)
                         .height(150.0)
                         .allow_zoom(false)
                         .allow_drag(false)
@@ -295,9 +324,11 @@ impl State {
                             p.line(Line::new(*title, PlotPoints::from(pts.clone())).color(*color).width(2.0));
                             p.points(Points::new(*title, PlotPoints::from(pts.clone())).color(*color).radius(2.5));
                         });
+                  });
                 });
             }
-        });
+          });
+        }
     }
 
     fn table(&self, ui: &mut Ui) {
