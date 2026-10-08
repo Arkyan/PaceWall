@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PaceWall · Overlay</title>
+<link rel="stylesheet" href="/assets/overlay.css">
+</head>
+<body class="pw-page">
+<script src="/assets/widgets.js"></script>
+<script src="/assets/runtime.js"></script>
+<script>
+  // /overlay/player  : mise en page « joueur » (fenêtre par-dessus le jeu)
+  // /overlay/obs     : mise en page « OBS » (source navigateur, fond transparent)
+  // Options d'URL : ?only=fuel,tyres  (n'afficher que ces widgets)   ?demo=1  (données factices)
+  const target = location.pathname.split('/').pop() === 'obs' ? 'obs' : 'player';
+  const q = new URLSearchParams(location.search);
+  const only = q.get('only') ? q.get('only').split(',') : null;
+  let view;
+
+  async function load() {
+    const layouts = await PW.loadLayouts();
+    const layout = (layouts.targets && layouts.targets[target]) || PW.defaultLayout();
+    if (view) view.setLayout(layout);
+    else view = PW.createView(document.body, { layout, only });
+  }
+
+  PW.feed.onLayout(load);          // l'éditeur vient d'enregistrer : on recharge la mise en page
+  PW.feed.setMode(q.get('demo') ? 'demo' : 'live');
+  load();
+</script>
+</body>
+</html>

@@ -13,10 +13,10 @@ pub struct Field {
     pub value: Value,
 }
 
-struct Out(Vec<Field>);
+pub struct Out(pub Vec<Field>);
 
 impl Out {
-    fn num(&mut self, key: impl Into<String>, unit: &'static str, label: &'static str, v: f64) {
+    pub fn num(&mut self, key: impl Into<String>, unit: &'static str, label: &'static str, v: f64) {
         // 3 décimales : évite d'envoyer du bruit de virgule flottante.
         let v = if v.is_finite() { (v * 1000.0).round() / 1000.0 } else { 0.0 };
         self.0.push(Field { key: key.into(), unit, label, value: json!(v) });
@@ -27,7 +27,7 @@ impl Out {
     fn flag(&mut self, key: impl Into<String>, label: &'static str, v: bool) {
         self.0.push(Field { key: key.into(), unit: "", label, value: json!(v) });
     }
-    fn text(&mut self, key: impl Into<String>, label: &'static str, v: String) {
+    pub fn text(&mut self, key: impl Into<String>, label: &'static str, v: String) {
         self.0.push(Field { key: key.into(), unit: "", label, value: json!(v) });
     }
 }

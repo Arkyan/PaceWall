@@ -4,15 +4,17 @@
 //!   du client le plus exigeant, et sans lire le classement si personne ne s'y abonne.
 //! - Chaque client WebSocket s'abonne à des préfixes de clés et ne reçoit que les valeurs qui ont changé.
 //! - La page `/` est l'explorateur de données (`explorer.html`), `/history` l'historique des sessions.
+//! - `/overlay/player` et `/overlay/obs` : les overlays ; `/editor` : leur éditeur ; `/api/layouts` : les mises en page.
 //! - Un second thread (`recorder`) enregistre les tours dans SQLite, overlay ouverte ou non.
 
 mod db;
 mod flatten;
 mod recorder;
+mod strategy;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use axum::Json;
 use axum::response::Html;
 use axum::routing::{delete, get};
@@ -46,6 +48,7 @@ struct Shared {
     demands: Mutex<HashMap<u64, Demand>>,
     next_id: AtomicU64,
     db: Mutex<Option<rusqlite::Connection>>,
+    layout_rev: watch::Sender<u64>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -57,6 +60,7 @@ async fn main() {
         demands: Mutex::new(HashMap::new()),
         next_id: AtomicU64::new(1),
         db: Mutex::new(db::open().ok()),
+        layout_rev: watch::channel(0).0,
     });
 
     let producer = shared.clone();
@@ -67,6 +71,12 @@ async fn main() {
     let app = Router::new()
         .route("/", get(|| async { Html(include_str!("explorer.html")) }))
         .route("/history", get(|| async { Html(include_str!("history.html")) }))
+        .route("/overlay/:target", get(|| async { Html(include_str!("../overlay/overlay.html")) }))
+        .route("/editor", get(|| async { Html(include_str!("../overlay/editor.html")) }))
+        .route("/assets/runtime.js", get(|| async { asset("text/javascript", include_str!("../overlay/runtime.js")) }))
+        .route("/assets/widgets.js", get(|| async { asset("text/javascript", include_str!("../overlay/widgets.js")) }))
+        .route("/assets/overlay.css", get(|| async { asset("text/css", include_str!("../overlay/overlay.css")) }))
+        .route("/api/layouts", get(api_layouts_get).put(api_layouts_put))
         .route("/ws", get(upgrade))
         .route("/api/sessions", get(api_sessions))
         .route("/api/sessions/:id/laps", get(api_laps))
@@ -75,7 +85,9 @@ async fn main() {
 
     let addr = format!("127.0.0.1:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("port déjà utilisé ?");
-    println!("PaceWall : http://{addr}  (explorateur)  http://{addr}/history  (historique)
+    println!("PaceWall : http://{addr}
+  explorateur  /   historique  /history   éditeur  /editor
+  overlays  /overlay/player  /overlay/obs
   base : {}", db::path().display());
     axum::serve(listener, app).await.unwrap();
 }
@@ -86,6 +98,7 @@ fn produce(shared: Arc<Shared>) {
     use lmu::reader::Reader;
 
     let mut reader: Option<Reader> = None;
+    let mut strategy = strategy::Strategy::default();
     let mut last_events = u32::MAX;
     let mut last_change = Instant::now();
     let mut game_live = false;
@@ -106,6 +119,7 @@ fn produce(shared: Arc<Shared>) {
         if reader.is_none() {
             reader = Reader::open();
             last_events = u32::MAX;
+            strategy = strategy::Strategy::default();
             if reader.is_none() {
                 publish(&shared, false, Vec::new(), &mut game_live);
                 std::thread::sleep(Duration::from_secs(2));
@@ -118,7 +132,9 @@ fn produce(shared: Arc<Shared>) {
         if events != last_events {
             last_events = events;
             last_change = Instant::now();
-            publish(&shared, true, flatten::read_all(r, want_grid), &mut game_live);
+            let mut fields = flatten::read_all(r, want_grid);
+            strategy.update(&mut fields);
+            publish(&shared, true, fields, &mut game_live);
         } else if last_change.elapsed() > Duration::from_secs(3) {
             // Jeu en pause, dans les menus ou fermé : on ralentit, et on referme si la zone a disparu.
             publish(&shared, false, Vec::new(), &mut game_live);
@@ -140,6 +156,36 @@ fn publish(shared: &Shared, game: bool, fields: Vec<Field>, live: &mut bool) {
     }
     *live = game;
     shared.tx.send_replace(Arc::new(Snapshot { game, fields }));
+}
+
+fn asset(content_type: &'static str, body: &'static str) -> ([(header::HeaderName, String); 2], &'static str) {
+    ([(header::CONTENT_TYPE, format!("{content_type}; charset=utf-8")), (header::CACHE_CONTROL, "no-cache".into())], body)
+}
+
+fn layouts_path() -> std::path::PathBuf {
+    db::path().with_file_name("layouts.json")
+}
+
+/// Mises en page des overlays (joueur et OBS), telles que l'éditeur les a enregistrées.
+async fn api_layouts_get() -> ([(header::HeaderName, &'static str); 1], String) {
+    let text = std::fs::read_to_string(layouts_path()).unwrap_or_else(|_| "{}".into());
+    ([(header::CONTENT_TYPE, "application/json")], text)
+}
+
+async fn api_layouts_put(State(shared): State<Arc<Shared>>, body: String) -> StatusCode {
+    if body.len() > 256 * 1024 || serde_json::from_str::<Value>(&body).is_err() {
+        return StatusCode::BAD_REQUEST;
+    }
+    let path = layouts_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if std::fs::write(path, body).is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    // Prévient les overlays ouvertes : elles rechargent leur mise en page.
+    shared.layout_rev.send_modify(|r| *r += 1);
+    StatusCode::NO_CONTENT
 }
 
 type ApiResult = Result<Json<Value>, StatusCode>;
@@ -172,6 +218,7 @@ async fn upgrade(ws: WebSocketUpgrade, State(shared): State<Arc<Shared>>) -> axu
 async fn client(mut socket: WebSocket, shared: Arc<Shared>) {
     let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
     let mut rx = shared.tx.subscribe();
+    let mut layout_rx = shared.layout_rev.subscribe();
     let mut demand = Demand::default();
     let mut sent: HashMap<String, Value> = HashMap::new();
     let mut last_game: Option<bool> = None;
@@ -195,6 +242,9 @@ async fn client(mut socket: WebSocket, shared: Arc<Shared>) {
                     last_game = None;
                     dirty = true;
                 }
+            }
+            changed = layout_rx.changed() => {
+                if changed.is_err() || socket.send(Message::Text(r#"{"t":"layout"}"#.into())).await.is_err() { break; }
             }
             changed = rx.changed() => {
                 if changed.is_err() { break; }

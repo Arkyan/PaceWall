@@ -27,8 +27,9 @@ Voir [docs/donnees.md](docs/donnees.md).
 1. [x] Squelette et détection de la mémoire partagée `LMU_Data`
 2. [x] Structures `#[repr(C, packed(4))]` (tailles et décalages vérifiés contre la référence) et lecture des valeurs brutes
 3. [x] Serveur WebSocket (différences seulement, abonnement par préfixe) et explorateur de données
-4. [ ] Overlay minimal (carburant, pneus) dans OBS et en fenêtre Tauri
-5. [ ] Moteur de stratégie et alertes
+4. [x] Overlays web (6 widgets), éditeur, mises en page joueur / OBS
+   - [ ] Fenêtre Tauri transparente aux clics pour l'overlay joueur
+5. [~] Moteur de stratégie (conso, tours restants, à ajouter : fait) ; alertes vocales à faire
 6. [x] Historique SQLite (enregistrement automatique des tours) et page de consultation `/history`
 
 ## Développer sans le jeu
@@ -70,3 +71,21 @@ lu uniquement si demandé). Unités déjà converties : km/h, °C, %, secondes.
   températures moyennes pneus et freins, météo, position, gomme.
 - Le tour en cours au moment où PaceWall se branche est ignoré (il serait incomplet).
 - API : `GET /api/sessions`, `GET /api/sessions/{id}/laps`, `DELETE /api/sessions/{id}`.
+
+## Overlays
+
+| Page | Rôle |
+|---|---|
+| `/editor` | Éditeur : ajouter, glisser, régler les widgets ; mises en page « Joueur » et « OBS » ; démo ou jeu en direct |
+| `/overlay/player` | Overlay joueur (fond transparent) |
+| `/overlay/obs` | Overlay pour une source navigateur OBS (1920×1080, fond transparent) |
+| `/overlay/obs?only=fuel,tyres` | Seulement certains widgets (une source OBS par widget) |
+| `/overlay/player?demo=1` | Données factices, pour voir le rendu sans jeu |
+
+- **Widgets** : carburant et énergie, pneus, chrono et écarts, pilotage, classement, session et météo.
+- Les overlays disparaissent quand le jeu n'est pas là, et se rechargent seules quand la mise en page est enregistrée.
+- Positions en pourcentage de l'écran, tailles relatives à une hauteur de 1080 px : la mise en page suit la résolution.
+- Mises en page enregistrées dans `%APPDATA%\PaceWall\layouts.json`.
+- **Stratégie** (calculée côté serveur, `strategy.*`) : consommation moyenne des 3 derniers tours propres, tours restants,
+  quantité à ajouter pour finir. Un tour avec arrêt ou incomplet n'est pas compté.
+- Ajouter un widget : une entrée dans `crates/server/overlay/widgets.js` (nom, clés suivies, options, `mount`).
