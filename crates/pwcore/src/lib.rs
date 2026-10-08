@@ -16,5 +16,6 @@ pub mod live;
 pub mod recorder;
 pub mod settings;
 pub mod strategy;
+pub mod trackmap;
 
 pub use data::Data;

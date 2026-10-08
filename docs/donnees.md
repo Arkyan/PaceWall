@@ -274,6 +274,18 @@ une option. Les données de ce canal sont celles qui manquent à la mémoire par
 | Historique par tour | Tout ce qui précède, échantillonné à chaque passage de ligne (`mLapNumber` change) |
 | Clips automatiques | `mLastImpactET`, `mPlace`, `mTotalLaps`, `mPitState` |
 
+## 6 bis. Carte du circuit
+
+| Donnée | Source | Usage |
+|---|---|---|
+| Position dans le monde | `VehicleScoring.mPos` (x, y, z en mètres) pour toutes les voitures | Voitures sur la carte |
+| Distance dans le tour | `VehicleScoring.mLapDist` | Découpage du tour, carte de secours en cercle |
+| Longueur du tour | `ScoringInfo.mLapDist` | Position sur le cercle |
+| Validité du tour | `VehicleScoring.mLastLapTime > 0` | Valider un tour enregistré |
+
+Repère retenu comme TinyPedal : abscisse `mPos.x`, ordonnée `-mPos.z`. ⚠️ À confirmer avec le vrai jeu : sens et
+orientation de la carte (l'option de rotation corrige un décalage).
+
 ## 7. Mesure et vérification
 
 - `cargo test -p lmu` : vérifie que la disposition des structures correspond à celle du jeu

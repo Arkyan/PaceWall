@@ -333,10 +333,83 @@ PW.widgets.session = {
   },
 };
 
+/* ---------- Carte du circuit ---------- */
+// Même principe que le widget natif : carte enregistrée pendant un tour propre (/api/track), repère (x, -z) ;
+// sans carte, un cercle avec les voitures placées selon leur distance dans le tour.
+PW.widgets.trackmap = {
+  name: 'Carte du circuit',
+  keys: ['grid.', 'session.track', 'session.vehicles', 'demo.map'],
+  hz: 5, size: [260, 276],
+  options: [
+    { id: 'size', label: 'Taille de la carte', type: 'number', min: 160, max: 420, step: 10, def: 260 },
+    { id: 'rotate', label: 'Rotation', type: 'select', choices: [['0', '0°'], ['90', '90°'], ['180', '180°'], ['270', '270°']], def: '0' },
+    { id: 'others', label: 'Afficher les autres voitures', type: 'bool', def: true },
+  ],
+  mount(root, o) {
+    const S = +o.size || 260, W = S, H = S + 16, R = 2;
+    const card = PW.tpl(`<div class="pw-card" style="width:${W}px;height:${H}px;padding:0">
+      <canvas width="${W * R}" height="${H * R}" style="width:${W}px;height:${H}px;position:absolute;left:0;top:0"></canvas>
+      <div class="pw-title" style="position:absolute;left:16px;right:16px;top:10px"><span>Carte</span><em data-k="trk"></em></div></div>`).firstChild;
+    root.appendChild(card);
+    const b = PW.bind(card), ctx = card.querySelector('canvas').getContext('2d');
+    const angle = (+o.rotate || 0) * Math.PI / 180, sin = Math.sin(angle), cos = Math.cos(angle);
+    const rot = p => [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos];
+    let key = null, map = null, tried = -1e9;
+
+    const demoMap = () => Array.from({ length: 360 }, (_, i) => { const a = i / 360 * Math.PI * 2; return [520 * Math.cos(a) + 130 * Math.cos(3 * a), 300 * Math.sin(a) + 90 * Math.sin(2 * a)]; });
+    const colorOf = c => /hyper/i.test(c) ? '#e5393b' : /lmp2/i.test(c) ? '#2d7ff9' : /gt3/i.test(c) ? '#2fbf71' : /lmp3/i.test(c) ? '#a85cf2' : /gte/i.test(c) ? '#f2a93b' : '#7b8494';
+
+    return {
+      update(g) {
+        const track = g('session.track', ''), demo = !!g('demo.map', false), k = demo ? 'demo' : track;
+        b.text('trk', track);
+        if (k !== key) { key = k; map = null; tried = -1e9; if (demo) map = demoMap(); }
+        if (!map && !demo && track && performance.now() - tried > 3000) {
+          tried = performance.now();
+          fetch('/api/track/' + encodeURIComponent(track)).then(r => r.ok ? r.json() : null).then(m => { if (m && key === k) map = m.points; }).catch(() => {});
+        }
+        const n = Math.min(g('session.vehicles', 0), 104), cars = [];
+        for (let i = 0; i < n; i++) {
+          const p = 'grid.' + String(i).padStart(3, '0');
+          const x = g(p + '.x'), z = g(p + '.z'); if (x == null || z == null) continue;
+          const me = !!g(p + '.is_player'); if (!me && !o.others) continue;
+          cars.push({ xy: [x, -z], d: g(p + '.lap_dist', 0), cls: g(p + '.class', ''), me, pit: !!g(p + '.in_pits') });
+        }
+        const ax = 16, ay = 32, aw = W - 32, ah = H - 32 - 14;
+        ctx.setTransform(R, 0, 0, R, 0, 0); ctx.clearRect(0, 0, W, H);
+        const dot = (c, x, y) => {
+          if (c.me) { ctx.beginPath(); ctx.arc(x, y, 6.5, 0, 7); ctx.fillStyle = '#19d3f3'; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#e8edf4'; ctx.stroke(); }
+          else { ctx.fillStyle = c.pit ? '#7f8a9a' : colorOf(c.cls); ctx.fillRect(x - 3.5, y - 3.5, 7, 7); }
+        };
+        const order = cars.filter(c => !c.me).concat(cars.filter(c => c.me));
+        const path = pts => { ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); };
+        const stroke = pts => { path(pts); ctx.lineJoin = 'round'; ctx.lineWidth = 9; ctx.strokeStyle = 'rgba(255,255,255,.07)'; ctx.stroke(); ctx.lineWidth = 2.5; ctx.strokeStyle = '#bec8d7'; ctx.stroke(); };
+        if (map) {
+          const pts = map.map(rot);
+          const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+          const minx = Math.min(...xs), miny = Math.min(...ys), bw = Math.max(1, Math.max(...xs) - minx), bh = Math.max(1, Math.max(...ys) - miny);
+          const s = Math.min(aw / bw, ah / bh), ox = ax + (aw - bw * s) / 2, oy = ay + (ah - bh * s) / 2;
+          const to = p => [ox + (p[0] - minx) * s, oy + (p[1] - miny) * s];
+          const sp = pts.map(to); stroke(sp);
+          if (sp.length > 2) { const [a, c] = [sp[0], sp[2]], dx = c[0] - a[0], dy = c[1] - a[1], l = Math.hypot(dx, dy) || 1, nx = -dy / l * 8, ny = dx / l * 8; ctx.beginPath(); ctx.moveTo(a[0] - nx, a[1] - ny); ctx.lineTo(a[0] + nx, a[1] + ny); ctx.lineWidth = 3; ctx.strokeStyle = '#e8edf4'; ctx.stroke(); }
+          order.forEach(c => { const p = to(rot(c.xy)); dot(c, p[0], p[1]); });
+        } else {
+          const r = Math.max(20, Math.min(aw, ah) / 2 - 6), cx = ax + aw / 2, cy = ay + ah / 2;
+          stroke(Array.from({ length: 72 }, (_, i) => [cx + r * Math.cos(i / 72 * 6.2832), cy + r * Math.sin(i / 72 * 6.2832)]));
+          ctx.beginPath(); ctx.moveTo(cx - 8, cy - r); ctx.lineTo(cx + 8, cy - r); ctx.lineWidth = 3; ctx.strokeStyle = '#e8edf4'; ctx.stroke();
+          const len = Math.max(1, g('session.track_length', 1));
+          order.forEach(c => { const a = -Math.PI / 2 + c.d / len * 6.2832; dot(c, cx + r * Math.cos(a), cy + r * Math.sin(a)); });
+          ctx.fillStyle = '#7f8a9a'; ctx.font = '10.5px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Un tour propre trace la carte', W / 2, H - 14);
+        }
+      },
+    };
+  },
+};
+
 /* ---------- Données de démonstration (éditeur, ou sans jeu) ---------- */
 PW.demo = (() => {
   const d = {
-    'game.version': 1, 'session.track': 'Circuit de la Sarthe', 'session.type': 10, 'session.phase': 5, 'session.yellow': 0,
+    'game.version': 1, 'demo.map': true, 'session.track': 'Circuit de la Sarthe', 'session.type': 10, 'session.phase': 5, 'session.yellow': 0,
     'session.remaining': 5 * 3600 + 1234, 'session.max_laps': 0, 'session.vehicles': 12, 'weather.ambient': 21, 'weather.track': 32, 'weather.rain': 0,
     'player.speed': 232, 'player.gear': 5, 'player.rpm': 7100, 'player.rpm_max': 8000, 'player.throttle': 82, 'player.brake': 0, 'player.clutch': 0, 'player.steering': 12,
     'fuel.level': 52.4, 'fuel.capacity': 90, 'fuel.percent': 58, 'energy.virtual': 61,

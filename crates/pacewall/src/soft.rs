@@ -263,6 +263,15 @@ impl Canvas for SoftCanvas<'_> {
         }
     }
 
+    fn circle(&mut self, x: f32, y: f32, r: f32, fill: Color32, stroke: Option<(f32, Color32)>) {
+        let Some(path) = PathBuilder::from_circle(x, y, r.max(0.5)) else { return };
+        self.pm.fill_path(&path, &paint(fill), FillRule::Winding, Transform::identity(), None);
+        if let Some((width, color)) = stroke {
+            let st = Stroke { width, ..Stroke::default() };
+            self.pm.stroke_path(&path, &paint(color), &st, Transform::identity(), None);
+        }
+    }
+
     fn polyline(&mut self, pts: &[(f32, f32)], width: f32, color: Color32) {
         let Some(path) = path_of(pts, false) else { return };
         let st = Stroke { width, line_cap: LineCap::Round, line_join: LineJoin::Round, ..Stroke::default() };

@@ -6,16 +6,18 @@ use crate::draw::{self, Font, HAlign, D};
 use crate::theme::*;
 use eframe::egui::Color32;
 use pwcore::layout::WidgetSpec;
+use pwcore::trackmap::{self, TrackMap};
 use pwcore::Data;
 use std::collections::VecDeque;
 
-pub const KINDS: [(&str, &str); 6] = [
+pub const KINDS: [(&str, &str); 7] = [
     ("fuel", "Carburant et énergie"),
     ("tyres", "Pneus"),
     ("timing", "Chrono et écarts"),
     ("inputs", "Pilotage"),
     ("standings", "Classement"),
     ("session", "Session et météo"),
+    ("trackmap", "Carte du circuit"),
 ];
 
 pub fn name(kind: &str) -> &'static str {
@@ -65,6 +67,11 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "classOnly", label: "Ma classe seulement", kind: Bool(false) },
         ],
         "session" => &[Opt { id: "weather", label: "Météo", kind: Bool(true) }],
+        "trackmap" => &[
+            Opt { id: "size", label: "Taille de la carte", kind: Num { min: 160.0, max: 420.0, step: 10.0, def: 260.0 } },
+            Opt { id: "rotate", label: "Rotation", kind: Choice(&[("0", "0°"), ("90", "90°"), ("180", "180°"), ("270", "270°")], "0") },
+            Opt { id: "others", label: "Afficher les autres voitures", kind: Bool(true) },
+        ],
         _ => NO_OPTS,
     }
 }
@@ -82,6 +89,7 @@ pub fn hz(kind: &str, spec: &WidgetSpec) -> f32 {
         "fuel" => 2.0,
         "tyres" => 1.0,
         "standings" => 1.0,
+        "trackmap" => 5.0,
         _ => 1.0,
     }
 }
@@ -91,6 +99,9 @@ pub fn hz(kind: &str, spec: &WidgetSpec) -> f32 {
 #[derive(Default)]
 pub struct WState {
     hist: VecDeque<(f64, [f32; 4])>,
+    /// Carte du circuit chargée : (circuit, carte). Rechargée au changement de circuit, ou toutes les 3 s tant qu'elle manque.
+    map: Option<(String, Option<TrackMap>)>,
+    map_checked: f64,
 }
 
 pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
@@ -101,6 +112,7 @@ pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, 
         "inputs" => inputs(d, spec, data, st, now),
         "standings" => standings(d, spec, data),
         "session" => session(d, spec, data),
+        "trackmap" => trackmap_widget(d, spec, data, st, now),
         _ => (0.0, 0.0),
     }
 }
@@ -532,6 +544,132 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
             let x = 16.0 + i as f32 * 86.0;
             d.label(x, wy, l, MUTED);
             d.text(x, wy + 12.0, v, 15.0, TEXT, Font::Num, HAlign::Left);
+        }
+    }
+    (w, h)
+}
+
+/* ---------- Carte du circuit ---------- */
+
+/// Position d'une voiture sur la carte : (x, -z), repère de TinyPedal.
+struct MapCar {
+    xy: [f32; 2],
+    lap_dist: f64,
+    class: String,
+    me: bool,
+    pit: bool,
+}
+
+fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
+    let size = spec.num("size", 260.0).clamp(160.0, 420.0) as f32;
+    let (w, h) = (size, size + 16.0);
+    if d.measuring() {
+        return (w, h);
+    }
+    d.card(w, h);
+    let track = data.text("session.track").to_string();
+    d.label(16.0, 10.0, "Carte", MUTED);
+    d.label_right(w - 16.0, 10.0, &track, ACCENT);
+
+    // Carte : enregistrée pendant un tour propre (voir pwcore::trackmap), lue sur le disque.
+    let demo = data.flag("demo.map");
+    let key = if demo { "demo".to_string() } else { track.clone() };
+    let reload = match &st.map {
+        Some((k, m)) => *k != key || (m.is_none() && now - st.map_checked > 3.0),
+        None => true,
+    };
+    if reload {
+        st.map_checked = now;
+        let loaded = if demo { Some(trackmap::demo()) } else if track.is_empty() { None } else { trackmap::load(&track) };
+        st.map = Some((key, loaded));
+    }
+    let map = st.map.as_ref().and_then(|(_, m)| m.as_ref());
+
+    let n = (data.f("session.vehicles", 0.0) as usize).min(104);
+    let show_others = spec.flag("others", true);
+    let cars: Vec<MapCar> = (0..n)
+        .filter_map(|i| {
+            let p = format!("grid.{i:03}");
+            let (x, z) = (data.num(&format!("{p}.x"))?, data.num(&format!("{p}.z"))?);
+            let me = data.flag(&format!("{p}.is_player"));
+            (me || show_others).then(|| MapCar {
+                xy: [x as f32, -z as f32],
+                lap_dist: data.f(&format!("{p}.lap_dist"), 0.0),
+                class: data.text(&format!("{p}.class")).to_string(),
+                me,
+                pit: data.flag(&format!("{p}.in_pits")),
+            })
+        })
+        .collect();
+
+    let (ax, ay, aw, ah) = (16.0, 32.0, w - 32.0, h - 32.0 - 14.0);
+    let angle = (spec.num("rotate", 0.0) as f32).to_radians();
+    let (sin, cos) = angle.sin_cos();
+    let rot = |p: [f32; 2]| [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos];
+
+    let dot = |c: &MapCar, x: f32, y: f32| {
+        if c.me {
+            d.circle(x, y, 6.5, ACCENT, Some((1.5, TEXT)));
+        } else {
+            let col = if c.pit { MUTED } else { class_color(&c.class) };
+            d.fill(x - 3.5, y - 3.5, 7.0, 7.0, col);
+        }
+    };
+
+    match map {
+        Some(map) => {
+            let pts: Vec<[f32; 2]> = map.points.iter().map(|&p| rot(p)).collect();
+            let (mut min, mut max) = ([f32::MAX; 2], [f32::MIN; 2]);
+            for p in &pts {
+                for k in 0..2 {
+                    min[k] = min[k].min(p[k]);
+                    max[k] = max[k].max(p[k]);
+                }
+            }
+            let (bw, bh) = ((max[0] - min[0]).max(1.0), (max[1] - min[1]).max(1.0));
+            let scale = (aw / bw).min(ah / bh);
+            let (ox, oy) = (ax + (aw - bw * scale) / 2.0, ay + (ah - bh * scale) / 2.0);
+            let to_screen = |p: [f32; 2]| (ox + (p[0] - min[0]) * scale, oy + (p[1] - min[1]) * scale);
+
+            let mut line: Vec<(f32, f32)> = pts.iter().map(|&p| to_screen(p)).collect();
+            if let Some(&first) = line.first() {
+                line.push(first);
+            }
+            d.line(&line, 9.0, Color32::from_white_alpha(18));
+            d.line(&line, 2.5, Color32::from_rgb(190, 200, 215));
+            // Ligne de départ : perpendiculaire au premier segment.
+            if line.len() > 2 {
+                let (a, b) = (line[0], line[2]);
+                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+                let len = (dx * dx + dy * dy).sqrt().max(0.001);
+                let (nx, ny) = (-dy / len * 8.0, dx / len * 8.0);
+                d.line(&[(a.0 - nx, a.1 - ny), (a.0 + nx, a.1 + ny)], 3.0, TEXT);
+            }
+            // Les autres d'abord, le joueur par-dessus.
+            for c in cars.iter().filter(|c| !c.me).chain(cars.iter().filter(|c| c.me)) {
+                let (x, y) = to_screen(rot(c.xy));
+                dot(c, x, y);
+            }
+        }
+        None => {
+            // Pas encore de carte : un cercle, avec les voitures placées selon leur distance dans le tour.
+            let r = (aw.min(ah) / 2.0 - 6.0).max(20.0);
+            let (cx, cy) = (ax + aw / 2.0, ay + ah / 2.0);
+            let circle: Vec<(f32, f32)> = (0..=72)
+                .map(|i| {
+                    let a = i as f32 / 72.0 * std::f32::consts::TAU;
+                    (cx + r * a.cos(), cy + r * a.sin())
+                })
+                .collect();
+            d.line(&circle, 9.0, Color32::from_white_alpha(18));
+            d.line(&circle, 2.5, Color32::from_rgb(190, 200, 215));
+            d.line(&[(cx - 8.0, cy - r), (cx + 8.0, cy - r)], 3.0, TEXT);
+            let length = data.f("session.track_length", 0.0).max(1.0);
+            for c in cars.iter().filter(|c| !c.me).chain(cars.iter().filter(|c| c.me)) {
+                let a = -std::f32::consts::FRAC_PI_2 + (c.lap_dist / length) as f32 * std::f32::consts::TAU;
+                dot(c, cx + r * a.cos(), cy + r * a.sin());
+            }
+            d.text(w / 2.0, h - 20.0, "Un tour propre trace la carte", 10.5, MUTED, Font::Ui, HAlign::Center);
         }
     }
     (w, h)

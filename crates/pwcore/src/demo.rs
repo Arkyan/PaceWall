@@ -21,6 +21,8 @@ pub fn data(t: f64) -> Data {
     put("session.yellow", json!(0));
     put("session.remaining", json!(5.0 * 3600.0 + 1234.0 - t));
     put("session.max_laps", json!(0));
+    put("session.track_length", json!(4000.0));
+    put("demo.map", json!(true));
     put("session.vehicles", json!(12));
     put("weather.ambient", json!(21.0));
     put("weather.track", json!(32.0));
@@ -77,6 +79,12 @@ pub fn data(t: f64) -> Data {
         put(&format!("{p}.behind_leader"), json!(i as f64 * 4.3));
         put(&format!("{p}.in_pits"), json!(false));
         put(&format!("{p}.is_player"), json!(*name == "Toi"));
+        // Position sur le circuit de démonstration : les voitures avancent le long de la boucle.
+        let frac = (t * 0.02 + 0.5 - i as f64 * 0.04).rem_euclid(1.0);
+        let pt = crate::trackmap::at(&crate::trackmap::demo(), frac);
+        put(&format!("{p}.x"), json!(pt[0]));
+        put(&format!("{p}.z"), json!(-pt[1]));
+        put(&format!("{p}.lap_dist"), json!(frac * 4000.0));
     }
     Data::new(f)
 }

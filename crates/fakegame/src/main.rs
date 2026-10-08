@@ -107,7 +107,7 @@ fn main() {
             info.mCurrentET = t;
             info.mEndET = 24.0 * 3600.0;
             info.mMaxLaps = 0;
-            info.mLapDist = 13626.0;
+            info.mLapDist = 4000.0;
             info.mNumVehicles = drivers.len() as i32;
             info.mGamePhase = 5;
             info.mInRealtime = 1;
@@ -125,7 +125,10 @@ fn main() {
                 put(&mut s.mVehicleName, "Hypercar");
                 put(&mut s.mVehicleClass, "Hypercar");
                 s.mTotalLaps = lap as i16;
-                s.mLapDist = progress * 13626.0 - i as f64 * 40.0;
+                s.mLapDist = (progress * 4000.0 - i as f64 * 40.0).rem_euclid(4000.0);
+                // Position dans le monde : un circuit fermé de forme quelconque, pour tester la carte.
+                let a = s.mLapDist / 4000.0 * std::f64::consts::TAU;
+                s.mPos = Vect3 { x: 500.0 * a.cos() + 130.0 * (3.0 * a).cos(), y: 0.0, z: 300.0 * a.sin() + 90.0 * (2.0 * a).sin() };
                 s.mBestLapTime = lap_seconds - 0.6 + i as f64 * 0.3;
                 s.mLastLapTime = lap_seconds - 0.2 + i as f64 * 0.3 + 0.4 * (lap as f64 * 1.7).sin();
                 s.mIsPlayer = (i == 0) as u8;

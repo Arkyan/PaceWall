@@ -246,7 +246,7 @@ pub fn run() {
             }
         }
 
-        let with_grid = layout.widgets.iter().any(|w| w.kind == "standings");
+        let with_grid = layout.widgets.iter().any(|w| w.kind == "standings" || w.kind == "trackmap");
         let t = Instant::now();
         let update = live.poll(with_grid);
         t_poll += t.elapsed();

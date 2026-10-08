@@ -29,6 +29,11 @@ pub trait Canvas {
     fn polyline(&mut self, pts: &[(f32, f32)], width: f32, color: Color32);
     /// Texte d'une ligne dont le haut est à `y` ; renvoie sa largeur en pixels.
     fn text(&mut self, x: f32, y: f32, s: &str, size: f32, font: Font, align: HAlign, color: Color32) -> f32;
+    fn circle(&mut self, x: f32, y: f32, r: f32, fill: Color32, stroke: Option<(f32, Color32)>);
+    /// `true` pour le canvas de mesure : un widget peut alors renvoyer sa taille sans rien calculer.
+    fn measuring(&self) -> bool {
+        false
+    }
 }
 
 /// Canvas qui ne dessine rien : sert à mesurer la taille d'un widget avant de lui allouer une image.
@@ -40,6 +45,10 @@ impl Canvas for Measure {
     fn polyline(&mut self, _: &[(f32, f32)], _: f32, _: Color32) {}
     fn text(&mut self, _: f32, _: f32, s: &str, size: f32, _: Font, _: HAlign, _: Color32) -> f32 {
         s.chars().count() as f32 * size * 0.55
+    }
+    fn circle(&mut self, _: f32, _: f32, _: f32, _: Color32, _: Option<(f32, Color32)>) {}
+    fn measuring(&self) -> bool {
+        true
     }
 }
 
@@ -89,6 +98,15 @@ impl<'a> D<'a> {
         let (px, py) = self.pt(x, y);
         let w = self.c.borrow_mut().text(px, py, s, size * self.s, font, align, self.col(color));
         w / self.s
+    }
+
+    pub fn circle(&self, x: f32, y: f32, r: f32, fill: Color32, stroke: Option<(f32, Color32)>) {
+        let (px, py) = self.pt(x, y);
+        self.c.borrow_mut().circle(px, py, r * self.s, self.col(fill), stroke.map(|(w, c)| (w * self.s, self.col(c))));
+    }
+
+    pub fn measuring(&self) -> bool {
+        self.c.borrow().measuring()
     }
 
     pub fn label(&self, x: f32, y: f32, s: &str, color: Color32) -> f32 {

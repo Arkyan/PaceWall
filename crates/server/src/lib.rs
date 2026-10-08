@@ -7,7 +7,8 @@
 //! Le jeu n'est lu que si au moins un client est abonné, à la cadence du plus exigeant.
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::http::header;
 use axum::response::Html;
 use axum::routing::get;
@@ -80,6 +81,7 @@ async fn serve(port: u16, stop: Arc<AtomicBool>) {
         .route("/assets/widgets.js", get(|| async { asset("text/javascript", include_str!("../overlay/widgets.js")) }))
         .route("/assets/overlay.css", get(|| async { asset("text/css", include_str!("../overlay/overlay.css")) }))
         .route("/api/layouts", get(api_layouts_get))
+        .route("/api/track/:name", get(api_track))
         .route("/ws", get(upgrade))
         .with_state(shared);
 
@@ -143,6 +145,13 @@ fn produce(shared: Arc<Shared>, stop: Arc<AtomicBool>) {
 
 fn asset(content_type: &'static str, body: &'static str) -> ([(header::HeaderName, String); 2], &'static str) {
     ([(header::CONTENT_TYPE, format!("{content_type}; charset=utf-8")), (header::CACHE_CONTROL, "no-cache".into())], body)
+}
+
+/// Carte d'un circuit, enregistrée par PaceWall pendant un tour propre (404 tant qu'elle n'existe pas).
+async fn api_track(Path(name): Path<String>) -> Result<([(header::HeaderName, &'static str); 1], String), StatusCode> {
+    let map = pwcore::trackmap::load(&name).ok_or(StatusCode::NOT_FOUND)?;
+    let json = serde_json::to_string(&map).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(([(header::CONTENT_TYPE, "application/json")], json))
 }
 
 /// Mises en page des overlays (joueur et OBS), telles que l'éditeur les a enregistrées.

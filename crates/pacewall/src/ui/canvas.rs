@@ -24,6 +24,11 @@ impl Canvas for EguiCanvas<'_> {
         self.painter.add(Shape::line(v, Stroke::new(width, color)));
     }
 
+    fn circle(&mut self, x: f32, y: f32, r: f32, fill: Color32, stroke: Option<(f32, Color32)>) {
+        let st = stroke.map(|(w, c)| Stroke::new(w, c)).unwrap_or(Stroke::NONE);
+        self.painter.circle(pos2(x, y), r, fill, st);
+    }
+
     fn text(&mut self, x: f32, y: f32, s: &str, size: f32, font: Font, align: HAlign, color: Color32) -> f32 {
         let id = if font == Font::Num { theme::num_font(size) } else { theme::ui_font(size) };
         let a = match align {

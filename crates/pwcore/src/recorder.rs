@@ -5,6 +5,7 @@
 //! moment où on se branche est ignoré (« partiel »), sauf si on démarre dans les premiers mètres.
 
 use crate::db::{self, NewLap, NewSession};
+use crate::trackmap::{self, Builder};
 use lmu::reader::{c_str, Reader};
 use lmu::{ScoringInfo, VehicleScoring, VehicleTelemetry};
 use rusqlite::Connection;
@@ -42,6 +43,9 @@ pub fn run() {
 
     let mut reader: Option<Reader> = None;
     let mut session: Option<Session> = None;
+    // Carte du circuit : (circuit, constructeur tant qu'elle n'existe pas encore).
+    let mut map: Option<(String, Option<Builder>)> = None;
+    let mut building = false;
     let mut last_update = u32::MAX;
     let mut last_change = Instant::now();
 
@@ -60,7 +64,7 @@ pub fn run() {
         if update != last_update {
             last_update = update;
             last_change = Instant::now();
-            sample(&conn, r, events.SME_START_SESSION, &mut session);
+            building = sample(&conn, r, events.SME_START_SESSION, &mut session, &mut map);
         } else if last_change.elapsed() > Duration::from_secs(3) {
             // Jeu fermé ou en pause longue : on clôt la session.
             if let Some(s) = session.take() {
@@ -70,7 +74,8 @@ pub fn run() {
             std::thread::sleep(Duration::from_secs(2));
             continue;
         }
-        std::thread::sleep(Duration::from_millis(500));
+        // Tant que la carte du circuit se construit, on échantillonne plus souvent (10 fois par seconde).
+        std::thread::sleep(Duration::from_millis(if building { 100 } else { 500 }));
     }
 }
 
@@ -86,9 +91,10 @@ fn averages(t: &VehicleTelemetry) -> (f64, f64, f64) {
     (tyre / 4.0, brake / 4.0, wear / 4.0)
 }
 
-fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<Session>) {
-    let Some((si, ti)) = r.player_indexes() else { return };
-    let (Some(s), Some(t)) = (r.vehicle_scoring(si), r.telemetry(ti)) else { return };
+/// Renvoie `true` tant que la carte du circuit est en construction.
+fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<Session>, map: &mut Option<(String, Option<Builder>)>) -> bool {
+    let Some((si, ti)) = r.player_indexes() else { return false };
+    let (Some(s), Some(t)) = (r.vehicle_scoring(si), r.telemetry(ti)) else { return false };
     let info = r.scoring_info();
     let track = c_str(&info.mTrackName);
     let session_type = info.mSession;
@@ -103,7 +109,26 @@ fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<
         }
         *session = begin(conn, &track, &info, &s, &t, start_event);
     }
-    let Some(cur) = session.as_mut() else { return };
+    // Carte du circuit : on la construit au premier passage, puis elle est réutilisée.
+    if map.as_ref().is_none_or(|(name, _)| *name != track) {
+        let builder = (!trackmap::exists(&track)).then(|| Builder::new(&track, info.mLapDist));
+        *map = Some((track.clone(), builder));
+    }
+    let mut building = false;
+    if let Some((_, slot)) = map.as_mut() {
+        if let Some(b) = slot.as_mut() {
+            building = true;
+            let pos = s.mPos;
+            if let Some(done) = b.update(s.mTotalLaps as i64, s.mLapDist, pos.x, pos.z, s.mInPits != 0, s.mLastLapTime, info.mCurrentET) {
+                if trackmap::save(&done).is_ok() {
+                    *slot = None;
+                    building = false;
+                }
+            }
+        }
+    }
+
+    let Some(cur) = session.as_mut() else { return building };
     cur.last_et = et;
 
     let (tyre, brake, wear) = averages(&t);
@@ -116,7 +141,7 @@ fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<
     let laps = s.mTotalLaps;
     if laps < cur.last_laps {
         cur.last_laps = laps; // retour au stand / remise à zéro
-        return;
+        return building;
     }
     if laps > cur.last_laps {
         let time = s.mLastLapTime;
@@ -159,6 +184,7 @@ fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<
         cur.pit = s.mInPits != 0;
         cur.invalid = false;
     }
+    building
 }
 
 fn begin(

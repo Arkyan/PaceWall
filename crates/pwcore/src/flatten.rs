@@ -183,4 +183,9 @@ fn grid(o: &mut Out, i: usize, s: &VehicleScoring) {
     o.num(format!("{p}.behind_leader"), "s", "Retard leader", s.mTimeBehindLeader);
     o.flag(format!("{p}.in_pits"), "Aux stands", s.mInPits != 0);
     o.flag(format!("{p}.is_player"), "Joueur", s.mIsPlayer != 0);
+    // Position dans le monde (mètres) pour la carte du circuit.
+    let pos = s.mPos;
+    o.num(format!("{p}.x"), "m", "Position X", pos.x);
+    o.num(format!("{p}.z"), "m", "Position Z", pos.z);
+    o.num(format!("{p}.lap_dist"), "m", "Distance dans le tour", s.mLapDist);
 }

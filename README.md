@@ -39,8 +39,19 @@ LMU ──► pwcore::live (mémoire partagée) ──┬─► overlay native (
 
 Carburant et énergie (tours restants, conso, quantité à ajouter), pneus (température par rapport à l'optimum, usure, pression),
 chrono et écarts, pilotage (rapport, vitesse, pédales, **graphe des inputs**), classement (devant/derrière, couleurs de classe),
-session et météo. Les mêmes sont écrits en Rust (overlay, aperçu) et en JavaScript (OBS) : `crates/pacewall/src/widgets.rs`
+session et météo, **carte du circuit**. Les mêmes sont écrits en Rust (overlay, aperçu) et en JavaScript (OBS) : `crates/pacewall/src/widgets.rs`
 et `crates/server/overlay/widgets.js`.
+
+## Carte du circuit
+
+Inspirée de TinyPedal. Au premier tour propre sur un circuit, PaceWall enregistre la trajectoire et la garde dans
+`%APPDATA%\PaceWall\tracks\<circuit>.json` ; elle est réutilisée ensuite, y compris par OBS (`/api/track/<circuit>`).
+
+- Un tour est enregistré s'il commence à la ligne, ne passe pas par les stands, ne contient aucune téléportation
+  (saut de plus de 100 m) et se termine par un tour **valide** (temps du dernier tour positif).
+- Repère : (`mPos.x`, `-mPos.z`). Option de rotation (0°, 90°, 180°, 270°) dans l'éditeur.
+- Tant qu'il n'y a pas de carte, le widget affiche un cercle avec les voitures placées selon leur distance dans le tour.
+- Voitures : carré à la couleur de leur classe, ma voiture en cyan, voitures aux stands grisées.
 
 ## Développement sans le jeu
 
