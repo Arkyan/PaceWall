@@ -91,7 +91,9 @@ PW.widgets.tyres = {
   options: [
     { id: 'pressure', label: 'Pression', type: 'select', choices: [['kpa', 'kPa'], ['bar', 'bar'], ['psi', 'psi'], ['off', 'Masquer']], def: 'kpa' },
     { id: 'brakes', label: 'Températures des freins', type: 'bool', def: false },
-    { id: 'unit', label: 'Température', type: 'select', choices: [['c', '°C'], ['f', '°F']], def: 'c' },
+    { id: 'tempsrc', label: 'Température affichée', type: 'select', choices: [['carcass', 'Carcasse'], ['surface', 'Surface (moyenne)']], def: 'carcass' },
+    { id: 'wearmode', label: 'Usure', type: 'select', choices: [['used', 'Usée (0 → 100 %)'], ['left', 'Restante (100 → 0 %)']], def: 'used' },
+    { id: 'unit', label: 'Unité de température', type: 'select', choices: [['c', '°C'], ['f', '°F']], def: 'c' },
   ],
   mount(root, o) {
     const names = ['fl', 'fr', 'rl', 'rr'];
@@ -110,15 +112,16 @@ PW.widgets.tyres = {
         const c = (g('tyre.front.compound', '') || g('tyre.rear.compound', ''));
         b.text('cmp', c);
         for (const n of names) {
-          const t = (g(`tyre.${n}.temp_left`) + g(`tyre.${n}.temp_center`) + g(`tyre.${n}.temp_right`)) / 3;
+          const t = o.tempsrc === 'surface' ? (g(`tyre.${n}.temp_left`) + g(`tyre.${n}.temp_center`) + g(`tyre.${n}.temp_right`)) / 3 : g(`tyre.${n}.carcass`, NaN);
           const opt = g(`tyre.${n}.optimal`, 0) || 88;
           const wear = g(`tyre.${n}.wear`, 0);
           b.text(n + 't', isFinite(t) ? Math.round(temp(t)) + '°' : '—');
           b.css(n, '--c', isFinite(t) ? `hsl(${hue(t - opt)} 70% 52%)` : '#666');
-          b.scaleX(n + 'w', 1 - wear / 100);
+          const worn = o.wearmode !== 'left';
+          b.scaleX(n + 'w', worn ? wear / 100 : 1 - wear / 100);
           b.css(n + 'w', 'background', wear > 70 ? 'var(--pw-bad)' : wear > 45 ? 'var(--pw-warn)' : 'var(--pw-ok)');
           const p = g(`tyre.${n}.pressure`);
-          b.text(n + 'i', (o.pressure === 'off' ? '' : (p ? press(p) + ' · ' : '')) + F.n(100 - wear, 0) + ' %');
+          b.text(n + 'i', (o.pressure === 'off' ? '' : (p ? press(p) + ' · ' : '')) + F.n(worn ? wear : 100 - wear, 0) + ' %');
           if (b.el[n + 'b']) b.text(n + 'b', Math.round(temp(g(`brake.${n}.temp`, 0))) + '°');
         }
       },
@@ -344,14 +347,14 @@ PW.widgets.trackmap = {
     { id: 'size', label: 'Taille de la carte', type: 'number', min: 160, max: 460, step: 10, def: 300 },
     { id: 'rotate', label: 'Rotation', type: 'select', choices: [['0', '0°'], ['90', '90°'], ['180', '180°'], ['270', '270°']], def: '0' },
     { id: 'others', label: 'Afficher les autres voitures', type: 'bool', def: true },
-    { id: 'numbers', label: 'Numéro dans les pastilles', type: 'select', choices: [['class', 'Place en classe'], ['overall', 'Place au général'], ['none', 'Aucun']], def: 'class' },
+    { id: 'numbers', label: 'Numéro dans les pastilles', type: 'select', choices: [['none', 'Aucun'], ['class', 'Place en classe'], ['overall', 'Place au général']], def: 'none' },
   ],
   mount(root, o) {
     const AC = (getComputedStyle(root).getPropertyValue('--pw-accent') || '').trim() || '#19d3f3', W = +o.size || 300, K = Math.min(1.4, Math.max(0.7, W / 300)), R = 2;
-    const ax = 14, ay = 32, aw = W - 28, maxH = ay + aw * 1.15 + 34;
+    const ax = 14, ay = 14, aw = W - 28, maxH = ay + aw * 1.15 + 14;
     const card = PW.tpl(`<div class="pw-card" style="width:${W}px;height:${maxH}px;padding:0">
       <canvas width="${W * R}" height="${maxH * R}" style="width:${W}px;height:${maxH}px;position:absolute;left:0;top:0"></canvas>
-      <div class="pw-title" style="position:absolute;left:16px;right:16px;top:10px"><span>Carte</span><em data-k="trk"></em></div></div>`).firstChild;
+      </div>`).firstChild;
     root.appendChild(card);
     const b = PW.bind(card), ctx = card.querySelector('canvas').getContext('2d');
     const angle = (+o.rotate || 0) * Math.PI / 180, sin = Math.sin(angle), cos = Math.cos(angle);
@@ -366,7 +369,6 @@ PW.widgets.trackmap = {
     return {
       update(g) {
         const track = g('session.track', ''), demo = !!g('demo.map', false), k = demo ? 'demo' : track;
-        b.text('trk', track);
         if (k !== key) { key = k; map = null; tried = -1e9; if (demo) map = demoMap(); }
         if (!map && !demo && track && performance.now() - tried > 3000) {
           tried = performance.now();
@@ -380,15 +382,14 @@ PW.widgets.trackmap = {
         }
         const seen = {};
         cars.slice().sort((a, b) => a.place - b.place).forEach(c => { seen[c.cls] = (seen[c.cls] || 0) + 1; c.rank = seen[c.cls]; });
-        const mine = cars.find(c => c.me);
         for (let i = cars.length - 1; i >= 0; i--) if (!cars[i].me && !o.others) cars.splice(i, 1);
         const pts = map ? map.map(rot) : [];
         let minx = 0, miny = 0, bw = 1, bh = 1;
         if (pts.length) { const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); minx = Math.min(...xs); miny = Math.min(...ys); bw = Math.max(1, Math.max(...xs) - minx); bh = Math.max(1, Math.max(...ys) - miny); }
-        const ah = aw * (pts.length ? Math.min(1.15, Math.max(0.5, bh / bw)) : 1), H = ay + ah + 34;
+        const ah = aw * (pts.length ? Math.min(1.15, Math.max(0.5, bh / bw)) : 1), H = ay + ah + 14;
         card.style.height = H + 'px';
         ctx.setTransform(R, 0, 0, R, 0, 0); ctx.clearRect(0, 0, W, maxH);
-        const mode = o.numbers || 'class';
+        const mode = o.numbers || 'none';
         const dot = (c, x, y) => {
           const num = mode === 'none' ? 0 : mode === 'overall' ? c.place : c.rank;
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -431,10 +432,6 @@ PW.widgets.trackmap = {
           order.forEach(c => { const a = -Math.PI / 2 + c.d / len * 6.2832; dot(c, cx + r * Math.cos(a), cy + r * Math.sin(a)); });
           ctx.fillStyle = '#7f8a9a'; ctx.font = '10.5px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Un tour propre trace la carte', W / 2, cy);
         }
-        if (mine && mine.place > 0) {
-          ctx.textAlign = 'left'; ctx.fillStyle = AC; ctx.font = '700 16px Consolas, monospace'; ctx.fillText('P' + mine.place, 16, H - 12);
-          ctx.textAlign = 'right'; ctx.fillStyle = colorOf(mine.cls); ctx.font = '600 11px sans-serif'; ctx.fillText(mine.cls.toUpperCase() + ' · P' + mine.rank, W - 16, H - 12);
-        }
       },
     };
   },
@@ -454,7 +451,7 @@ PW.demo = (() => {
     'tyre.front.compound': 'Medium', 'tyre.rear.compound': 'Medium',
   };
   ['fl', 'fr', 'rl', 'rr'].forEach((n, i) => {
-    Object.assign(d, { [`tyre.${n}.temp_left`]: 80 + i, [`tyre.${n}.temp_center`]: 86 + i, [`tyre.${n}.temp_right`]: 92 + i, [`tyre.${n}.optimal`]: 88,
+    Object.assign(d, { [`tyre.${n}.temp_left`]: 80 + i, [`tyre.${n}.temp_center`]: 86 + i, [`tyre.${n}.temp_right`]: 92 + i, [`tyre.${n}.carcass`]: 84 + i, [`tyre.${n}.optimal`]: 88,
       [`tyre.${n}.pressure`]: 165 + i, [`tyre.${n}.wear`]: 12 + i * 2, [`brake.${n}.temp`]: 420 + i * 20 });
   });
   const names = ['A. Martin', 'B. Dupont', 'C. Rossi', 'Toi', 'E. Keller', 'F. Sato', 'G. Novak', 'H. Silva', 'I. Moreau', 'J. Weber', 'K. Costa', 'L. Berg'];

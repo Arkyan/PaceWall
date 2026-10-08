@@ -42,6 +42,14 @@ impl State {
             if ui.checkbox(&mut auto, "S'ouvre automatiquement avec le jeu et se ferme avec lui").changed() {
                 let _ = settings::set("overlay_auto", json!(auto));
             }
+            let mut fg = settings::bool_of("overlay_fg_only", true);
+            if ui.checkbox(&mut fg, "Masquée quand le jeu n'est pas au premier plan").changed() {
+                let _ = settings::set("overlay_fg_only", json!(fg));
+            }
+            let mut idle = settings::bool_of("overlay_hide_idle", true);
+            if ui.checkbox(&mut idle, "Masquée en pause, dans les menus et hors piste").changed() {
+                let _ = settings::set("overlay_hide_idle", json!(idle));
+            }
             ui.add_space(8.0);
             if self.monitors.is_empty() {
                 self.monitors = win::monitors();

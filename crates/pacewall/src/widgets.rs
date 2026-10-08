@@ -50,7 +50,9 @@ pub fn options(kind: &str) -> &'static [Opt] {
         "tyres" => &[
             Opt { id: "pressure", label: "Pression", kind: Choice(&[("kpa", "kPa"), ("bar", "bar"), ("psi", "psi"), ("off", "Masquer")], "kpa") },
             Opt { id: "brakes", label: "Températures des freins", kind: Bool(false) },
-            Opt { id: "unit", label: "Température", kind: Choice(&[("c", "°C"), ("f", "°F")], "c") },
+            Opt { id: "tempsrc", label: "Température affichée", kind: Choice(&[("carcass", "Carcasse"), ("surface", "Surface (moyenne)")], "carcass") },
+            Opt { id: "wearmode", label: "Usure", kind: Choice(&[("used", "Usée (0 → 100 %)"), ("left", "Restante (100 → 0 %)")], "used") },
+            Opt { id: "unit", label: "Unité de température", kind: Choice(&[("c", "°C"), ("f", "°F")], "c") },
         ],
         "timing" => &[Opt { id: "gaps", label: "Écarts devant / derrière", kind: Bool(true) }],
         "inputs" => &[
@@ -71,7 +73,7 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "size", label: "Taille de la carte", kind: Num { min: 160.0, max: 460.0, step: 10.0, def: 300.0 } },
             Opt { id: "rotate", label: "Rotation", kind: Choice(&[("0", "0°"), ("90", "90°"), ("180", "180°"), ("270", "270°")], "0") },
             Opt { id: "others", label: "Afficher les autres voitures", kind: Bool(true) },
-            Opt { id: "numbers", label: "Numéro dans les pastilles", kind: Choice(&[("class", "Place en classe"), ("overall", "Place au général"), ("none", "Aucun")], "class") },
+            Opt { id: "numbers", label: "Numéro dans les pastilles", kind: Choice(&[("none", "Aucun"), ("class", "Place en classe"), ("overall", "Place au général")], "none") },
         ],
         _ => NO_OPTS,
     }
@@ -249,6 +251,8 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let brakes = spec.flag("brakes", false);
     let fahrenheit = spec.choice("unit", "c") == "f";
     let pressure = spec.choice("pressure", "kpa");
+    let surface = spec.choice("tempsrc", "carcass") == "surface";
+    let worn = spec.choice("wearmode", "used") == "used";
     let h = 28.0 + 134.0 + 12.0 + if brakes { 40.0 } else { 0.0 };
     d.card(w, h);
     d.label(16.0, 10.0, "Pneus", MUTED);
@@ -261,7 +265,11 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     for (i, n) in names.iter().enumerate() {
         let x = 16.0 + (i % 2) as f32 * (cw + 8.0);
         let y = 28.0 + (i / 2) as f32 * 70.0;
-        let t = (data.f(&format!("tyre.{n}.temp_left"), f64::NAN) + data.f(&format!("tyre.{n}.temp_center"), f64::NAN) + data.f(&format!("tyre.{n}.temp_right"), f64::NAN)) / 3.0;
+        let t = if surface {
+            (data.f(&format!("tyre.{n}.temp_left"), f64::NAN) + data.f(&format!("tyre.{n}.temp_center"), f64::NAN) + data.f(&format!("tyre.{n}.temp_right"), f64::NAN)) / 3.0
+        } else {
+            data.f(&format!("tyre.{n}.carcass"), f64::NAN)
+        };
         let opt = {
             let o = data.f(&format!("tyre.{n}.optimal"), 0.0);
             if o > 0.0 {
@@ -279,7 +287,8 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         d.fill(x, y, cw, 3.0, tint);
         let ttxt = if t.is_finite() { format!("{:.0}°", temp(t)) } else { "—".into() };
         d.text(x + cw / 2.0, y + 8.0, &ttxt, 24.0, TEXT, Font::Num, HAlign::Center);
-        let wf = (1.0 - wear / 100.0) as f32;
+        // `wear` = usure en % (0 = neuve) ; la barre et le chiffre montrent l'usure ou ce qu'il reste, au choix.
+        let wf = if worn { wear / 100.0 } else { 1.0 - wear / 100.0 } as f32;
         d.fill(x + 8.0, y + 42.0, cw - 16.0, 3.0, Color32::from_white_alpha(26));
         d.fill(x + 8.0, y + 42.0, (cw - 16.0) * wf.clamp(0.0, 1.0), 3.0, if wear > 70.0 { BAD } else if wear > 45.0 { WARN } else { OK });
         let p = data.f(&format!("tyre.{n}.pressure"), 0.0);
@@ -290,7 +299,7 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
             "psi" => format!("{:.1} psi · ", p * 0.145038),
             _ => format!("{p:.0} kPa · "),
         };
-        d.text(x + cw / 2.0, y + 49.0, &format!("{ptxt}{:.0} %", 100.0 - wear), 11.0, MUTED, Font::Num, HAlign::Center);
+        d.text(x + cw / 2.0, y + 49.0, &format!("{ptxt}{:.0} %", if worn { wear } else { 100.0 - wear }), 11.0, MUTED, Font::Num, HAlign::Center);
     }
     if brakes {
         let bw = (w - 30.0) / 4.0;
@@ -638,20 +647,18 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
     let (bw, bh) = ((max[0] - min[0]).max(1.0), (max[1] - min[1]).max(1.0));
 
     // La carte prend la forme du circuit : plus de grand vide pour un tracé allongé.
-    let (ax, ay, aw) = (14.0, 32.0, w - 28.0);
+    let (ax, ay, aw) = (14.0, 14.0, w - 28.0);
     let aspect = if pts.is_empty() { 1.0 } else { (bh / bw).clamp(0.5, 1.15) };
     let ah = aw * aspect;
-    let h = ay + ah + 34.0;
+    let h = ay + ah + 14.0;
     if d.measuring() {
         return (w, h);
     }
     d.card(w, h);
-    d.label(16.0, 10.0, "Carte", MUTED);
-    d.label_right(w - 16.0, 10.0, &track, d.accent());
 
     let n = (data.f("session.vehicles", 0.0) as usize).min(104);
     let show_others = spec.flag("others", true);
-    let mode = spec.choice("numbers", "class").to_string();
+    let mode = spec.choice("numbers", "none").to_string();
     let mut cars: Vec<MapCar> = (0..n)
         .filter_map(|i| {
             let p = format!("grid.{i:03}");
@@ -676,7 +683,6 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         *c += 1;
         cars[i].rank = *c;
     }
-    let me_info = cars.iter().find(|c| c.me).map(|c| (c.place, c.rank, c.class.clone()));
     cars.retain(|c| c.me || show_others);
     // Les premiers au-dessus des suivants, le joueur tout en haut.
     cars.sort_by_key(|c| (c.me, -c.place));
@@ -754,13 +760,6 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
             dot(c, cx + r * a.cos(), cy + r * a.sin());
         }
         d.text(w / 2.0, cy - 6.0, "Un tour propre trace la carte", 10.5, MUTED, Font::Ui, HAlign::Center);
-    }
-    // Pied : ma place au général et dans ma classe.
-    if let Some((place, rank, class)) = me_info {
-        if place > 0 {
-            d.text(16.0, h - 24.0, &format!("P{place}"), 16.0, d.accent(), Font::Num, HAlign::Left);
-            d.text(w - 16.0, h - 21.0, &format!("{} · P{rank}", class.to_uppercase()), 11.0, class_color(&class), Font::Ui, HAlign::Right);
-        }
     }
     (w, h)
 }

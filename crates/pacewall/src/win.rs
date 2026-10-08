@@ -5,10 +5,12 @@ use std::process::Command;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{GetLastError, BOOL, ERROR_ALREADY_EXISTS, HWND, LPARAM, RECT, TRUE, WPARAM};
 use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
-use windows::Win32::System::Threading::CreateMutexW;
+use windows::core::PWSTR;
+use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::System::Threading::{CreateMutexW, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, IsIconic, PostMessageW, SetForegroundWindow, ShowWindow, SW_RESTORE, WM_CLOSE,
+    FindWindowW, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, PostMessageW, SetForegroundWindow, ShowWindow, SW_RESTORE, WM_CLOSE,
 };
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -153,4 +155,32 @@ pub fn set_autostart(on: bool) {
     } else {
         let _ = key.delete_value("PaceWall");
     }
+}
+
+/// Nom (minuscules, sans dossier) du programme dont la fenêtre est au premier plan.
+pub fn foreground_exe() -> String {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return String::new();
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return String::new() };
+        let mut buf = [0u16; 520];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
+        let _ = CloseHandle(process);
+        if !ok {
+            return String::new();
+        }
+        let path = String::from_utf16_lossy(&buf[..len as usize]);
+        path.rsplit(['\\', '/']).next().unwrap_or("").to_lowercase()
+    }
+}
+
+/// Le programme au premier plan est-il le jeu (ou son faux pour les tests) ?
+pub fn game_in_front() -> bool {
+    let exe = foreground_exe();
+    exe.contains("le mans ultimate") || exe.contains("lmu") || exe.contains("fakegame")
 }

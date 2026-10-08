@@ -214,6 +214,12 @@ pub fn run() {
     // Écran choisi dans les réglages ; tout est calculé en pixels réels. Relu toutes les 2 s seulement.
     let mut mon = pick_monitor();
     let mut next_topmost = Instant::now() + Duration::from_secs(3);
+    // Visibilité : jeu au premier plan, en piste et pas en pause (réglages « overlay_fg_only » et « overlay_hide_idle »).
+    let mut fg_only = settings::bool_of("overlay_fg_only", true);
+    let mut hide_idle = settings::bool_of("overlay_hide_idle", true);
+    let mut fg_ok = true;
+    let mut was_visible = false;
+    let mut next_fg = Instant::now();
     let start = Instant::now();
     // Diagnostic : PACEWALL_DEBUG=1 écrit des compteurs dans %TEMP%\pw-overlay.log.
     let debug = std::env::var_os("PACEWALL_DEBUG").is_some();
@@ -250,6 +256,8 @@ pub fn run() {
         if now >= next_check {
             next_check = now + Duration::from_secs(2);
             mon = pick_monitor();
+            fg_only = settings::bool_of("overlay_fg_only", true);
+            hide_idle = settings::bool_of("overlay_hide_idle", true);
             let mtime = layout::modified();
             if mtime != layout_mtime {
                 layout_mtime = mtime;
@@ -283,8 +291,28 @@ pub fn run() {
             Update::Unchanged => {}
         }
 
-        let mut sleep = Duration::from_millis(500);
-        if let (true, Some(mon)) = (game, mon.clone()) {
+        // Premier plan : interrogé 4 fois par seconde seulement.
+        if now >= next_fg {
+            next_fg = now + Duration::from_millis(250);
+            fg_ok = !fg_only || win::game_in_front();
+        }
+        // En pause ou au menu, plus rien ne bouge (temps du jeu figé) ou « en piste » est faux : on masque.
+        let driving = !hide_idle || (data.flag("session.realtime") && live.idle() < Duration::from_millis(1500));
+        let visible = game && fg_ok && driving;
+        if visible != was_visible {
+            was_visible = visible;
+            log_event(&format!(
+                "{} (jeu {}, premier plan {}, en piste {}, inactif depuis {} ms)",
+                if visible { "overlay affichée" } else { "overlay masquée" },
+                game,
+                fg_ok,
+                data.flag("session.realtime"),
+                live.idle().as_millis()
+            ));
+        }
+
+        let mut sleep = Duration::from_millis(if game { 250 } else { 500 });
+        if let (true, Some(mon)) = (visible, mon.clone()) {
             while panels.len() < layout.widgets.len() {
                 match Panel::new() {
                     Some(p) => panels.push(p),
@@ -360,7 +388,7 @@ pub fn run() {
         }
 
         // Certains jeux repassent devant : on réaffirme le premier plan de temps en temps (sans prendre le focus).
-        if game && now >= next_topmost {
+        if visible && now >= next_topmost {
             next_topmost = now + Duration::from_secs(3);
             for p in &panels {
                 unsafe {

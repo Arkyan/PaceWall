@@ -10,6 +10,8 @@ pub fn path() -> PathBuf {
 fn defaults() -> Map<String, Value> {
     let Value::Object(m) = json!({
         "overlay_auto": true,          // ouvrir / fermer l'overlay avec le jeu
+        "overlay_fg_only": true,       // masquer l'overlay quand le jeu n'est pas au premier plan
+        "overlay_hide_idle": true,     // masquer l'overlay en pause, au menu ou hors piste
         "overlay_monitor": 0,          // index de l'écran (0 = principal)
         "autostart": false,            // lancer avec Windows
         "obs_server": false,           // serveur web pour OBS (source navigateur)

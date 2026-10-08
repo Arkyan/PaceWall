@@ -73,6 +73,11 @@ impl Live {
         Update::Unchanged
     }
 
+    /// Temps écoulé depuis la dernière donnée nouvelle du jeu (en pause, plus rien ne bouge).
+    pub fn idle(&self) -> Duration {
+        self.last_change.elapsed()
+    }
+
     fn absent(&mut self) -> Update {
         // On ne le signale qu'une fois : les consommateurs n'ont pas à se réveiller pour rien.
         if self.reported_absent {
