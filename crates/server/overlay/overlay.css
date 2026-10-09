@@ -119,6 +119,7 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 /* Drapeaux : un ou deux drapeaux en grand, rien s'il n'y en a pas */
 .pw-flags { width: 290px; height: 44px; display: flex; gap: 8px; }
 .pw-flags .pw-fl { flex: 1; display: flex; align-items: center; justify-content: center; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; text-align: center; line-height: 1; }
-.pw-flags.one .pw-fl { font-size: 22px; }
-.pw-flags.two .pw-fl { font-size: 18px; }
+.pw-flags.one .pw-fl { font-size: 26px; }
+.pw-flags.two .pw-fl { font-size: 22px; }
+.pw-flags .pw-fl.checker { background-image: conic-gradient(#0c0c0c 25%, transparent 0 50%, #0c0c0c 0 75%, transparent 0); background-size: 22px 22px; }
 .pw-flags .pw-fl.black { box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.8); }

@@ -35,6 +35,8 @@ pub struct Scene {
     pub phase: u8,
     pub rain: f64,
     pub flat: bool,
+    /// Drapeau bleu montré au joueur.
+    pub blue: bool,
 }
 
 /// Déroulé du scénario : 0-20 s pneus froids, 20-50 s réchauffe, 50-65 s trop chauds, puis normaux ; carburant qui
@@ -59,6 +61,7 @@ pub fn scene(c: f64) -> Scene {
         phase: if (50.0..60.0).contains(&c) { 6 } else { 5 },
         rain: if (70.0..85.0).contains(&c) { 0.15 } else { 0.0 },
         flat: (75.0..78.0).contains(&c),
+        blue: (42.0..48.0).contains(&c),
     }
 }
 
@@ -203,6 +206,8 @@ pub fn run(opts: Options, stop: &dyn Fn() -> bool) -> Result<(), String> {
                 s.mBestLapTime = lap_seconds - 0.6 + i as f64 * 0.3;
                 s.mLastLapTime = lap_seconds - 0.2 + i as f64 * 0.3 + 0.4 * (lap as f64 * 1.7).sin();
                 s.mIsPlayer = (i == 0) as u8;
+                // Drapeau bleu (mFlag = 6) montré au joueur pendant le scénario.
+                s.mFlag = if i == 0 && sc.is_some_and(|x| x.blue) { 6 } else { 0 };
                 s.mPlace = i as u8 + 1;
                 s.mTimeBehindNext = 1.5;
                 s.mTimeBehindLeader = i as f64 * 1.5;
@@ -238,6 +243,7 @@ mod tests {
         assert_eq!(scene(55.0).phase, 6);
         assert!(scene(72.0).rain > 0.05);
         assert!(scene(76.0).flat);
+        assert!(scene(44.0).blue && !scene(10.0).blue);
         assert!(!scene(5.0).yellow && !scene(5.0).flat);
     }
 }

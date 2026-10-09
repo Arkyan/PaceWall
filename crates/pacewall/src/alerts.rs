@@ -62,6 +62,7 @@ pub struct Alerts {
     last_phase: Option<i64>,
     /// Secteurs en jaune à la lecture précédente (secteurs 1, 2, 3).
     yellow_before: [bool; 3],
+    blue_before: bool,
     raining_before: bool,
     last_said: HashMap<&'static str, Instant>,
 }
@@ -121,6 +122,12 @@ impl Alerts {
             }
             self.last_phase = Some(phase);
             self.yellow_before = yellow;
+            // Drapeau bleu : une voiture plus rapide arrive, on prévient quand il apparaît (pas en boucle).
+            let blue = data.flag("player.blue_flag");
+            if blue && !self.blue_before && self.ready("blue", now, 12) {
+                say.push(self::say("blue", "Drapeau bleu"));
+            }
+            self.blue_before = blue;
         }
 
         if cfg.weather {
@@ -265,6 +272,19 @@ mod tests {
         assert_eq!(texts(a.update(&d(5, true, true, false), &cfg(), t + Duration::from_secs(10))), vec!["Drapeau jaune"]);
         assert_eq!(texts(a.update(&d(6, false, false, false), &cfg(), t + Duration::from_secs(20))), vec!["Full course yellow"]);
         assert_eq!(texts(a.update(&d(5, false, false, false), &cfg(), t + Duration::from_secs(50))), vec!["Course relancée, drapeau vert"]);
+    }
+
+    #[test]
+    fn blue_flag_announced_once_per_appearance() {
+        let mut a = Alerts::default();
+        let t = Instant::now();
+        let d = |blue: bool| data(&[("session.realtime", json!(true)), ("player.blue_flag", json!(blue))]);
+        assert!(a.update(&d(false), &cfg(), t).is_empty());
+        assert_eq!(texts(a.update(&d(true), &cfg(), t)), vec!["Drapeau bleu"]);
+        // Il reste affiché : pas de répétition ; il disparaît puis revient après le délai : nouvelle annonce.
+        assert!(a.update(&d(true), &cfg(), t + Duration::from_secs(3)).is_empty());
+        assert!(a.update(&d(false), &cfg(), t + Duration::from_secs(5)).is_empty());
+        assert_eq!(texts(a.update(&d(true), &cfg(), t + Duration::from_secs(20))), vec!["Drapeau bleu"]);
     }
 
     #[test]

@@ -652,12 +652,20 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
 
 /* ---------- Drapeaux ---------- */
 
-/// Un drapeau montré au pilote : texte long (un seul drapeau), texte court (deux côte à côte), couleurs.
+/// Un drapeau montré au pilote : une couleur, et le secteur pour le jaune. Aucun autre texte.
 struct Flag {
-    long: String,
-    short: String,
     fill: Color32,
+    /// Texte du bandeau : seulement le secteur du jaune (« S2 »).
+    label: String,
     ink: Color32,
+    kind: FlagKind,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum FlagKind {
+    Plain,
+    Black,
+    Checkered,
 }
 
 /// Le drapeau (ou les deux plus importants s'il y en a plusieurs) affiché en grand, rien quand il n'y en a aucun :
@@ -677,32 +685,33 @@ fn flags(d: &D, _spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (
 
     let dark = Color32::from_rgb(17, 17, 17);
     let mut active: Vec<Flag> = Vec::new();
-    let mut add = |long: &str, short: &str, fill: Color32, ink: Color32| active.push(Flag { long: long.into(), short: short.into(), fill, ink });
+    let mut add = |fill: Color32, label: &str, ink: Color32, kind: FlagKind| active.push(Flag { fill, label: label.into(), ink, kind });
     if phase == 7 || ystate == 7 {
-        add("DRAPEAU ROUGE", "ROUGE", BAD, Color32::WHITE);
+        add(BAD, "", Color32::WHITE, FlagKind::Plain);
     }
     if phase == 6 {
-        add("FULL COURSE YELLOW", "FCY", WARN, dark);
+        // Neutralisation (full course yellow, safety car) : orange, pour ne pas la confondre avec le jaune d'un secteur.
+        add(WARN, "", dark, FlagKind::Plain);
     }
     if finish == 3 {
-        add("DISQUALIFIÉ", "NOIR", Color32::from_rgb(12, 12, 12), Color32::WHITE);
+        add(Color32::from_rgb(12, 12, 12), "", Color32::WHITE, FlagKind::Black);
     }
     let sectors: Vec<usize> = (1..=3).filter(|s| data.flag(&format!("session.sector_yellow.{s}"))).collect();
     if !sectors.is_empty() {
         let list: Vec<String> = sectors.iter().map(|s| format!("S{s}")).collect();
-        add(&format!("JAUNE · {}", list.join(" ")), &format!("JAUNE {}", list.join(" ")), Color32::from_rgb(255, 214, 51), dark);
+        add(Color32::from_rgb(255, 214, 51), &list.join(" "), dark, FlagKind::Plain);
     }
     if data.flag("player.blue_flag") {
-        add("DRAPEAU BLEU · LAISSE PASSER", "BLEU", BLUE, Color32::WHITE);
+        add(BLUE, "", Color32::WHITE, FlagKind::Plain);
     }
     if ystate == 5 {
-        add("DERNIER TOUR", "DERNIER TOUR", Color32::from_rgb(240, 244, 250), dark);
+        add(Color32::from_rgb(240, 244, 250), "", dark, FlagKind::Plain);
     }
     if now < st.green_until {
-        add("DRAPEAU VERT", "VERT", OK, dark);
+        add(OK, "", dark, FlagKind::Plain);
     }
     if phase == 8 || finish == 1 {
-        add("ARRIVÉE", "ARRIVÉE", Color32::WHITE, dark);
+        add(Color32::WHITE, "", dark, FlagKind::Checkered);
     }
 
     if active.is_empty() {
@@ -723,16 +732,33 @@ fn flags(d: &D, _spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (
     for (i, f) in shown.iter().enumerate() {
         let x = i as f32 * (bw + gap);
         d.fill(x, 0.0, bw, h, f.fill);
-        if f.fill == Color32::from_rgb(12, 12, 12) {
-            // Noir : contour clair pour le distinguer d'un fond sombre.
-            let edge = Color32::from_white_alpha(200);
-            d.fill(x, 0.0, bw, 1.5, edge);
-            d.fill(x, h - 1.5, bw, 1.5, edge);
-            d.fill(x, 0.0, 1.5, h, edge);
-            d.fill(x + bw - 1.5, 0.0, 1.5, h, edge);
+        match f.kind {
+            FlagKind::Black => {
+                // Noir : contour clair pour le distinguer d'un fond sombre.
+                let edge = Color32::from_white_alpha(200);
+                d.fill(x, 0.0, bw, 1.5, edge);
+                d.fill(x, h - 1.5, bw, 1.5, edge);
+                d.fill(x, 0.0, 1.5, h, edge);
+                d.fill(x + bw - 1.5, 0.0, 1.5, h, edge);
+            }
+            FlagKind::Checkered => {
+                // Damier : carrés noirs et blancs sur toute la largeur.
+                let cell = h / 4.0;
+                let cols = (bw / cell).ceil() as usize;
+                for cx in 0..cols {
+                    for cy in 0..4 {
+                        if (cx + cy) % 2 == 0 {
+                            d.fill(x + cx as f32 * cell, cy as f32 * cell, cell.min(bw - cx as f32 * cell), cell, Color32::from_rgb(12, 12, 12));
+                        }
+                    }
+                }
+            }
+            FlagKind::Plain => {}
         }
-        let (text, size) = if shown.len() == 1 { (&f.long, 22.0) } else { (&f.short, 18.0) };
-        d.text(x + bw / 2.0, h / 2.0 - size * 0.62, text, size, f.ink, Font::Ui, HAlign::Center);
+        if !f.label.is_empty() {
+            let size = if shown.len() == 1 { 26.0 } else { 22.0 };
+            d.text(x + bw / 2.0, h / 2.0 - size * 0.62 + 3.0, &f.label, size, f.ink, Font::Num, HAlign::Center);
+        }
     }
     (w, h)
 }

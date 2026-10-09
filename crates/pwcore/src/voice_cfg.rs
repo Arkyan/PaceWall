@@ -33,6 +33,7 @@ pub const CATALOG: &[AlertDef] = &[
     AlertDef { id: "tyres_worn", group: "Pneus", label: "Pneus usés", clips: &["tyres_worn"], phrases: &["Pneus usés, pense à ton arrêt.", "Les pneus sont en fin de vie."] },
     AlertDef { id: "flat", group: "Pneus", label: "Crevaison", clips: &["flat"], phrases: &["Crevaison ! Rentre au stand !", "Tu as une crevaison, rentre doucement !"] },
     AlertDef { id: "yellow", group: "Drapeaux", label: "Drapeau jaune (avec le secteur)", clips: &["yellow_s2", "yellow", "yellow_s1", "yellow_s3"], phrases: &["Drapeau jaune, secteur N.", "Jaune dans le secteur N, lève le pied."] },
+    AlertDef { id: "blue", group: "Drapeaux", label: "Drapeau bleu", clips: &["blue"], phrases: &["Drapeau bleu, laisse passer.", "Drapeau bleu, une voiture plus rapide arrive."] },
     AlertDef { id: "fcy", group: "Drapeaux", label: "Full course yellow", clips: &["fcy"], phrases: &["Full course yellow.", "Full course yellow, respecte les écarts et reste concentré."] },
     AlertDef { id: "green", group: "Drapeaux", label: "Relance, drapeau vert", clips: &["green"], phrases: &["Course relancée, drapeau vert.", "Feu vert, c'est reparti, bonne relance."] },
     AlertDef { id: "rain", group: "Météo", label: "Pluie détectée", clips: &["rain"], phrases: &["Pluie détectée.", "Il commence à pleuvoir, prépare tes pneus pluie."] },
@@ -105,7 +106,7 @@ mod tests {
 
     #[test]
     fn every_clip_key_has_an_alert() {
-        for key in ["fuel_5", "energy_1", "tyres_cold", "flat", "yellow_s3", "yellow", "fcy", "green", "rain"] {
+        for key in ["fuel_5", "energy_1", "tyres_cold", "flat", "yellow_s3", "yellow", "blue", "fcy", "green", "rain"] {
             assert!(id_of_key(key).is_some(), "{key}");
         }
         assert_eq!(id_of_key("yellow_s1"), Some("yellow"));

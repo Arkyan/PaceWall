@@ -2,6 +2,7 @@
 
 /// Clips de la voix « f » : (clé d'alerte, variantes WAV 16 bits mono 16 kHz).
 pub const CLIPS_F: &[(&str, &[&[u8]])] = &[
+    ("blue", &[include_bytes!("../assets/voice/f/blue_0.wav"), include_bytes!("../assets/voice/f/blue_1.wav")]),
     ("energy_1", &[include_bytes!("../assets/voice/f/energy_1_0.wav"), include_bytes!("../assets/voice/f/energy_1_1.wav")]),
     ("energy_2", &[include_bytes!("../assets/voice/f/energy_2_0.wav"), include_bytes!("../assets/voice/f/energy_2_1.wav")]),
     ("energy_3", &[include_bytes!("../assets/voice/f/energy_3_0.wav"), include_bytes!("../assets/voice/f/energy_3_1.wav")]),
@@ -25,6 +26,7 @@ pub const CLIPS_F: &[(&str, &[&[u8]])] = &[
 
 /// Clips de la voix « m » : (clé d'alerte, variantes WAV 16 bits mono 16 kHz).
 pub const CLIPS_M: &[(&str, &[&[u8]])] = &[
+    ("blue", &[include_bytes!("../assets/voice/m/blue_0.wav"), include_bytes!("../assets/voice/m/blue_1.wav")]),
     ("energy_1", &[include_bytes!("../assets/voice/m/energy_1_0.wav"), include_bytes!("../assets/voice/m/energy_1_1.wav")]),
     ("energy_2", &[include_bytes!("../assets/voice/m/energy_2_0.wav"), include_bytes!("../assets/voice/m/energy_2_1.wav")]),
     ("energy_3", &[include_bytes!("../assets/voice/m/energy_3_0.wav"), include_bytes!("../assets/voice/m/energy_3_1.wav")]),

@@ -481,7 +481,8 @@ PW.widgets.trackmap = {
 };
 
 /* ---------- Drapeaux ---------- */
-// Un drapeau, ou les deux plus importants s'il y en a plusieurs, affichés en grand ; rien quand il n'y en a aucun.
+// Un drapeau, ou les deux plus importants s'il y en a plusieurs, affichés en grand (couleur seule, le secteur pour le jaune) ;
+// rien quand il n'y en a aucun.
 // Ordre : rouge, neutralisation, noir, jaune, bleu, blanc, vert (8 s après une relance), damier.
 PW.widgets.flags = {
   name: 'Drapeaux',
@@ -497,24 +498,24 @@ PW.widgets.flags = {
         const phase = g('session.phase', 5), ystate = g('session.yellow', 0), finish = g('player.finish_status', 0), now = performance.now();
         if (before != null && phase === 5 && before !== 5 && before >= 0) greenUntil = now + 8000;
         before = phase;
-        const list = [], add = (long, short, bg, fg, cls) => list.push({ long, short, bg, fg, cls: cls || '' });
-        if (phase === 7 || ystate === 7) add('Drapeau rouge', 'Rouge', '#ff4d5e', '#fff');
-        if (phase === 6) add('Full course yellow', 'FCY', '#ffb020', '#111');
-        if (finish === 3) add('Disqualifié', 'Noir', '#0c0c0c', '#fff', 'black');
+        const list = [], add = (bg, label, fg, cls) => list.push({ bg, label: label || '', fg, cls: cls || '' });
+        if (phase === 7 || ystate === 7) add('#ff4d5e', '', '#fff');
+        if (phase === 6) add('#ffb020', '', '#111'); // neutralisation : orange, distincte du jaune d'un secteur
+        if (finish === 3) add('#0c0c0c', '', '#fff', 'black');
         const ys = [1, 2, 3].filter(s => g('session.sector_yellow.' + s, false)).map(s => 'S' + s);
-        if (ys.length) add('Jaune · ' + ys.join(' '), 'Jaune ' + ys.join(' '), '#ffd633', '#111');
-        if (g('player.blue_flag', false)) add('Drapeau bleu · laisse passer', 'Bleu', '#4f9dff', '#fff');
-        if (ystate === 5) add('Dernier tour', 'Dernier tour', '#f0f4fa', '#111');
-        if (now < greenUntil) add('Drapeau vert', 'Vert', '#38e07b', '#111');
-        if (phase === 8 || finish === 1) add('Arrivée', 'Arrivée', '#fff', '#111');
-        const shown = list.slice(0, 2), k = shown.map(f => f.long).join('|');
+        if (ys.length) add('#ffd633', ys.join(' '), '#111');
+        if (g('player.blue_flag', false)) add('#4f9dff', '', '#fff');
+        if (ystate === 5) add('#f0f4fa', '', '#111');
+        if (now < greenUntil) add('#38e07b', '', '#111');
+        if (phase === 8 || finish === 1) add('#fff', '', '#111', 'checker');
+        const shown = list.slice(0, 2), k = shown.map(f => f.bg + f.label).join('|');
         if (k === key) return;
         key = k;
         box.className = 'pw-flags ' + (shown.length === 1 ? 'one' : 'two');
         box.replaceChildren(...shown.map(f => {
           const el = document.createElement('div');
           el.className = 'pw-fl ' + f.cls; el.style.background = f.bg; el.style.color = f.fg;
-          el.textContent = shown.length === 1 ? f.long : f.short;
+          el.textContent = f.label;
           return el;
         }));
       },
