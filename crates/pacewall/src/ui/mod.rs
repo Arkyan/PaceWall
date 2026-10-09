@@ -9,6 +9,7 @@ mod history;
 mod home;
 mod kit;
 mod settings_page;
+mod tutorial;
 
 use crate::theme::*;
 use crate::win;
@@ -76,6 +77,7 @@ struct App {
     history: history::State,
     settings: settings_page::State,
     alerts: alerts_page::State,
+    tutorial: tutorial::Tutorial,
     dbg_last: f64,
     sized: u8,
 }
@@ -139,6 +141,7 @@ impl App {
             history: history::State::default(),
             settings: settings_page::State::default(),
             alerts: alerts_page::State::default(),
+            tutorial: tutorial::Tutorial::new(),
             dbg_last: 0.0,
             sized: 0,
         };
@@ -317,7 +320,23 @@ impl eframe::App for App {
         if let Some(p) = self.take_request() {
             self.enter(p);
         }
+        // Tutoriel : ouvert au premier lancement, ou à la demande depuis Réglages.
+        if TUTORIAL_REQUEST.with(|r| r.replace(false)) {
+            self.tutorial.restart();
+        }
+        if let Some(tutorial::Action::Open(page)) = self.tutorial.show(ui.ctx()) {
+            self.enter(page);
+        }
     }
+}
+
+// Demande de réaffichage du tutoriel, émise par les Réglages.
+thread_local! {
+    static TUTORIAL_REQUEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn request_tutorial() {
+    TUTORIAL_REQUEST.with(|r| r.set(true));
 }
 
 // Demande de changement de page émise par une page (ex. bouton « Modifier » de l'accueil).

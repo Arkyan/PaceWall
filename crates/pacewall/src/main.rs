@@ -11,6 +11,7 @@
 mod alerts;
 mod daemon;
 mod draw;
+mod install;
 mod overlay;
 mod probe;
 mod soft;
@@ -24,7 +25,15 @@ mod win;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let has = |f: &str| args.iter().any(|a| a == f);
-    if has("--simulate") {
+    if has("--install") {
+        // Installation sans interface : `pacewall.exe --install [--desktop] [--autostart]`.
+        if let Ok(exe) = install::install(install::Options { desktop_shortcut: has("--desktop"), autostart: has("--autostart") }) {
+            let _ = std::process::Command::new(exe).spawn();
+        }
+    } else if has("--uninstall") {
+        // Désinstallation : `pacewall.exe --uninstall [--purge]` (--purge supprime aussi les données).
+        install::uninstall(has("--purge"));
+    } else if has("--simulate") {
         // Faux jeu intégré : le verrou nommé dit au reste de PaceWall qu'une simulation tourne (voir Réglages).
         if win::single_instance("PaceWallSimulator") {
             let stop = win::simulator_stop_signal();

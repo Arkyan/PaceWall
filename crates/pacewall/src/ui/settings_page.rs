@@ -2,14 +2,25 @@
 
 use super::kit;
 use crate::theme::*;
+use crate::install;
 use crate::win;
 use eframe::egui::{self, Margin, RichText, Ui};
 use pwcore::{db, layout, settings};
 use serde_json::json;
 
-#[derive(Default)]
 pub struct State {
     monitors: Vec<win::Monitor>,
+    /// Installation : raccourci du bureau, suppression des données à la désinstallation, confirmation, erreur éventuelle.
+    desktop_link: bool,
+    purge: bool,
+    confirm_uninstall: bool,
+    install_error: Option<String>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self { monitors: Vec::new(), desktop_link: true, purge: false, confirm_uninstall: false, install_error: None }
+    }
 }
 
 impl State {
@@ -115,8 +126,61 @@ impl State {
                 win::set_autostart(auto);
             }
             ui.add_space(6.0);
-            ui.label(RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION"))).size(12.5).color(MUTED));
+            ui.horizontal(|ui| {
+                if kit::button(ui, "Revoir le tutoriel").clicked() {
+                    super::request_tutorial();
+                }
+                ui.label(RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION"))).size(12.5).color(MUTED));
+            });
+            ui.add_space(10.0);
+            self.installation(ui);
         });
+    }
+
+    /// Installer ou désinstaller PaceWall (raccourcis, démarrage avec Windows, entrée « Applications installées »).
+    fn installation(&mut self, ui: &mut Ui) {
+        ui.label(RichText::new("INSTALLATION").size(11.0).color(MUTED));
+        if install::running_installed() {
+            ui.label(RichText::new(format!("Installé dans {}", install::install_dir().display())).font(num_font(12.0)));
+            ui.add_space(4.0);
+            ui.checkbox(&mut self.purge, "Supprimer aussi mes données (historique, mises en page, réglages)");
+            if self.confirm_uninstall {
+                ui.label(RichText::new("PaceWall va se fermer et se désinstaller.").color(WARN));
+                ui.horizontal(|ui| {
+                    if kit::button(ui, "Confirmer la désinstallation").clicked() {
+                        install::uninstall(self.purge);
+                        std::process::exit(0);
+                    }
+                    if kit::button(ui, "Annuler").clicked() {
+                        self.confirm_uninstall = false;
+                    }
+                });
+            } else if kit::button(ui, "Désinstaller PaceWall").clicked() {
+                self.confirm_uninstall = true;
+            }
+        } else {
+            ui.label(RichText::new("Cette copie de PaceWall n'est pas installée : elle tourne depuis son dossier actuel.").size(12.5).color(MUTED));
+            ui.add_space(4.0);
+            ui.checkbox(&mut self.desktop_link, "Ajouter un raccourci sur le bureau");
+            let mut autostart = settings::bool_of("autostart", false);
+            if ui.checkbox(&mut autostart, "Lancer avec Windows après l'installation").changed() {
+                let _ = settings::set("autostart", json!(autostart));
+            }
+            ui.add_space(4.0);
+            if kit::button(ui, "Installer PaceWall").clicked() {
+                match install::install(install::Options { desktop_shortcut: self.desktop_link, autostart }) {
+                    Ok(exe) => {
+                        // La copie installée prend le relais : elle ouvre PaceWall, cette copie se ferme.
+                        let _ = std::process::Command::new(exe).spawn();
+                        std::process::exit(0);
+                    }
+                    Err(e) => self.install_error = Some(e),
+                }
+            }
+            if let Some(e) = &self.install_error {
+                ui.label(RichText::new(format!("Installation impossible : {e}")).color(BAD));
+            }
+        }
     }
 
     fn files(&mut self, ui: &mut Ui) {

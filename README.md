@@ -26,6 +26,16 @@ LMU ──► pwcore::live (mémoire partagée) ──┬─► overlay native (
                                           └─► serveur OBS (WebSocket + pages HTML)
 ```
 
+## Installation
+
+`pacewall.exe` s'installe lui-même, sans installateur externe et sans droits administrateur :
+- au premier lancement, un **tutoriel** en six étapes prépare le jeu, les overlays, les alertes vocales et OBS, et propose d'installer ;
+- ou Réglages > Application > **Installer PaceWall** ; en ligne de commande : `pacewall.exe --install [--desktop] [--autostart]` ;
+- l'installation copie le programme dans `%LOCALAPPDATA%\Programs\PaceWall`, crée un raccourci du menu Démarrer (et du bureau
+  si demandé), peut lancer PaceWall avec Windows, et l'ajoute à « Applications installées » ;
+- la désinstallation (Réglages, « Applications installées » ou `pacewall.exe --uninstall [--purge]`) retire tout ; `--purge`
+  supprime aussi l'historique, les mises en page et les réglages.
+
 ## Utilisation
 
 1. Lancer `pacewall.exe` : l'icône apparaît dans la zone de notification, clic gauche pour ouvrir la fenêtre.
