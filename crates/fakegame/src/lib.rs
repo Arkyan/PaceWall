@@ -37,6 +37,14 @@ pub struct Scene {
     pub flat: bool,
     /// Drapeau bleu montré au joueur.
     pub blue: bool,
+    /// Voiture qui arrive derrière à moins d'une seconde.
+    pub rear_close: bool,
+    /// Le meilleur tour du joueur s'améliore (à partir de 35 s).
+    pub best_improved: bool,
+    /// Dernier tour (état 5 du jeu).
+    pub last_lap: bool,
+    /// Le joueur est aux stands sans limiteur.
+    pub pit: bool,
 }
 
 /// Déroulé du scénario : 0-20 s pneus froids, 20-50 s réchauffe, 50-65 s trop chauds, puis normaux ; carburant qui
@@ -62,6 +70,10 @@ pub fn scene(c: f64) -> Scene {
         rain: if (70.0..85.0).contains(&c) { 0.15 } else { 0.0 },
         flat: (75.0..78.0).contains(&c),
         blue: (42.0..48.0).contains(&c),
+        rear_close: (14.0..22.0).contains(&c),
+        best_improved: c >= 35.0,
+        last_lap: (80.0..88.0).contains(&c),
+        pit: (60.0..68.0).contains(&c),
     }
 }
 
@@ -143,7 +155,7 @@ pub fn run(opts: Options, stop: &dyn Fn() -> bool) -> Result<(), String> {
             };
             v.mDeltaBest = 0.3 * (progress * 6.28).sin();
             v.mTimeGapCarAhead = 2.1;
-            v.mTimeGapCarBehind = 3.4;
+            v.mTimeGapCarBehind = if sc.is_some_and(|s| s.rear_close) { 0.6 } else { 3.4 };
             v.mBatteryChargeFraction = 0.6;
             v.mMaxGears = 7;
             v.mRearBrakeBias = 0.54;
@@ -183,6 +195,9 @@ pub fn run(opts: Options, stop: &dyn Fn() -> bool) -> Result<(), String> {
             // Jaune local dans le secteur 2 (ordre naturel : l'élément 1 du tableau). Le full course yellow passe par la phase 6.
             info.mSectorFlag = [0, (sc.map_or(opts.yellow && (t as u64 % 12) >= 8, |s| s.yellow)) as u8, 0];
             info.mInRealtime = 1;
+            if sc.is_some_and(|s| s.last_lap) {
+                info.mYellowFlagState = 5;
+            }
             put(&mut info.mPlayerName, "Toi");
             info.mRaining = sc.map_or(0.0, |s| s.rain);
             info.mAmbientTemp = 21.0;
@@ -206,6 +221,12 @@ pub fn run(opts: Options, stop: &dyn Fn() -> bool) -> Result<(), String> {
                 s.mBestLapTime = lap_seconds - 0.6 + i as f64 * 0.3;
                 s.mLastLapTime = lap_seconds - 0.2 + i as f64 * 0.3 + 0.4 * (lap as f64 * 1.7).sin();
                 s.mIsPlayer = (i == 0) as u8;
+                if i == 0 {
+                    if sc.is_some_and(|x| x.best_improved) {
+                        s.mBestLapTime -= 0.2;
+                    }
+                    s.mInPits = sc.is_some_and(|x| x.pit) as u8;
+                }
                 // Drapeau bleu (mFlag = 6) montré au joueur pendant le scénario.
                 s.mFlag = if i == 0 && sc.is_some_and(|x| x.blue) { 6 } else { 0 };
                 s.mPlace = i as u8 + 1;
@@ -244,6 +265,7 @@ mod tests {
         assert!(scene(72.0).rain > 0.05);
         assert!(scene(76.0).flat);
         assert!(scene(44.0).blue && !scene(10.0).blue);
+        assert!(scene(16.0).rear_close && scene(40.0).best_improved && scene(84.0).last_lap && scene(64.0).pit);
         assert!(!scene(5.0).yellow && !scene(5.0).flat);
     }
 }

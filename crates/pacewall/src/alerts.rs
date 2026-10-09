@@ -63,6 +63,12 @@ pub struct Alerts {
     /// Secteurs en jaune à la lecture précédente (secteurs 1, 2, 3).
     yellow_before: [bool; 3],
     blue_before: bool,
+    last_lap_before: bool,
+    /// Dernier instant en neutralisation : la relance a sa propre annonce, pas besoin de « fin du jaune » en plus.
+    fcy_seen: Option<Instant>,
+    last_best: Option<f64>,
+    rear_before: Option<f64>,
+    limiter_since: Option<Instant>,
     raining_before: bool,
     last_said: HashMap<&'static str, Instant>,
 }
@@ -121,6 +127,21 @@ impl Alerts {
                 }
             }
             self.last_phase = Some(phase);
+            // Fin du jaune : tous les secteurs sont repassés au vert (hors neutralisation et sa relance).
+            if phase == 6 {
+                self.fcy_seen = Some(now);
+            }
+            let after_fcy = self.fcy_seen.is_some_and(|t| now.duration_since(t) < Duration::from_secs(15));
+            if self.yellow_before.iter().any(|y| *y) && !yellow.iter().any(|y| *y) && phase != 6 && !after_fcy && self.ready("yellow_end", now, 6) {
+                say.push(self::say("yellow_end", "Fin du jaune"));
+            }
+            // Dernier tour : état « dernier tour » du jeu, ou tour courant = nombre de tours de la course.
+            let max_laps = data.f("session.max_laps", 0.0);
+            let last_lap = data.f("session.yellow", 0.0) as i64 == 5 || (max_laps > 0.0 && max_laps < 10_000.0 && data.f("lap.number", 0.0) >= max_laps);
+            if last_lap && !self.last_lap_before && self.ready("last_lap", now, 60) {
+                say.push(self::say("last_lap", "Dernier tour"));
+            }
+            self.last_lap_before = last_lap;
             self.yellow_before = yellow;
             // Drapeau bleu : une voiture plus rapide arrive, on prévient quand il apparaît (pas en boucle).
             let blue = data.flag("player.blue_flag");
@@ -140,6 +161,34 @@ impl Alerts {
 
         if !on_track {
             return say;
+        }
+
+        // Meilleur tour personnel : le meilleur temps de la session baisse.
+        if let Some(best) = data.num("position.best_lap").filter(|v| *v > 0.0) {
+            if self.last_best.is_some_and(|prev| best < prev - 0.0005) && self.ready("best_lap", now, 10) {
+                say.push(self::say("best_lap", "Meilleur tour personnel"));
+            }
+            self.last_best = Some(best);
+        }
+        // Voiture derrière qui se rapproche (course) : l'écart passe sous une seconde après avoir été plus grand.
+        let is_race = (10..=13).contains(&(data.f("session.type", -1.0) as i64));
+        match data.num("gap.car_behind").filter(|v| *v > 0.0) {
+            Some(gap) => {
+                if is_race && speed > 50.0 && gap < 1.0 && self.rear_before.is_some_and(|prev| prev >= 1.3) && self.ready("rear_close", now, 45) {
+                    say.push(self::say("rear_close", "Voiture derrière, elle se rapproche"));
+                }
+                self.rear_before = Some(gap);
+            }
+            None => self.rear_before = None,
+        }
+        // Limiteur de vitesse : aux stands, à plus de 70 km/h depuis une seconde, sans le limiteur.
+        if data.flag("pit.in_pits") && !data.flag("car.speed_limiter") && speed > 70.0 {
+            let since = *self.limiter_since.get_or_insert(now);
+            if now.duration_since(since) >= Duration::from_secs(1) && self.ready("pit_limiter", now, 20) {
+                say.push(self::say("pit_limiter", "Active le limiteur"));
+            }
+        } else {
+            self.limiter_since = None;
         }
 
         if cfg.fuel {
@@ -285,6 +334,40 @@ mod tests {
         assert!(a.update(&d(true), &cfg(), t + Duration::from_secs(3)).is_empty());
         assert!(a.update(&d(false), &cfg(), t + Duration::from_secs(5)).is_empty());
         assert_eq!(texts(a.update(&d(true), &cfg(), t + Duration::from_secs(20))), vec!["Drapeau bleu"]);
+    }
+
+    #[test]
+    fn race_alerts() {
+        let mut a = Alerts::default();
+        let t = Instant::now();
+        let base = |extra: &[(&str, Value)]| {
+            let mut v = vec![("session.realtime", json!(true)), ("player.speed", json!(150.0)), ("session.type", json!(10))];
+            v.extend(extra.iter().cloned());
+            data(&v)
+        };
+        // Meilleur tour : annoncé seulement quand il baisse.
+        assert!(a.update(&base(&[("position.best_lap", json!(100.0))]), &cfg(), t).is_empty());
+        assert_eq!(texts(a.update(&base(&[("position.best_lap", json!(99.2))]), &cfg(), t + Duration::from_secs(1))), vec!["Meilleur tour personnel"]);
+        assert!(a.update(&base(&[("position.best_lap", json!(99.2))]), &cfg(), t + Duration::from_secs(2)).is_empty());
+        // Voiture derrière : plus de 1,3 s puis moins d'une seconde.
+        assert!(a.update(&base(&[("gap.car_behind", json!(2.0))]), &cfg(), t + Duration::from_secs(3)).is_empty());
+        assert_eq!(texts(a.update(&base(&[("gap.car_behind", json!(0.8))]), &cfg(), t + Duration::from_secs(4))), vec!["Voiture derrière, elle se rapproche"]);
+        assert!(a.update(&base(&[("gap.car_behind", json!(0.7))]), &cfg(), t + Duration::from_secs(5)).is_empty());
+        // Dernier tour : état 5 du jeu.
+        assert_eq!(texts(a.update(&base(&[("session.yellow", json!(5))]), &cfg(), t + Duration::from_secs(6))), vec!["Dernier tour"]);
+        // Limiteur : aux stands, vite, sans limiteur, pendant plus d'une seconde.
+        let pit = base(&[("pit.in_pits", json!(true)), ("car.speed_limiter", json!(false))]);
+        assert!(a.update(&pit, &cfg(), t + Duration::from_secs(10)).is_empty());
+        assert_eq!(texts(a.update(&pit, &cfg(), t + Duration::from_secs(12))), vec!["Active le limiteur"]);
+    }
+
+    #[test]
+    fn yellow_end_announced() {
+        let mut a = Alerts::default();
+        let t = Instant::now();
+        let d = |s2: bool| data(&[("session.realtime", json!(true)), ("session.phase", json!(5)), ("session.sector_yellow.2", json!(s2))]);
+        assert_eq!(texts(a.update(&d(true), &cfg(), t)), vec!["Drapeau jaune, secteur deux"]);
+        assert_eq!(texts(a.update(&d(false), &cfg(), t + Duration::from_secs(10))), vec!["Fin du jaune"]);
     }
 
     #[test]

@@ -18,7 +18,7 @@ pub struct AlertDef {
     pub phrases: &'static [&'static str],
 }
 
-pub const GROUPS: [&str; 5] = ["Carburant", "Énergie", "Pneus", "Drapeaux", "Météo"];
+pub const GROUPS: [&str; 6] = ["Carburant", "Énergie", "Pneus", "Drapeaux", "Course", "Météo"];
 
 pub const CATALOG: &[AlertDef] = &[
     AlertDef { id: "fuel_5", group: "Carburant", label: "Cinq tours de carburant", clips: &["fuel_5"], phrases: &["Carburant, il reste cinq tours.", "Cinq tours de carburant."] },
@@ -36,6 +36,11 @@ pub const CATALOG: &[AlertDef] = &[
     AlertDef { id: "blue", group: "Drapeaux", label: "Drapeau bleu", clips: &["blue"], phrases: &["Drapeau bleu, laisse passer.", "Drapeau bleu, une voiture plus rapide arrive."] },
     AlertDef { id: "fcy", group: "Drapeaux", label: "Full course yellow", clips: &["fcy"], phrases: &["Full course yellow.", "Full course yellow, respecte les écarts et reste concentré."] },
     AlertDef { id: "green", group: "Drapeaux", label: "Relance, drapeau vert", clips: &["green"], phrases: &["Course relancée, drapeau vert.", "Feu vert, c'est reparti, bonne relance."] },
+    AlertDef { id: "yellow_end", group: "Drapeaux", label: "Fin du jaune", clips: &["yellow_end"], phrases: &["Fin du jaune.", "Piste libre, tu peux attaquer."] },
+    AlertDef { id: "last_lap", group: "Course", label: "Dernier tour", clips: &["last_lap"], phrases: &["Dernier tour.", "C'est le dernier tour, donne tout."] },
+    AlertDef { id: "best_lap", group: "Course", label: "Meilleur tour personnel", clips: &["best_lap"], phrases: &["Meilleur tour personnel.", "Nouveau meilleur tour, bravo."] },
+    AlertDef { id: "rear_close", group: "Course", label: "Voiture qui se rapproche derrière (course)", clips: &["rear_close"], phrases: &["Voiture derrière, elle se rapproche.", "Attention, voiture derrière à moins d'une seconde."] },
+    AlertDef { id: "pit_limiter", group: "Course", label: "Limiteur de vitesse aux stands", clips: &["pit_limiter"], phrases: &["Active le limiteur.", "Limiteur de vitesse, ralentis."] },
     AlertDef { id: "rain", group: "Météo", label: "Pluie détectée", clips: &["rain"], phrases: &["Pluie détectée.", "Il commence à pleuvoir, prépare tes pneus pluie."] },
 ];
 
@@ -106,7 +111,7 @@ mod tests {
 
     #[test]
     fn every_clip_key_has_an_alert() {
-        for key in ["fuel_5", "energy_1", "tyres_cold", "flat", "yellow_s3", "yellow", "blue", "fcy", "green", "rain"] {
+        for key in ["fuel_5", "energy_1", "tyres_cold", "flat", "yellow_s3", "yellow", "blue", "fcy", "green", "rain", "yellow_end", "last_lap", "best_lap", "rear_close", "pit_limiter"] {
             assert!(id_of_key(key).is_some(), "{key}");
         }
         assert_eq!(id_of_key("yellow_s1"), Some("yellow"));

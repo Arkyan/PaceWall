@@ -51,6 +51,11 @@ PHRASES = {
     "yellow_s2": (URGENT, ["Drapeau jaune, secteur deux.", "Jaune dans le secteur deux, lève le pied."]),
     "yellow_s3": (URGENT, ["Drapeau jaune, secteur trois.", "Jaune dans le secteur trois, lève le pied."]),
     "blue": (URGENT, ["Drapeau bleu, laisse passer.", "Drapeau bleu, une voiture plus rapide arrive."]),
+    "last_lap": (URGENT, ["Dernier tour.", "C'est le dernier tour, donne tout."]),
+    "best_lap": (CALM, ["Meilleur tour personnel.", "Nouveau meilleur tour, bravo."]),
+    "rear_close": (URGENT, ["Voiture derrière, elle se rapproche.", "Attention, voiture derrière à moins d'une seconde."]),
+    "yellow_end": (CALM, ["Fin du jaune.", "Piste libre, tu peux attaquer."]),
+    "pit_limiter": (URGENT, ["Active le limiteur.", "Limiteur de vitesse, ralentis."]),
     "fcy": (CALM, ["Full course yellow.", "Full course yellow, respecte les écarts et reste concentré."]),
     "green": (CALM, ["Course relancée, drapeau vert.", "Feu vert, c'est reparti, bonne relance."]),
     "rain": (CALM, ["Pluie détectée.", "Il commence à pleuvoir, prépare tes pneus pluie."]),
@@ -100,7 +105,8 @@ def main():
         sys.exit(__doc__)
     name, model = sys.argv[1], sys.argv[2]
     speaker = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] != "-" else None
-    only = sys.argv[4] if len(sys.argv) > 4 else None  # préfixe de clés à (re)faire ; les autres clips restent tels quels
+    # Préfixes de clés à (re)faire, séparés par des virgules ; les autres clips restent tels quels.
+    only = tuple(sys.argv[4].split(",")) if len(sys.argv) > 4 else None
     voice = PiperVoice.load(model)
     out_dir = ASSETS / name
     out_dir.mkdir(parents=True, exist_ok=True)
