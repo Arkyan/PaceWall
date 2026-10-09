@@ -47,6 +47,8 @@ struct Say {
     text: String,
     volume: u16,
     engine: Engine,
+    /// Phrase imposée (0 ou 1) ; `None` : les phrases alternent.
+    variant: Option<usize>,
 }
 
 pub struct Speaker {
@@ -71,8 +73,8 @@ impl Speaker {
 
     /// Dit une alerte à `volume` % (0 à 100). `key` désigne le clip de l'ingénieur ; `text` est lu par la voix Windows
     /// si `engine` est la voix Windows ou si la clé n'a pas de clip. Ne bloque pas : la phrase est lue par le fil de parole.
-    pub fn say(&self, key: &str, text: &str, volume: u32, engine: Engine) {
-        let _ = self.tx.send(Say { key: key.to_string(), text: text.to_string(), volume: volume.min(100) as u16, engine });
+    pub fn say(&self, key: &str, text: &str, volume: u32, engine: Engine, variant: Option<usize>) {
+        let _ = self.tx.send(Say { key: key.to_string(), text: text.to_string(), volume: volume.min(100) as u16, engine, variant });
     }
 }
 
@@ -140,6 +142,9 @@ fn worker(rx: Receiver<Say>) {
                         let mut pick = (counter.wrapping_mul(2654435761) >> 7) % variants.len();
                         if variants.len() > 1 && Some(pick) == previous {
                             pick = (pick + 1) % variants.len();
+                        }
+                        if let Some(v) = say.variant {
+                            pick = v.min(variants.len() - 1);
                         }
                         last_variant.insert((say.engine, say.key.clone()), pick);
                         play_clip(variants[pick], say.volume);

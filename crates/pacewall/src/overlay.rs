@@ -227,6 +227,8 @@ pub fn run() {
     let mut was_visible = false;
     // Alertes vocales : règles (alerts) et voix (speech) ; relues avec les autres réglages toutes les 2 s.
     let mut voice = alerts::Config::load();
+    // Réglages alerte par alerte (onglet Alertes) : activée, phrase choisie, phrase personnalisée.
+    let mut per_alert = pwcore::voice_cfg::load();
     let mut alerts = alerts::Alerts::default();
     let mut next_alert = Instant::now();
     let mut next_fg = Instant::now();
@@ -272,6 +274,7 @@ pub fn run() {
             fg_only = settings::bool_of("overlay_fg_only", true);
             hide_idle = settings::bool_of("overlay_hide_idle", true);
             voice = alerts::Config::load();
+            per_alert = pwcore::voice_cfg::load();
             let mtime = layout::modified();
             if mtime != layout_mtime {
                 layout_mtime = mtime;
@@ -304,8 +307,19 @@ pub fn run() {
                 if voice.enabled {
                     next_alert = now + Duration::from_millis(250);
                     for phrase in alerts.update(&data, &voice, now) {
-                        log_event(&format!("alerte vocale : {}", phrase.text));
-                        speech::Speaker::global().say(phrase.key, &phrase.text, voice.volume, voice.engine);
+                        let acfg = pwcore::voice_cfg::id_of_key(phrase.key).and_then(|id| per_alert.get(id)).cloned().unwrap_or_default();
+                        if !acfg.on {
+                            continue;
+                        }
+                        // Phrase personnalisée : lue par la voix Windows. Sinon le clip de l'ingénieur (phrase choisie ou alternée).
+                        let custom = acfg.text.trim().to_string();
+                        if custom.is_empty() {
+                            log_event(&format!("alerte vocale : {}", phrase.text));
+                            speech::Speaker::global().say(phrase.key, &phrase.text, voice.volume, voice.engine, acfg.fixed_variant());
+                        } else {
+                            log_event(&format!("alerte vocale (phrase personnalisée) : {custom}"));
+                            speech::Speaker::global().say("", &custom, voice.volume, speech::Engine::Windows, None);
+                        }
                     }
                 }
             }

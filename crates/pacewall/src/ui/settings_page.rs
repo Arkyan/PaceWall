@@ -24,10 +24,6 @@ impl State {
                 ui.set_max_width(760.0);
                 self.overlay(ui);
                 ui.add_space(14.0);
-                self.voice(ui);
-                ui.add_space(14.0);
-                self.simulation(ui);
-                ui.add_space(14.0);
                 self.obs(ui);
                 ui.add_space(14.0);
                 self.app(ui);
@@ -35,90 +31,6 @@ impl State {
                 self.files(ui);
             });
         });
-    }
-
-    /// Alertes vocales : quoi dire, à quel volume, et un bouton pour entendre la voix.
-    fn voice(&mut self, ui: &mut Ui) {
-        kit::panel_frame().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            kit::section(ui, "Alertes vocales");
-            ui.add_space(6.0);
-            let mut on = settings::bool_of("voice_enabled", true);
-            if ui.checkbox(&mut on, "Activer les alertes vocales (pendant que tu roules)").changed() {
-                let _ = settings::set("voice_enabled", json!(on));
-            }
-            ui.add_enabled_ui(on, |ui| {
-                for (key, label) in [
-                    ("voice_fuel", "Carburant et énergie : 5, 3, 2 puis 1 tour restant"),
-                    ("voice_tyres", "Pneus : froids, trop chauds, usés, crevaison"),
-                    ("voice_flags", "Drapeau jaune, full course jaune et reprise"),
-                    ("voice_weather", "Pluie détectée"),
-                ] {
-                    let mut v = settings::bool_of(key, true);
-                    if ui.checkbox(&mut v, label).changed() {
-                        let _ = settings::set(key, json!(v));
-                    }
-                }
-                ui.add_space(6.0);
-                ui.label(RichText::new("Voix").size(12.0).color(MUTED));
-                let engine = settings::str_of("voice_engine", "engineer_m");
-                let name = |v: &str| match v {
-                    "windows" => "Voix de synthèse Windows",
-                    "engineer_f" => "Ingénieure de course (voix de femme)",
-                    _ => "Ingénieur de course (voix d'homme)",
-                };
-                egui::ComboBox::from_id_salt("voice_engine").selected_text(name(&engine)).width(320.0).show_ui(ui, |ui| {
-                    for v in ["engineer_m", "engineer_f", "windows"] {
-                        if ui.selectable_label(engine == v || (v == "engineer_m" && engine == "engineer"), name(v)).clicked() {
-                            let _ = settings::set("voice_engine", json!(v));
-                        }
-                    }
-                });
-                ui.add_space(6.0);
-                let mut volume = settings::int_of("voice_volume", 80).clamp(0, 100) as f32;
-                ui.label(RichText::new("Volume de la voix").size(12.0).color(MUTED));
-                ui.spacing_mut().slider_width = (ui.available_width() - 200.0).clamp(100.0, 320.0);
-                if ui.add(egui::Slider::new(&mut volume, 0.0..=100.0).step_by(5.0).suffix(" %")).changed() {
-                    let _ = settings::set("voice_volume", json!(volume.round() as i64));
-                }
-                ui.add_space(6.0);
-                if kit::button(ui, "Tester la voix").clicked() {
-                    crate::speech::Speaker::global().say("test", "Radio check. Alertes vocales activées.", volume.round() as u32, crate::speech::Engine::from_setting(&settings::str_of("voice_engine", "engineer_m")));
-                }
-            });
-            ui.add_space(4.0);
-            ui.label(RichText::new("La voix d'ingénieur est enregistrée dans PaceWall (hors ligne, sans coût pendant la course). La voix Windows sert de secours : installe une voix française dans Paramètres > Heure et langue > Voix.").size(11.5).color(MUTED));
-        });
-    }
-
-    /// Simulation : un faux jeu intégré qui déroule toutes les alertes, pour essayer PaceWall sans Le Mans Ultimate.
-    fn simulation(&mut self, ui: &mut Ui) {
-        kit::panel_frame().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            kit::section(ui, "Simulation (sans le jeu)");
-            ui.add_space(6.0);
-            let simulating = pwcore::live::simulation_running();
-            let game = !simulating && pwcore::live::game_running();
-            ui.label(RichText::new("Lance un faux Le Mans Ultimate : les overlays, la carte et les alertes vocales se déclenchent comme en course (un cycle de 90 s qui se répète : pneus froids puis chauds puis usés, carburant, drapeau jaune, full course jaune, pluie, crevaison).").size(12.0).color(MUTED));
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                if simulating {
-                    if kit::button(ui, "Arrêter la simulation").clicked() {
-                        win::stop_simulator();
-                    }
-                    ui.label(RichText::new("Simulation en cours").color(OK));
-                } else if game {
-                    ui.add_enabled(false, egui::Button::new("Lancer la simulation"));
-                    ui.label(RichText::new("Le jeu tourne : simulation impossible").color(MUTED));
-                } else if kit::button(ui, "Lancer la simulation").clicked() {
-                    win::spawn_self(&["--simulate"]);
-                }
-            });
-            ui.add_space(4.0);
-            ui.label(RichText::new("Pour que l'overlay s'ouvre toute seule, PaceWall doit tourner en arrière-plan (icône près de l'horloge).").size(11.5).color(MUTED));
-        });
-        // Le statut se met à jour tout seul pendant que la page est ouverte.
-        ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
     }
 
     fn overlay(&mut self, ui: &mut Ui) {

@@ -36,7 +36,7 @@ fn main() {
         let text = args.iter().skip_while(|a| *a != "--say").nth(1).cloned().unwrap_or_else(|| "Alertes vocales PaceWall".into());
         // `--say test` joue le clip de l'ingénieur ; tout autre texte est lu par la voix Windows.
         let engine = speech::Engine::from_setting(&pwcore::settings::str_of("voice_engine", "engineer_m"));
-        speech::Speaker::global().say(&text, &text, pwcore::settings::int_of("voice_volume", 80) as u32, engine);
+        speech::Speaker::global().say(&text, &text, pwcore::settings::int_of("voice_volume", 80) as u32, engine, None);
         std::thread::sleep(std::time::Duration::from_secs(6));
     } else if has("--probe") {
         probe::run();

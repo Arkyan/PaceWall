@@ -18,5 +18,6 @@ pub mod recorder;
 pub mod settings;
 pub mod strategy;
 pub mod trackmap;
+pub mod voice_cfg;
 
 pub use data::Data;

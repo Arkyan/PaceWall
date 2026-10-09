@@ -1,6 +1,7 @@
 //! Fenêtre principale (egui) : accueil, éditeur d'overlays, données en direct, historique, réglages.
 //! Lancée à la demande par le processus de fond ; fermée, elle libère toute sa mémoire.
 
+mod alerts_page;
 mod canvas;
 mod editor;
 mod explorer;
@@ -22,6 +23,7 @@ pub enum Page {
     Overlays,
     Data,
     History,
+    Alerts,
     Settings,
 }
 
@@ -31,6 +33,7 @@ impl Page {
             "overlays" => Page::Overlays,
             "data" => Page::Data,
             "history" => Page::History,
+            "alerts" => Page::Alerts,
             "settings" => Page::Settings,
             _ => Page::Home,
         }
@@ -72,6 +75,7 @@ struct App {
     explorer: explorer::State,
     history: history::State,
     settings: settings_page::State,
+    alerts: alerts_page::State,
     dbg_last: f64,
     sized: u8,
 }
@@ -134,6 +138,7 @@ impl App {
             explorer: explorer::State::default(),
             history: history::State::default(),
             settings: settings_page::State::default(),
+            alerts: alerts_page::State::default(),
             dbg_last: 0.0,
             sized: 0,
         };
@@ -147,6 +152,7 @@ impl App {
         match page {
             Page::Home => self.home.refresh(),
             Page::History => self.history.reload(),
+            Page::Alerts => self.alerts.refresh(),
             Page::Settings => self.settings.refresh(),
             _ => {}
         }
@@ -174,6 +180,7 @@ impl App {
             (Page::Overlays, "Overlays"),
             (Page::Data, "Données en direct"),
             (Page::History, "Historique"),
+            (Page::Alerts, "Alertes"),
             (Page::Settings, "Réglages"),
         ];
         let mut goto = None;
@@ -251,6 +258,12 @@ fn icon(p: &egui::Painter, r: Rect, page: Page, color: Color32) {
             p.circle_stroke(pt(12.0, 12.0), 9.0 / 24.0 * r.width(), st);
             line(&[(12.0, 7.0), (12.0, 12.0), (15.0, 14.0)]);
         }
+        Page::Alerts => {
+            // Haut-parleur avec deux ondes.
+            line(&[(4.0, 9.0), (8.0, 9.0), (13.0, 5.0), (13.0, 19.0), (8.0, 15.0), (4.0, 15.0), (4.0, 9.0)]);
+            line(&[(16.0, 9.0), (18.0, 12.0), (16.0, 15.0)]);
+            line(&[(19.0, 6.0), (22.0, 12.0), (19.0, 18.0)]);
+        }
         Page::Settings => {
             line(&[(4.0, 7.0), (14.0, 7.0)]);
             line(&[(18.0, 7.0), (20.0, 7.0)]);
@@ -298,6 +311,7 @@ impl eframe::App for App {
             Page::Overlays => self.editor.show(ui, &mut self.feed, now),
             Page::Data => self.explorer.show(ui, &mut self.feed),
             Page::History => self.history.show(ui),
+            Page::Alerts => self.alerts.show(ui),
             Page::Settings => self.settings.show(ui),
         });
         if let Some(p) = self.take_request() {
