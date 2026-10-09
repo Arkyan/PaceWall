@@ -357,25 +357,39 @@ PW.widgets.session = {
 PW.widgets.trackmap = {
   name: 'Carte du circuit',
   keys: ['grid.', 'session.track', 'session.vehicles', 'demo.map'],
-  hz: o => +o.fps || 20, size: [300, 330],
+  hz: o => +o.fps || 20, size: [300, 220],
   options: [
-    { id: 'size', label: 'Taille de la carte', type: 'number', min: 160, max: 460, step: 10, def: 300 },
-    { id: 'rotate', label: 'Rotation', type: 'select', choices: [['0', '0°'], ['90', '90°'], ['180', '180°'], ['270', '270°']], def: '0' },
+    { id: 'size', label: 'Largeur de la zone', type: 'number', min: 160, max: 600, step: 10, def: 300 },
+    { id: 'height', label: 'Hauteur de la zone', type: 'number', min: 120, max: 600, step: 10, def: 220 },
+    { id: 'rotate', label: 'Orientation', type: 'select', choices: [['auto', 'Auto (circuit le plus grand)'], ['0', '0°'], ['90', '90°'], ['180', '180°'], ['270', '270°']], def: 'auto' },
     { id: 'others', label: 'Afficher les autres voitures', type: 'bool', def: true },
     { id: 'fps', label: 'Fluidité (images/s)', type: 'select', choices: [['10', '10'], ['20', '20'], ['30', '30']], def: '20' },
     { id: 'sectors', label: 'Limites des secteurs', type: 'bool', def: true },
     { id: 'numbers', label: 'Numéro dans les pastilles', type: 'select', choices: [['none', 'Aucun'], ['class', 'Place en classe'], ['overall', 'Place au général']], def: 'none' },
   ],
   mount(root, o) {
-    const AC = (getComputedStyle(root).getPropertyValue('--pw-accent') || '').trim() || '#19d3f3', W = +o.size || 300, K = Math.min(1.4, Math.max(0.7, W / 300)), R = 2;
-    const ax = 24, ay = 24, aw = W - 48, maxH = ay + aw * 1.15 + 24;
-    const card = PW.tpl(`<div class="pw-card" style="width:${W}px;height:${maxH}px;padding:0">
-      <canvas width="${W * R}" height="${maxH * R}" style="width:${W}px;height:${maxH}px;position:absolute;left:0;top:0"></canvas>
+    const AC = (getComputedStyle(root).getPropertyValue('--pw-accent') || '').trim() || '#19d3f3', W = +o.size || 300, Hz = +o.height || 220, K = Math.min(1.4, Math.max(0.7, Math.min(W, Hz * 1.4) / 300)), R = 2;
+    // Zone fixe choisie par le pilote : le circuit s'y adapte et se tourne pour y être le plus grand possible.
+    const ax = 24, ay = 24, aw = W - 48, ah = Hz - 48;
+    const card = PW.tpl(`<div class="pw-card" style="width:${W}px;height:${Hz}px;padding:0">
+      <canvas width="${W * R}" height="${Hz * R}" style="width:${W}px;height:${Hz}px;position:absolute;left:0;top:0"></canvas>
       </div>`).firstChild;
     root.appendChild(card);
     const b = PW.bind(card), ctx = card.querySelector('canvas').getContext('2d');
-    const angle = (+o.rotate || 0) * Math.PI / 180, sin = Math.sin(angle), cos = Math.cos(angle);
+    let sin = 0, cos = 1, angKey = '';
     const rot = p => [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos];
+    // Angle (0 à 179°) qui donne au circuit la plus grande taille dans la zone.
+    const bestAngle = pts => {
+      let best = 0, bestScale = 0;
+      for (let deg = 0; deg < 180; deg++) {
+        const s = Math.sin(deg * Math.PI / 180), c = Math.cos(deg * Math.PI / 180);
+        let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+        for (const p of pts) { const x = p[0] * c - p[1] * s, y = p[0] * s + p[1] * c; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+        const scale = Math.min(aw / Math.max(1, x1 - x0), ah / Math.max(1, y1 - y0));
+        if (scale > bestScale * 1.002) { bestScale = scale; best = deg; }
+      }
+      return best;
+    };
     let key = null, map = null, sectors = [], tried = -1e9;
     const carPos = new Map();
 
@@ -413,12 +427,21 @@ PW.widgets.trackmap = {
           const ahead = Math.min(0.25, Math.max(0, nowS - e.t));
           c.xy = [e.x + e.vx * ahead, e.y + e.vy * ahead];
         }
+        // Orientation : automatique (calculée une fois par circuit) ou imposée.
+        if (map) {
+          const want = o.rotate === undefined || o.rotate === 'auto' ? 'auto' : String(o.rotate);
+          const tag = want + ':' + key + ':' + map.length;
+          if (tag !== angKey) {
+            angKey = tag;
+            const a = (want === 'auto' ? bestAngle(map) : +want || 0) * Math.PI / 180;
+            sin = Math.sin(a); cos = Math.cos(a);
+          }
+        }
         const pts = map ? map.map(rot) : [];
         let minx = 0, miny = 0, bw = 1, bh = 1;
         if (pts.length) { const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); minx = Math.min(...xs); miny = Math.min(...ys); bw = Math.max(1, Math.max(...xs) - minx); bh = Math.max(1, Math.max(...ys) - miny); }
-        const ah = aw * (pts.length ? Math.min(1.15, Math.max(0.5, bh / bw)) : 1), H = ay + ah + 24;
-        card.style.height = H + 'px';
-        ctx.setTransform(R, 0, 0, R, 0, 0); ctx.clearRect(0, 0, W, maxH);
+        const H = Hz;
+        ctx.setTransform(R, 0, 0, R, 0, 0); ctx.clearRect(0, 0, W, Hz);
         const mode = o.numbers || 'none';
         const dot = (c, x, y) => {
           const num = mode === 'none' ? 0 : mode === 'overall' ? c.place : c.rank;

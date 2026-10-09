@@ -49,7 +49,9 @@ Inspirée de TinyPedal. Au premier tour propre sur un circuit, PaceWall enregist
 
 - Un tour est enregistré s'il commence à la ligne, ne passe pas par les stands, ne contient aucune téléportation
   (saut de plus de 100 m) et se termine par un tour **valide** (temps du dernier tour positif).
-- Repère : (`mPos.x`, `-mPos.z`). Option de rotation (0°, 90°, 180°, 270°) dans l'éditeur.
+- Zone fixe : tu choisis la largeur et la hauteur de la carte dans l'éditeur ; le circuit s'y adapte et se tourne tout seul
+  (orientation « Auto ») pour y être le plus grand possible. Une orientation fixe (0°, 90°, 180°, 270°) reste possible.
+- Repère : (`mPos.x`, `-mPos.z`).
 - Tant qu'il n'y a pas de carte, le widget affiche un cercle avec les voitures placées selon leur distance dans le tour.
 - Voitures : carré à la couleur de leur classe, ma voiture en cyan, voitures aux stands grisées.
 

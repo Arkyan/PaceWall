@@ -73,8 +73,9 @@ pub fn options(kind: &str) -> &'static [Opt] {
         ],
         "session" => &[Opt { id: "weather", label: "Météo", kind: Bool(true) }],
         "trackmap" => &[
-            Opt { id: "size", label: "Taille de la carte", kind: Num { min: 160.0, max: 460.0, step: 10.0, def: 300.0 } },
-            Opt { id: "rotate", label: "Rotation", kind: Choice(&[("0", "0°"), ("90", "90°"), ("180", "180°"), ("270", "270°")], "0") },
+            Opt { id: "size", label: "Largeur de la zone", kind: Num { min: 160.0, max: 600.0, step: 10.0, def: 300.0 } },
+            Opt { id: "height", label: "Hauteur de la zone", kind: Num { min: 120.0, max: 600.0, step: 10.0, def: 220.0 } },
+            Opt { id: "rotate", label: "Orientation", kind: Choice(&[("auto", "Auto (circuit le plus grand)"), ("0", "0°"), ("90", "90°"), ("180", "180°"), ("270", "270°")], "auto") },
             Opt { id: "others", label: "Afficher les autres voitures", kind: Bool(true) },
             Opt { id: "fps", label: "Fluidité (images/s)", kind: Choice(&[("10", "10"), ("20", "20"), ("30", "30")], "20") },
             Opt { id: "sectors", label: "Limites des secteurs", kind: Bool(true) },
@@ -143,6 +144,8 @@ pub struct WState {
     /// Dernière phase de course vue et instant jusqu'auquel le drapeau vert reste allumé (après une relance).
     flag_phase: Option<i64>,
     green_until: f64,
+    /// Orientation automatique de la carte, calculée une fois par circuit et par zone : (circuit, points, zone) → degrés.
+    map_angle: Option<((Option<String>, usize, u32, u32), f32)>,
 }
 
 pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
@@ -796,10 +799,39 @@ fn smooth_loop(p: &[[f32; 2]], rounds: u32) -> Vec<[f32; 2]> {
     cur
 }
 
+/// Angle (degrés, 0 à 179) qui donne au circuit la plus grande taille possible dans une zone de `aw` × `ah`.
+fn best_angle(points: &[[f32; 2]], aw: f32, ah: f32) -> f32 {
+    let (mut best, mut best_scale) = (0.0f32, 0.0f32);
+    for deg in 0..180 {
+        let (sin, cos) = (deg as f32).to_radians().sin_cos();
+        let (mut min, mut max) = ([f32::MAX; 2], [f32::MIN; 2]);
+        for p in points {
+            let r = [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos];
+            for a in 0..2 {
+                min[a] = min[a].min(r[a]);
+                max[a] = max[a].max(r[a]);
+            }
+        }
+        let scale = (aw / (max[0] - min[0]).max(1.0)).min(ah / (max[1] - min[1]).max(1.0));
+        // Strictement meilleur : à taille égale on garde l'angle le plus petit (carte « droite » si possible).
+        if scale > best_scale * 1.002 {
+            best_scale = scale;
+            best = deg as f32;
+        }
+    }
+    best
+}
+
 fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
-    let size = spec.num("size", 300.0).clamp(160.0, 460.0) as f32;
-    let k = (size / 300.0).clamp(0.7, 1.4); // épaisseur du tracé et taille des voitures suivent la taille
-    let w = size;
+    // Zone choisie par le pilote : sa taille ne change jamais, c'est le circuit qui s'y adapte (et se tourne
+    // pour y être le plus grand possible).
+    let w = spec.num("size", 300.0).clamp(160.0, 600.0) as f32;
+    let h = spec.num("height", 220.0).clamp(120.0, 600.0) as f32;
+    if d.measuring() {
+        return (w, h);
+    }
+    let k = (w.min(h * 1.4) / 300.0).clamp(0.7, 1.4); // épaisseur du tracé et taille des voitures suivent la zone
+    let (ax, ay, aw, ah) = (24.0, 24.0, w - 48.0, h - 48.0);
     let track = data.text("session.track").to_string();
 
     // Carte : enregistrée pendant un tour propre (voir pwcore::trackmap), lue sur le disque.
@@ -814,10 +846,26 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         let loaded = if demo { Some(trackmap::demo()) } else if track.is_empty() { None } else { trackmap::load(&track) };
         st.map = Some((key, loaded));
     }
+
+    // Orientation : automatique (la plus grande dans la zone) ou imposée.
+    let rotate = spec.choice("rotate", "auto");
+    let angle_deg: f32 = if rotate == "auto" {
+        let count = st.map.as_ref().and_then(|(_, m)| m.as_ref()).map_or(0, |m| m.points.len());
+        let tag = (st.map.as_ref().map(|(k, _)| k.clone()), count, aw.to_bits(), ah.to_bits());
+        match &st.map_angle {
+            Some((t, a)) if *t == tag => *a,
+            _ => {
+                let a = st.map.as_ref().and_then(|(_, m)| m.as_ref()).map_or(0.0, |m| best_angle(&m.points, aw, ah));
+                st.map_angle = Some((tag, a));
+                a
+            }
+        }
+    } else {
+        rotate.parse().unwrap_or(0.0)
+    };
     let map = st.map.as_ref().and_then(|(_, m)| m.as_ref());
 
-    let angle = (spec.num("rotate", 0.0) as f32).to_radians();
-    let (sin, cos) = angle.sin_cos();
+    let (sin, cos) = angle_deg.to_radians().sin_cos();
     let rot = |p: [f32; 2]| [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos];
     let pts: Vec<[f32; 2]> = map.map(|m| m.points.iter().map(|&p| rot(p)).collect()).unwrap_or_default();
     let (mut min, mut max) = ([f32::MAX; 2], [f32::MIN; 2]);
@@ -828,15 +876,6 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         }
     }
     let (bw, bh) = ((max[0] - min[0]).max(1.0), (max[1] - min[1]).max(1.0));
-
-    // La carte prend la forme du circuit : plus de grand vide pour un tracé allongé.
-    let (ax, ay, aw) = (24.0, 24.0, w - 48.0);
-    let aspect = if pts.is_empty() { 1.0 } else { (bh / bw).clamp(0.5, 1.15) };
-    let ah = aw * aspect;
-    let h = ay + ah + 24.0;
-    if d.measuring() {
-        return (w, h);
-    }
     d.card(w, h);
 
     let n = (data.f("session.vehicles", 0.0) as usize).min(104);
