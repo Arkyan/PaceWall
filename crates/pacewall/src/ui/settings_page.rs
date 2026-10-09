@@ -61,14 +61,17 @@ impl State {
                 }
                 ui.add_space(6.0);
                 ui.label(RichText::new("Voix").size(12.0).color(MUTED));
-                let engine = settings::str_of("voice_engine", "engineer");
-                let shown = if engine == "windows" { "Voix de synthèse Windows" } else { "Ingénieur de course (voix naturelle)" };
-                egui::ComboBox::from_id_salt("voice_engine").selected_text(shown).width(300.0).show_ui(ui, |ui| {
-                    if ui.selectable_label(engine != "windows", "Ingénieur de course (voix naturelle)").clicked() {
-                        let _ = settings::set("voice_engine", json!("engineer"));
-                    }
-                    if ui.selectable_label(engine == "windows", "Voix de synthèse Windows").clicked() {
-                        let _ = settings::set("voice_engine", json!("windows"));
+                let engine = settings::str_of("voice_engine", "engineer_m");
+                let name = |v: &str| match v {
+                    "windows" => "Voix de synthèse Windows",
+                    "engineer_f" => "Ingénieure de course (voix de femme)",
+                    _ => "Ingénieur de course (voix d'homme)",
+                };
+                egui::ComboBox::from_id_salt("voice_engine").selected_text(name(&engine)).width(320.0).show_ui(ui, |ui| {
+                    for v in ["engineer_m", "engineer_f", "windows"] {
+                        if ui.selectable_label(engine == v || (v == "engineer_m" && engine == "engineer"), name(v)).clicked() {
+                            let _ = settings::set("voice_engine", json!(v));
+                        }
                     }
                 });
                 ui.add_space(6.0);
@@ -80,7 +83,7 @@ impl State {
                 }
                 ui.add_space(6.0);
                 if kit::button(ui, "Tester la voix").clicked() {
-                    crate::speech::Speaker::global().say("test", "Radio check. Alertes vocales activées.", volume.round() as u32, settings::str_of("voice_engine", "engineer") != "windows");
+                    crate::speech::Speaker::global().say("test", "Radio check. Alertes vocales activées.", volume.round() as u32, crate::speech::Engine::from_setting(&settings::str_of("voice_engine", "engineer_m")));
                 }
             });
             ui.add_space(4.0);

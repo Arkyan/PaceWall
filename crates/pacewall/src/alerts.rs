@@ -2,6 +2,7 @@
 //! Ne fait que décider quoi dire ; la parole elle-même est dans `speech`. Chaque règle a son délai de relance pour ne
 //! jamais répéter une alerte en boucle.
 
+use crate::speech::Engine;
 use pwcore::Data;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -21,8 +22,8 @@ fn say(key: &'static str, text: impl Into<String>) -> Phrase {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Config {
     pub enabled: bool,
-    /// `true` : clips de l'ingénieur de course ; `false` : voix de synthèse de Windows.
-    pub engineer: bool,
+    /// Voix : ingénieur (homme ou femme) ou synthèse Windows.
+    pub engine: Engine,
     pub volume: u32,
     pub fuel: bool,
     pub tyres: bool,
@@ -35,7 +36,7 @@ impl Config {
         use pwcore::settings::{bool_of, int_of};
         Self {
             enabled: bool_of("voice_enabled", true),
-            engineer: pwcore::settings::str_of("voice_engine", "engineer") != "windows",
+            engine: Engine::from_setting(&pwcore::settings::str_of("voice_engine", "engineer_m")),
             volume: int_of("voice_volume", 80).clamp(0, 100) as u32,
             fuel: bool_of("voice_fuel", true),
             tyres: bool_of("voice_tyres", true),
@@ -205,7 +206,7 @@ mod tests {
     }
 
     fn cfg() -> Config {
-        Config { enabled: true, engineer: true, volume: 80, fuel: true, tyres: true, flags: true, weather: true }
+        Config { enabled: true, engine: Engine::Male, volume: 80, fuel: true, tyres: true, flags: true, weather: true }
     }
 
     #[test]

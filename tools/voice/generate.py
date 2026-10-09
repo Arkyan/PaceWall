@@ -1,13 +1,19 @@
 """Fabrique les phrases de la voix d'ingénieur de course (alertes vocales de PaceWall).
 
-Chaque phrase est synthétisée avec Piper (voix neuronale hors ligne, modèle fr_FR-siwis-medium, données SIWIS sous
-licence CC BY 4.0), en plusieurs variantes, puis passée à l'effet « radio » : bande passante réduite, compression douce,
-souffle léger et petits bips de début et de fin. Les clips sont écrits dans crates/pacewall/assets/voice/ et listés dans
-crates/pacewall/src/voice_clips.rs (intégrés au programme : rien à télécharger ni à calculer pendant la course).
+Chaque phrase est synthétisée avec Piper (voix neuronale hors ligne), en plusieurs variantes, puis passée à l'effet
+« radio » : bande passante réduite, compression douce, souffle léger et petits bips de début et de fin. Les clips sont
+écrits dans crates/pacewall/assets/voice/<voix>/ et listés dans crates/pacewall/src/voice_clips.rs (intégrés au programme :
+rien à télécharger ni à calculer pendant la course).
 
-Utilisation (le modèle n'est pas dans le dépôt) :
+Voix :
+  f (femme)  fr_FR-siwis-medium, données SIWIS, licence CC BY 4.0 (Université d'Édimbourg)
+  m (homme)  fr_FR-upmc-medium, locuteur « pierre », données UPMC, licence CC BY-SA 4.0 (Université Pierre et Marie Curie)
+Les modèles ne sont pas dans le dépôt (rhasspy/piper-voices sur HuggingFace).
+
+Utilisation :
     pip install piper-tts numpy scipy
-    python tools/voice/generate.py chemin/vers/fr_FR-siwis-medium.onnx
+    python tools/voice/generate.py f chemin/vers/fr_FR-siwis-medium.onnx
+    python tools/voice/generate.py m chemin/vers/fr_FR-upmc-medium.onnx 1      # 1 = locuteur « pierre »
 """
 import sys
 from pathlib import Path
@@ -18,7 +24,7 @@ from scipy.io import wavfile
 from scipy.signal import butter, resample_poly, sosfilt
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "crates" / "pacewall" / "assets" / "voice"
+ASSETS = ROOT / "crates" / "pacewall" / "assets" / "voice"
 RS = ROOT / "crates" / "pacewall" / "src" / "voice_clips.rs"
 SR = 16000  # la radio est limitée à ~3,4 kHz : 16 kHz suffit largement et garde les fichiers petits
 
@@ -77,34 +83,47 @@ def radio(voice_audio, sr_in, rng):
     return (out * 0.89 * 32767).astype(np.int16)
 
 
+def write_listing():
+    """Liste tous les clips présents (toutes les voix) dans voice_clips.rs."""
+    lines = ["//! Généré par tools/voice/generate.py : ne pas modifier à la main.", ""]
+    for name, const in (("f", "CLIPS_F"), ("m", "CLIPS_M")):
+        folder = ASSETS / name
+        keys = {}
+        for wav in sorted(folder.glob("*.wav")) if folder.exists() else []:
+            keys.setdefault(wav.stem.rsplit("_", 1)[0], []).append(wav.name)
+        lines.append(f"/// Clips de la voix « {name} » : (clé d'alerte, variantes WAV 16 bits mono 16 kHz).")
+        lines.append(f"pub const {const}: &[(&str, &[&[u8]])] = &[")
+        for key, names in keys.items():
+            files = ", ".join(f'include_bytes!("../assets/voice/{name}/{n}")' for n in names)
+            lines.append(f'    ("{key}", &[{files}]),')
+        lines.append("];")
+        lines.append("")
+    RS.write_text("\n".join(lines), encoding="utf-8")
+
+
 def main():
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 3 or sys.argv[1] not in ("f", "m"):
         sys.exit(__doc__)
-    voice = PiperVoice.load(sys.argv[1])
-    OUT.mkdir(parents=True, exist_ok=True)
-    for old in OUT.glob("*.wav"):
+    name, model = sys.argv[1], sys.argv[2]
+    speaker = int(sys.argv[3]) if len(sys.argv) > 3 else None
+    voice = PiperVoice.load(model)
+    out_dir = ASSETS / name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for old in out_dir.glob("*.wav"):
         old.unlink()
     rng = np.random.default_rng(7)
-    listing = []
+    count = 0
     for key, (params, texts) in PHRASES.items():
-        names = []
         for i, text in enumerate(texts):
-            chunks = list(voice.synthesize(text, syn_config=SynthesisConfig(**params[i % len(params)])))
+            chunks = list(voice.synthesize(text, syn_config=SynthesisConfig(speaker_id=speaker, **params[i % len(params)])))
             audio = np.concatenate([c.audio_float_array for c in chunks])
             clip = radio(audio, chunks[0].sample_rate, rng)
-            name = f"{key}_{i}.wav"
-            wavfile.write(OUT / name, SR, clip)
-            names.append(name)
-            print(f"{name:<18} {len(clip) / SR:4.1f} s  {text}")
-        listing.append((key, names))
-    lines = ["//! Généré par tools/voice/generate.py : ne pas modifier à la main.", "", "/// Clips de la voix d'ingénieur : (clé d'alerte, variantes WAV 16 bits mono 16 kHz).", "pub const CLIPS: &[(&str, &[&[u8]])] = &["]
-    for key, names in listing:
-        files = ", ".join(f'include_bytes!("../assets/voice/{n}")' for n in names)
-        lines.append(f'    ("{key}", &[{files}]),')
-    lines.append("];")
-    RS.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    total = sum(p.stat().st_size for p in OUT.glob("*.wav"))
-    print(f"\n{sum(len(n) for _, n in listing)} clips, {total / 1e6:.2f} Mo")
+            wavfile.write(out_dir / f"{key}_{i}.wav", SR, clip)
+            count += 1
+            print(f"{key}_{i}.wav  {len(clip) / SR:4.1f} s")
+    write_listing()
+    total = sum(p.stat().st_size for p in out_dir.glob("*.wav"))
+    print(f"\n{count} clips, {total / 1e6:.2f} Mo (voix {name})")
 
 
 if __name__ == "__main__":

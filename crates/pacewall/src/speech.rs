@@ -5,7 +5,7 @@
 //!
 //! La parole se fait sur un fil à part : le dessin de l'overlay n'attend jamais la fin d'une phrase.
 
-use crate::voice_clips::CLIPS;
+use crate::voice_clips::{CLIPS_F, CLIPS_M};
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::OnceLock;
@@ -14,12 +14,39 @@ use windows::Win32::Media::Audio::{PlaySoundW, SND_MEMORY, SND_NODEFAULT, SND_SY
 use windows::Win32::Media::Speech::{ISpObjectToken, ISpObjectTokenCategory, ISpVoice, SpObjectTokenCategory, SpVoice, SPCAT_VOICES};
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
 
+/// Qui parle : l'ingénieur (voix d'homme ou de femme, clips enregistrés) ou la voix de synthèse de Windows.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Engine {
+    Male,
+    Female,
+    Windows,
+}
+
+impl Engine {
+    /// Valeur du réglage « voice_engine » (l'ancienne valeur « engineer » donne la voix d'homme).
+    pub fn from_setting(value: &str) -> Self {
+        match value {
+            "windows" => Engine::Windows,
+            "engineer_f" => Engine::Female,
+            _ => Engine::Male,
+        }
+    }
+
+    fn clips(self) -> Option<&'static [(&'static str, &'static [&'static [u8]])]> {
+        match self {
+            Engine::Male => Some(CLIPS_M),
+            Engine::Female => Some(CLIPS_F),
+            Engine::Windows => None,
+        }
+    }
+}
+
 struct Say {
     /// Clé du clip de l'ingénieur (« fuel_3 », « yellow »…), ou le texte lui-même pour un essai.
     key: String,
     text: String,
     volume: u16,
-    engineer: bool,
+    engine: Engine,
 }
 
 pub struct Speaker {
@@ -43,9 +70,9 @@ impl Speaker {
     }
 
     /// Dit une alerte à `volume` % (0 à 100). `key` désigne le clip de l'ingénieur ; `text` est lu par la voix Windows
-    /// si `engineer` est faux ou si la clé n'a pas de clip. Ne bloque pas : la phrase est lue par le fil de parole.
-    pub fn say(&self, key: &str, text: &str, volume: u32, engineer: bool) {
-        let _ = self.tx.send(Say { key: key.to_string(), text: text.to_string(), volume: volume.min(100) as u16, engineer });
+    /// si `engine` est la voix Windows ou si la clé n'a pas de clip. Ne bloque pas : la phrase est lue par le fil de parole.
+    pub fn say(&self, key: &str, text: &str, volume: u32, engine: Engine) {
+        let _ = self.tx.send(Say { key: key.to_string(), text: text.to_string(), volume: volume.min(100) as u16, engine });
     }
 }
 
@@ -90,7 +117,7 @@ fn play_clip(wav: &[u8], volume: u16) {
 fn worker(rx: Receiver<Say>) {
     let _ = std::fs::remove_file(std::env::temp_dir().join("pw-speech.log"));
     // Variante jouée en dernier pour chaque clé : on alterne pour ne jamais redire la même phrase deux fois de suite.
-    let mut last_variant: HashMap<String, usize> = HashMap::new();
+    let mut last_variant: HashMap<(Engine, String), usize> = HashMap::new();
     let mut counter = 0usize;
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
@@ -105,16 +132,16 @@ fn worker(rx: Receiver<Say>) {
             }
             let skip = pending.len().saturating_sub(2);
             for say in pending.into_iter().skip(skip) {
-                if say.engineer {
-                    if let Some((_, variants)) = CLIPS.iter().find(|(k, _)| *k == say.key) {
+                if let Some(table) = say.engine.clips() {
+                    if let Some((_, variants)) = table.iter().find(|(k, _)| *k == say.key) {
                         counter += 1;
-                        let previous = last_variant.get(&say.key).copied();
+                        let previous = last_variant.get(&(say.engine, say.key.clone())).copied();
                         // Variante au hasard (compteur mélangé), différente de la précédente.
                         let mut pick = (counter.wrapping_mul(2654435761) >> 7) % variants.len();
                         if variants.len() > 1 && Some(pick) == previous {
                             pick = (pick + 1) % variants.len();
                         }
-                        last_variant.insert(say.key.clone(), pick);
+                        last_variant.insert((say.engine, say.key.clone()), pick);
                         play_clip(variants[pick], say.volume);
                         continue;
                     }

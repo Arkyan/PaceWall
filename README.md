@@ -60,6 +60,14 @@ en piste : carburant et énergie (5, 3, 2 puis 1 tour restant), pneus (froids, t
 full course jaune et reprise, pluie. Chaque alerte a un délai de relance. Réglages > Alertes vocales : cases, volume, essai
 de la voix (`pacewall.exe --say "texte"` en ligne de commande). Problèmes de voix : `%TEMP%\pw-speech.log`.
 
+### Voix de l'ingénieur et crédits
+
+Les alertes sont dites par des clips pré-enregistrés (voix d'homme par défaut, voix de femme au choix, ou voix de synthèse
+Windows), fabriqués avec Piper (`tools/voice/generate.py`) puis passés à un effet radio. Crédits des voix :
+- homme : fr_FR-upmc-medium, locuteur « pierre », données UPMC (Université Pierre et Marie Curie), licence
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) : les clips en dérivent et se repartagent sous la même licence ;
+- femme : fr_FR-siwis-medium, données SIWIS (Université d'Édimbourg), licence [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
 ## Développement sans le jeu
 
 ```bash

@@ -305,7 +305,7 @@ pub fn run() {
                     next_alert = now + Duration::from_millis(250);
                     for phrase in alerts.update(&data, &voice, now) {
                         log_event(&format!("alerte vocale : {}", phrase.text));
-                        speech::Speaker::global().say(phrase.key, &phrase.text, voice.volume, voice.engineer);
+                        speech::Speaker::global().say(phrase.key, &phrase.text, voice.volume, voice.engine);
                     }
                 }
             }
