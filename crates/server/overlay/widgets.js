@@ -327,7 +327,7 @@ PW.widgets.session = {
     { id: 'weather', label: 'Météo', type: 'bool', def: true },
   ],
   mount(root, o) {
-    const card = PW.tpl(`<div class="pw-card"><div class="pw-flag" data-k="flag" data-base="pw-flag">Jaune</div>
+    const card = PW.tpl(`<div class="pw-card">
       <div class="pw-title"><span data-k="track">—</span><em data-k="type"></em></div>
       <div class="pw-row"><span class="pw-big" data-k="time">—</span><span class="pw-sub" data-k="laps"></span></div>
       ${o.weather ? `<div class="pw-weather"><div><small>Air</small><b data-k="air">—</b></div><div><small>Piste</small><b data-k="trk">—</b></div><div><small>Pluie</small><b data-k="rain">—</b></div></div>` : ''}</div>`).firstChild;
@@ -340,9 +340,6 @@ PW.widgets.session = {
         b.text('time', F.hms(g('session.remaining')));
         const max = g('session.max_laps', 0), left = g('strategy.race_laps_left');
         b.text('laps', max > 0 && max < 10000 ? 'Tour ' + g('lap.number', 0) + ' / ' + max : left != null ? '≈ ' + Math.round(left) + ' tours' : '');
-        const phase = g('session.phase', 5), ys = [1, 2, 3].filter(s => g('session.sector_yellow.' + s, false));
-        b.cls('flag', phase === 6 || ys.length ? 'on' : '');
-        b.text('flag', phase === 6 ? 'Full course yellow / Safety car' : ys.length ? 'Jaune · ' + ys.map(s => 'S' + s).join(' ') : '');
         if (b.el.air) {
           b.text('air', F.n(g('weather.ambient'), 0) + '°');
           b.text('trk', F.n(g('weather.track'), 0) + '°');
@@ -483,10 +480,40 @@ PW.widgets.trackmap = {
   },
 };
 
+/* ---------- Drapeaux ---------- */
+// Jaune par secteur (S1 S2 S3), puis full course jaune, bleu, blanc (dernier tour), rouge (course arrêtée), vert (relance,
+// allumé 8 s), noir (disqualifié) et damier (arrivée).
+PW.widgets.flags = {
+  name: 'Drapeaux',
+  keys: ['session.phase', 'session.yellow', 'session.sector_yellow.', 'player.blue_flag', 'player.finish_status'],
+  hz: 4, size: [290, 84],
+  options: [{ id: 'inactive', label: 'Afficher les drapeaux éteints', type: 'bool', def: true }],
+  mount(root, o) {
+    const card = PW.tpl(`<div class="pw-card pw-flags${o.inactive === false ? ' hide-off' : ''}">
+      <div class="pw-title"><span>Drapeaux</span></div>
+      <div class="pw-fsec"><i data-k="s1">S1</i><i data-k="s2">S2</i><i data-k="s3">S3</i></div>
+      <div class="pw-fsw"><i data-k="fcy" style="--c:#ffb020">FCY</i><i data-k="blue" style="--c:#4f9dff"></i><i data-k="white" style="--c:#f0f4fa"></i><i data-k="red" style="--c:#ff4d5e"></i><i data-k="green" style="--c:#38e07b"></i><i data-k="black" class="black" style="--c:#0c0c0c"></i><i data-k="checker" class="checker" style="--c:#fff"></i></div></div>`).firstChild;
+    root.appendChild(card);
+    const el = k => card.querySelector(`[data-k="${k}"]`);
+    let before = null, greenUntil = 0;
+    return {
+      update(g) {
+        const phase = g('session.phase', 5), ystate = g('session.yellow', 0), finish = g('player.finish_status', 0), now = performance.now();
+        if (before != null && phase === 5 && before !== 5 && before >= 0) greenUntil = now + 8000;
+        before = phase;
+        [1, 2, 3].forEach(s => el('s' + s).classList.toggle('on', !!g('session.sector_yellow.' + s, false)));
+        const on = (k, v) => el(k.split(' ')[0]).classList.toggle('on', !!v);
+        on('fcy', phase === 6); on('blue', g('player.blue_flag', false)); on('white', ystate === 5); on('red', phase === 7 || ystate === 7);
+        on('green', now < greenUntil); on('black', finish === 3); on('checker', phase === 8 || finish === 1);
+      },
+    };
+  },
+};
+
 /* ---------- Données de démonstration (éditeur, ou sans jeu) ---------- */
 PW.demo = (() => {
   const d = {
-    'game.version': 1, 'demo.map': true, 'session.track_length': 4000, 'session.track': 'Circuit de la Sarthe', 'session.type': 10, 'session.phase': 5, 'session.sector_yellow.1': false, 'session.sector_yellow.2': false, 'session.sector_yellow.3': false,
+    'game.version': 1, 'demo.map': true, 'session.track_length': 4000, 'session.track': 'Circuit de la Sarthe', 'session.type': 10, 'session.phase': 5, 'session.sector_yellow.1': false, 'session.sector_yellow.2': true, 'player.blue_flag': true, 'session.sector_yellow.3': false,
     'session.remaining': 5 * 3600 + 1234, 'session.max_laps': 0, 'session.vehicles': 12, 'weather.ambient': 21, 'weather.track': 32, 'weather.rain': 0,
     'player.speed': 232, 'player.gear': 5, 'player.rpm': 7100, 'player.rpm_max': 8000, 'player.throttle': 82, 'player.brake': 0, 'player.clutch': 0, 'player.steering': 12,
     'fuel.level': 52.4, 'fuel.capacity': 90, 'fuel.percent': 58, 'energy.virtual': 61,

@@ -174,6 +174,9 @@ fn player(o: &mut Out, s: &VehicleScoring, t: &VehicleTelemetry) {
     o.num("position.best_lap", "s", "Meilleur tour", s.mBestLapTime);
     o.num("position.behind_next", "s", "Retard sur la voiture devant", s.mTimeBehindNext);
     o.num("position.behind_leader", "s", "Retard sur le leader", s.mTimeBehindLeader);
+    // Drapeaux du joueur : bleu (mFlag = 6), état d'arrivée (0 en course, 1 arrivé, 2 abandon, 3 disqualifié).
+    o.flag("player.blue_flag", "Drapeau bleu", s.mFlag == 6);
+    o.int("player.finish_status", "État d'arrivée", s.mFinishStatus as i64);
     o.flag("pit.in_pits", "Aux stands", s.mInPits != 0);
     o.int("pit.state", "État du stand", s.mPitState as i64);
     o.int("pit.stops", "Arrêts effectués", s.mNumPitstops as i64);

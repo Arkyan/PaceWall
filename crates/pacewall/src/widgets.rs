@@ -10,7 +10,7 @@ use pwcore::trackmap::{self, TrackMap};
 use pwcore::Data;
 use std::collections::VecDeque;
 
-pub const KINDS: [(&str, &str); 7] = [
+pub const KINDS: [(&str, &str); 8] = [
     ("fuel", "Carburant et énergie"),
     ("tyres", "Pneus"),
     ("timing", "Chrono et écarts"),
@@ -18,6 +18,7 @@ pub const KINDS: [(&str, &str); 7] = [
     ("standings", "Classement"),
     ("session", "Session et météo"),
     ("trackmap", "Carte du circuit"),
+    ("flags", "Drapeaux"),
 ];
 
 pub fn name(kind: &str) -> &'static str {
@@ -71,6 +72,7 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "scope", label: "Classement", kind: Choice(&[("overall", "Général"), ("class", "Par classe (ma classe)")], "overall") },
         ],
         "session" => &[Opt { id: "weather", label: "Météo", kind: Bool(true) }],
+        "flags" => &[Opt { id: "inactive", label: "Afficher les drapeaux éteints", kind: Bool(true) }],
         "trackmap" => &[
             Opt { id: "size", label: "Taille de la carte", kind: Num { min: 160.0, max: 460.0, step: 10.0, def: 300.0 } },
             Opt { id: "rotate", label: "Rotation", kind: Choice(&[("0", "0°"), ("90", "90°"), ("180", "180°"), ("270", "270°")], "0") },
@@ -124,6 +126,7 @@ pub fn hz(kind: &str, spec: &WidgetSpec) -> f32 {
         "tyres" => 1.0,
         "standings" => 1.0,
         "trackmap" => spec.num("fps", 20.0) as f32,
+        "flags" => 4.0,
         _ => 1.0,
     }
 }
@@ -138,6 +141,9 @@ pub struct WState {
     map_checked: f64,
     /// Dernière position connue de chaque voiture de la carte : (x, y, instant, vitesse x, vitesse y), pour la lisser.
     car_pos: std::collections::HashMap<usize, (f32, f32, f64, f32, f32)>,
+    /// Dernière phase de course vue et instant jusqu'auquel le drapeau vert reste allumé (après une relance).
+    flag_phase: Option<i64>,
+    green_until: f64,
 }
 
 pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
@@ -149,6 +155,7 @@ pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, 
         "standings" => standings(d, spec, data),
         "session" => session(d, spec, data),
         "trackmap" => trackmap_widget(d, spec, data, st, now),
+        "flags" => flags(d, spec, data, st, now),
         _ => (0.0, 0.0),
     }
 }
@@ -604,25 +611,12 @@ fn session_name(t: i64) -> &'static str {
 fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let w = 280.0;
     let weather = spec.flag("weather", true);
-    let phase = data.f("session.phase", 5.0) as i64;
-    // Secteurs en jaune (1, 2, 3) : le bandeau les nomme.
-    let yellow_sectors: Vec<usize> = (1..=3).filter(|s| data.flag(&format!("session.sector_yellow.{s}"))).collect();
-    let flag = phase == 6 || !yellow_sectors.is_empty();
-    let top = if flag { 36.0 } else { 0.0 };
+    // Les drapeaux ont leur propre widget (« Drapeaux »).
+    let top = 0.0;
     // Circuit et type de session seulement si demandés.
     let hdr = if d.titles() { 16.0 } else { 0.0 };
     let h = 10.0 + top + hdr + 46.0 + if weather { 52.0 } else { 6.0 };
     d.card(w, h);
-    if flag {
-        d.fill(16.0, 10.0, w - 32.0, 24.0, WARN);
-        let banner = if phase == 6 {
-            "FULL COURSE YELLOW / SAFETY CAR".to_string()
-        } else {
-            let list: Vec<String> = yellow_sectors.iter().map(|s| format!("S{s}")).collect();
-            format!("JAUNE · {}", list.join(" "))
-        };
-        d.text(w / 2.0, 14.0, &banner, 12.0, Color32::from_rgb(17, 17, 17), Font::Ui, HAlign::Center);
-    }
     let y = 10.0 + top;
     if d.titles() {
         d.label(16.0, y, data.text("session.track"), MUTED);
@@ -652,6 +646,93 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
             let x = 16.0 + i as f32 * 86.0;
             d.label(x, wy, l, MUTED);
             d.text(x, wy + 12.0, v, 15.0, TEXT, Font::Num, HAlign::Left);
+        }
+    }
+    (w, h)
+}
+
+/* ---------- Drapeaux ---------- */
+
+/// Tous les drapeaux au même endroit : jaune par secteur (S1, S2, S3), puis full course jaune, bleu, blanc (dernier tour),
+/// rouge (course arrêtée), vert (relance), noir (disqualifié) et damier (arrivée). Allumés quand ils sont montrés.
+fn flags(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
+    let w = 290.0;
+    let hdr = if d.titles() { 16.0 } else { 0.0 };
+    let h = 8.0 + hdr + 26.0 + 8.0 + 24.0 + 10.0;
+    d.card(w, h);
+    if d.titles() {
+        d.label(16.0, 10.0, "Drapeaux", MUTED);
+    }
+    let show_off = spec.flag("inactive", true);
+
+    let phase = data.f("session.phase", 5.0) as i64;
+    let ystate = data.f("session.yellow", 0.0) as i64;
+    let finish = data.f("player.finish_status", 0.0) as i64;
+    // Vert : allumé 8 s après une relance (retour en phase de course après formation, neutralisation ou arrêt).
+    if let Some(before) = st.flag_phase {
+        if phase == 5 && before != 5 && before >= 0 {
+            st.green_until = now + 8.0;
+        }
+    }
+    st.flag_phase = Some(phase);
+
+    let y1 = 8.0 + hdr;
+    let sector_w = (w - 32.0 - 2.0 * 9.0) / 3.0;
+    let yellow = Color32::from_rgb(255, 214, 51);
+    for s in 0..3 {
+        let lit = data.flag(&format!("session.sector_yellow.{}", s + 1));
+        let x = 16.0 + s as f32 * (sector_w + 9.0);
+        if lit {
+            d.fill(x, y1, sector_w, 26.0, yellow);
+        } else if show_off {
+            d.fill(x, y1, sector_w, 26.0, Color32::from_white_alpha(14));
+        }
+        if lit || show_off {
+            d.text(x + sector_w / 2.0, y1 + 5.0, &format!("S{}", s + 1), 15.0, if lit { Color32::from_rgb(17, 17, 17) } else { MUTED }, Font::Num, HAlign::Center);
+        }
+    }
+
+    let y2 = y1 + 26.0 + 8.0;
+    let n = 7;
+    let cw = 32.0;
+    let gap = (w - 32.0 - n as f32 * cw) / (n as f32 - 1.0);
+    // (allumé, couleur du drapeau, texte)
+    let items: [(bool, Color32, &str); 7] = [
+        (phase == 6, WARN, "FCY"),
+        (data.flag("player.blue_flag"), BLUE, ""),
+        (ystate == 5, Color32::from_rgb(240, 244, 250), ""),
+        (phase == 7 || ystate == 7, BAD, ""),
+        (now < st.green_until, OK, ""),
+        (finish == 3, Color32::from_rgb(12, 12, 12), ""),
+        (phase == 8 || finish == 1, Color32::WHITE, ""),
+    ];
+    for (i, (lit, color, text)) in items.iter().enumerate() {
+        let x = 16.0 + i as f32 * (cw + gap);
+        if !lit && !show_off {
+            continue;
+        }
+        let fill = if *lit { *color } else { color.gamma_multiply(0.16) };
+        d.fill(x, y2, cw, 24.0, fill);
+        if i == 5 {
+            // Noir : contour clair pour le voir sur fond sombre.
+            let edge = Color32::from_white_alpha(if *lit { 200 } else { 40 });
+            d.fill(x, y2, cw, 1.5, edge);
+            d.fill(x, y2 + 22.5, cw, 1.5, edge);
+            d.fill(x, y2, 1.5, 24.0, edge);
+            d.fill(x + cw - 1.5, y2, 1.5, 24.0, edge);
+        }
+        if i == 6 {
+            // Damier : 4 colonnes × 2 lignes alternées.
+            for cx in 0..4 {
+                for cy in 0..2 {
+                    if (cx + cy) % 2 == 0 {
+                        d.fill(x + cx as f32 * cw / 4.0, y2 + cy as f32 * 12.0, cw / 4.0, 12.0, Color32::from_rgb(12, 12, 12).gamma_multiply(if *lit { 1.0 } else { 0.3 }));
+                    }
+                }
+            }
+        }
+        if !text.is_empty() {
+            d.text(x + cw / 2.0, y2 + 5.0, text, 12.0, if *lit { Color32::from_rgb(17, 17, 17) } else { MUTED }, Font::Num, HAlign::Center);
         }
     }
     (w, h)

@@ -17,6 +17,11 @@ pub fn data(t: f64) -> Data {
     put("game.version", json!(1));
     put("session.track", json!("Circuit de la Sarthe"));
     put("session.type", json!(10));
+    // Drapeaux de démonstration : jaune dans le secteur 2, bleu qui clignote.
+    put("session.sector_yellow.1", json!(false));
+    put("session.sector_yellow.2", json!(true));
+    put("session.sector_yellow.3", json!(false));
+    put("player.blue_flag", json!(((t * 0.5) as i64) % 2 == 0));
     put("session.phase", json!(5));
     put("session.yellow", json!(0));
     put("session.remaining", json!(5.0 * 3600.0 + 1234.0 - t));
