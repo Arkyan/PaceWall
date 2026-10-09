@@ -80,6 +80,17 @@ Windows), fabriqués avec Piper (`tools/voice/generate.py`) puis passés à un e
   [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) : les clips en dérivent et se repartagent sous la même licence ;
 - femme : fr_FR-siwis-medium, données SIWIS (Université d'Édimbourg), licence [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
+## Simulation sans le jeu
+
+Onglet Alertes > Simulation (ou `pacewall.exe --simulate`) : un faux Le Mans Ultimate pour tout essayer.
+- **Scénario d'alertes** (90 s) : déclenche chaque alerte vocale.
+- **Course réaliste**, **qualifications**, **essais libres** (`--session race|quali|practice [--speed N] [--laps N]`) : un
+  circuit fictif de 5,9 km, 32 voitures sur trois classes (Hypercar, LMP2, LMGT3) avec leur rythme et leur régularité,
+  tours chronométrés, consommation, usure et température des pneus, arrêts aux stands, jaunes locaux, full course yellow,
+  drapeaux bleus, pluie. Le temps de jeu est accéléré (jusqu'à 8×) pour qu'une course tienne en quelques minutes ;
+  `cargo test -p fakegame report -- --ignored --nocapture` imprime le bilan d'une course complète.
+- ⚠️ Les données sont écrites d'après mes hypothèses sur le jeu : la simulation ne valide pas la lecture du vrai LMU.
+
 ## Développement sans le jeu
 
 ```bash

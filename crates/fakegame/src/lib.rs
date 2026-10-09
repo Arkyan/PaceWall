@@ -2,6 +2,12 @@
 //! PaceWall (alertes vocales comprises) sans Le Mans Ultimate. Utilisé par le programme `fakegame` et par
 //! `pacewall.exe --simulate`.
 
+mod sim;
+#[cfg(windows)]
+mod realistic;
+
+pub use sim::{Config as SessionConfig, Kind as SessionKind};
+
 /// Réglages de la simulation.
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
@@ -14,11 +20,13 @@ pub struct Options {
     /// Scénario complet de 90 s qui déclenche chaque alerte vocale : carburant, énergie, pneus froids puis chauds puis
     /// usés, jaune, full course yellow, pluie, crevaison. Il se répète.
     pub scenario: bool,
+    /// Session réaliste (circuit, 32 voitures, stands, événements) : remplace le scénario ci-dessus.
+    pub realistic: Option<SessionConfig>,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { lap_seconds: 100.0, frozen_events: true, yellow: false, scenario: false }
+        Self { lap_seconds: 100.0, frozen_events: true, yellow: false, scenario: false, realistic: None }
     }
 }
 
@@ -79,6 +87,9 @@ pub fn scene(c: f64) -> Scene {
 
 #[cfg(windows)]
 pub fn run(opts: Options, stop: &dyn Fn() -> bool) -> Result<(), String> {
+    if let Some(cfg) = opts.realistic {
+        return realistic::run(cfg, stop);
+    }
     use core::mem::{size_of, zeroed};
     use core::ptr::addr_of_mut;
     use lmu::*;

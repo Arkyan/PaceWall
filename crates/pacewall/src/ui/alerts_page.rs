@@ -10,10 +10,19 @@ use pwcore::settings;
 use pwcore::voice_cfg::{self, AlertCfg, AlertDef, AlertSet, CATALOG, GROUPS};
 use serde_json::json;
 
-#[derive(Default)]
 pub struct State {
     set: AlertSet,
     loaded: bool,
+    /// Simulation choisie : 0 scénario d'alertes, 1 course, 2 qualifications, 3 essais libres ; accélération et tours.
+    sim_kind: usize,
+    sim_speed: f32,
+    sim_laps: f32,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self { set: AlertSet::new(), loaded: false, sim_kind: 1, sim_speed: 6.0, sim_laps: 18.0 }
+    }
 }
 
 fn engine() -> Engine {
@@ -180,7 +189,25 @@ impl State {
             ui.add_space(6.0);
             let simulating = pwcore::live::simulation_running();
             let game = !simulating && pwcore::live::game_running();
-            ui.label(RichText::new("Lance un faux Le Mans Ultimate : les overlays, la carte et les alertes vocales se déclenchent comme en course (un cycle de 90 s qui se répète : pneus froids puis chauds puis usés, carburant, drapeau jaune, full course yellow, pluie, crevaison).").size(12.0).color(MUTED));
+            ui.label(RichText::new("Lance un faux Le Mans Ultimate pour tout essayer sans le jeu. Le scénario d'alertes déclenche chaque alerte en 90 s ; la course, les qualifs et les essais simulent une vraie session : 32 voitures sur trois classes, tours chronométrés, stands, jaunes locaux, full course yellow, drapeaux bleus et pluie.").size(12.0).color(MUTED));
+            ui.add_space(6.0);
+            ui.add_enabled_ui(!simulating && !game, |ui| {
+                ui.label(RichText::new("Type de simulation").size(12.0).color(MUTED));
+                let kinds = ["Scénario d'alertes (90 s, déclenche toutes les alertes)", "Course réaliste (32 voitures, stands, jaunes, full course yellow, pluie)", "Qualifications (tours lancés, classement par meilleur tour)", "Essais libres"];
+                egui::ComboBox::from_id_salt("sim_kind").selected_text(kinds[self.sim_kind]).width(520.0).show_ui(ui, |ui| {
+                    for (i, k) in kinds.iter().enumerate() {
+                        ui.selectable_value(&mut self.sim_kind, i, *k);
+                    }
+                });
+                if self.sim_kind > 0 {
+                    ui.add_space(4.0);
+                    ui.spacing_mut().slider_width = 220.0;
+                    ui.add(egui::Slider::new(&mut self.sim_speed, 1.0..=8.0).step_by(1.0).text("Accélération du temps").suffix(" ×"));
+                    if self.sim_kind == 1 {
+                        ui.add(egui::Slider::new(&mut self.sim_laps, 5.0..=40.0).step_by(1.0).text("Tours de course"));
+                    }
+                }
+            });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if simulating {
@@ -192,7 +219,13 @@ impl State {
                     ui.add_enabled(false, egui::Button::new("Lancer la simulation"));
                     ui.label(RichText::new("Le jeu tourne : simulation impossible").color(MUTED));
                 } else if kit::button(ui, "Lancer la simulation").clicked() {
-                    win::spawn_self(&["--simulate"]);
+                    let session = ["", "race", "quali", "practice"][self.sim_kind];
+                    if session.is_empty() {
+                        win::spawn_self(&["--simulate"]);
+                    } else {
+                        let (speed, laps) = (format!("{}", self.sim_speed.round()), format!("{}", self.sim_laps.round()));
+                        win::spawn_self(&["--simulate", "--session", session, "--speed", &speed, "--laps", &laps]);
+                    }
                 }
             });
             ui.add_space(4.0);

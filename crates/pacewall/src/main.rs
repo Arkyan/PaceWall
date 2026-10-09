@@ -37,7 +37,19 @@ fn main() {
         // Faux jeu intégré : le verrou nommé dit au reste de PaceWall qu'une simulation tourne (voir Réglages).
         if win::single_instance("PaceWallSimulator") {
             let stop = win::simulator_stop_signal();
-            let opts = fakegame::Options { lap_seconds: 10.0, frozen_events: true, yellow: false, scenario: true };
+            // `--simulate` : scénario d'alertes (90 s). `--session race|practice|quali [--speed N] [--laps N]` : session réaliste.
+            let value = |flag: &str| args.iter().skip_while(|a| *a != flag).nth(1).cloned();
+            let realistic = value("--session").and_then(|s| fakegame::SessionKind::parse(&s)).map(|kind| {
+                let mut cfg = fakegame::SessionConfig { kind, ..Default::default() };
+                if let Some(v) = value("--speed").and_then(|v| v.parse().ok()) {
+                    cfg.speed = v;
+                }
+                if let Some(v) = value("--laps").and_then(|v| v.parse().ok()) {
+                    cfg.laps = v;
+                }
+                cfg
+            });
+            let opts = fakegame::Options { lap_seconds: 10.0, frozen_events: true, yellow: false, scenario: realistic.is_none(), realistic };
             let _ = fakegame::run(opts, &stop);
         }
     } else if has("--say") {
