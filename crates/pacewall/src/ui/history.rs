@@ -56,8 +56,11 @@ fn session_name(t: i64) -> &'static str {
     }
 }
 
+/// Date et heure locales (fuseau de Windows, heure d'été comprise) ; en UTC si Windows ne sait pas convertir.
 fn date(ts: i64) -> String {
-    // Jour et heure UTC suffisent pour s'y retrouver ; pas de dépendance de fuseau horaire.
+    if let Some((y, m, d, h, mi)) = crate::win::local_time(ts) {
+        return format!("{d:02}/{m:02}/{y} {h:02}:{mi:02}");
+    }
     let days = ts.div_euclid(86_400);
     let secs = ts.rem_euclid(86_400);
     let (y, m, d) = civil(days);

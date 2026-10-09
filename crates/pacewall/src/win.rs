@@ -212,3 +212,41 @@ pub fn stop_simulator() {
         }
     }
 }
+
+/// Date et heure locales (fuseau et heure d'été de Windows) d'un horodatage Unix en secondes UTC :
+/// (année, mois, jour, heure, minute). `None` si Windows ne sait pas convertir.
+pub fn local_time(ts: i64) -> Option<(i32, u32, u32, u32, u32)> {
+    use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
+    // FILETIME : intervalles de 100 ns depuis le 1er janvier 1601.
+    let ticks = (ts.checked_add(11_644_473_600)?).checked_mul(10_000_000)?;
+    if ticks < 0 {
+        return None;
+    }
+    let ft = FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 };
+    unsafe {
+        let mut utc = SYSTEMTIME::default();
+        FileTimeToSystemTime(&ft, &mut utc).ok()?;
+        let mut local = SYSTEMTIME::default();
+        SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).ok()?;
+        Some((local.wYear as i32, local.wMonth as u32, local.wDay as u32, local.wHour as u32, local.wMinute as u32))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_time;
+
+    #[test]
+    fn local_time_is_a_whole_zone_shift_of_utc() {
+        // 2025-10-09 08:53:20 UTC : la conversion ne change que l'heure et éventuellement le jour (fuseaux à l'heure ou à la demi-heure près).
+        let (y, m, d, h, mi) = local_time(1_760_000_000).expect("conversion");
+        assert_eq!((y, m), (2025, 10));
+        assert!(d == 9 || d == 8 || d == 10);
+        assert!(h < 24 && mi < 60);
+        // Deux horodatages éloignés d'une heure : une heure d'écart en heure locale (hors changement d'heure).
+        let a = local_time(1_760_000_000).unwrap();
+        let b = local_time(1_760_003_600).unwrap();
+        assert_eq!((a.3 + 1) % 24, b.3);
+    }
+}
