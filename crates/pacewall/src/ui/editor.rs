@@ -225,7 +225,7 @@ impl State {
             let st = self.states.entry(spec.id.clone()).or_default();
             let (bw, bh) = {
                 let mut canvas = EguiCanvas { painter: &painter };
-                let d = D::new(&mut canvas, (origin.x, origin.y), scale, spec.opacity, widgets::bg(&spec)).styled(widgets::accent(&spec), widgets::bar(&spec)).titled(widgets::titles(&spec));
+                let d = D::new(&mut canvas, (origin.x, origin.y), scale, spec.opacity, widgets::bg(&spec)).styled(widgets::accent(&spec), widgets::bar(&spec)).titled(widgets::titles(&spec)).previewing(true);
                 widgets::draw(&spec.kind, &d, &spec, data, st, now)
             };
             let rect = Rect::from_min_size(origin, vec2(bw, bh) * scale);

@@ -72,7 +72,6 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "scope", label: "Classement", kind: Choice(&[("overall", "Général"), ("class", "Par classe (ma classe)")], "overall") },
         ],
         "session" => &[Opt { id: "weather", label: "Météo", kind: Bool(true) }],
-        "flags" => &[Opt { id: "inactive", label: "Afficher les drapeaux éteints", kind: Bool(true) }],
         "trackmap" => &[
             Opt { id: "size", label: "Taille de la carte", kind: Num { min: 160.0, max: 460.0, step: 10.0, def: 300.0 } },
             Opt { id: "rotate", label: "Rotation", kind: Choice(&[("0", "0°"), ("90", "90°"), ("180", "180°"), ("270", "270°")], "0") },
@@ -653,18 +652,18 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
 
 /* ---------- Drapeaux ---------- */
 
-/// Tous les drapeaux au même endroit : jaune par secteur (S1, S2, S3), puis full course jaune, bleu, blanc (dernier tour),
-/// rouge (course arrêtée), vert (relance), noir (disqualifié) et damier (arrivée). Allumés quand ils sont montrés.
-fn flags(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
-    let w = 290.0;
-    let hdr = if d.titles() { 16.0 } else { 0.0 };
-    let h = 8.0 + hdr + 26.0 + 8.0 + 24.0 + 10.0;
-    d.card(w, h);
-    if d.titles() {
-        d.label(16.0, 10.0, "Drapeaux", MUTED);
-    }
-    let show_off = spec.flag("inactive", true);
+/// Un drapeau montré au pilote : texte long (un seul drapeau), texte court (deux côte à côte), couleurs.
+struct Flag {
+    long: String,
+    short: String,
+    fill: Color32,
+    ink: Color32,
+}
 
+/// Le drapeau (ou les deux plus importants s'il y en a plusieurs) affiché en grand, rien quand il n'y en a aucun :
+/// lisible d'un coup d'œil en roulant. Ordre d'importance : rouge, neutralisation, noir, jaune, bleu, blanc, vert, damier.
+fn flags(d: &D, _spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
+    let (w, h) = (290.0, 44.0);
     let phase = data.f("session.phase", 5.0) as i64;
     let ystate = data.f("session.yellow", 0.0) as i64;
     let finish = data.f("player.finish_status", 0.0) as i64;
@@ -676,64 +675,64 @@ fn flags(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f
     }
     st.flag_phase = Some(phase);
 
-    let y1 = 8.0 + hdr;
-    let sector_w = (w - 32.0 - 2.0 * 9.0) / 3.0;
-    let yellow = Color32::from_rgb(255, 214, 51);
-    for s in 0..3 {
-        let lit = data.flag(&format!("session.sector_yellow.{}", s + 1));
-        let x = 16.0 + s as f32 * (sector_w + 9.0);
-        if lit {
-            d.fill(x, y1, sector_w, 26.0, yellow);
-        } else if show_off {
-            d.fill(x, y1, sector_w, 26.0, Color32::from_white_alpha(14));
-        }
-        if lit || show_off {
-            d.text(x + sector_w / 2.0, y1 + 5.0, &format!("S{}", s + 1), 15.0, if lit { Color32::from_rgb(17, 17, 17) } else { MUTED }, Font::Num, HAlign::Center);
-        }
+    let dark = Color32::from_rgb(17, 17, 17);
+    let mut active: Vec<Flag> = Vec::new();
+    let mut add = |long: &str, short: &str, fill: Color32, ink: Color32| active.push(Flag { long: long.into(), short: short.into(), fill, ink });
+    if phase == 7 || ystate == 7 {
+        add("DRAPEAU ROUGE", "ROUGE", BAD, Color32::WHITE);
+    }
+    if phase == 6 {
+        add("FULL COURSE JAUNE", "FCY", WARN, dark);
+    }
+    if finish == 3 {
+        add("DISQUALIFIÉ", "NOIR", Color32::from_rgb(12, 12, 12), Color32::WHITE);
+    }
+    let sectors: Vec<usize> = (1..=3).filter(|s| data.flag(&format!("session.sector_yellow.{s}"))).collect();
+    if !sectors.is_empty() {
+        let list: Vec<String> = sectors.iter().map(|s| format!("S{s}")).collect();
+        add(&format!("JAUNE · {}", list.join(" ")), &format!("JAUNE {}", list.join(" ")), Color32::from_rgb(255, 214, 51), dark);
+    }
+    if data.flag("player.blue_flag") {
+        add("DRAPEAU BLEU · LAISSE PASSER", "BLEU", BLUE, Color32::WHITE);
+    }
+    if ystate == 5 {
+        add("DERNIER TOUR", "DERNIER TOUR", Color32::from_rgb(240, 244, 250), dark);
+    }
+    if now < st.green_until {
+        add("DRAPEAU VERT", "VERT", OK, dark);
+    }
+    if phase == 8 || finish == 1 {
+        add("ARRIVÉE", "ARRIVÉE", Color32::WHITE, dark);
     }
 
-    let y2 = y1 + 26.0 + 8.0;
-    let n = 7;
-    let cw = 32.0;
-    let gap = (w - 32.0 - n as f32 * cw) / (n as f32 - 1.0);
-    // (allumé, couleur du drapeau, texte)
-    let items: [(bool, Color32, &str); 7] = [
-        (phase == 6, WARN, "FCY"),
-        (data.flag("player.blue_flag"), BLUE, ""),
-        (ystate == 5, Color32::from_rgb(240, 244, 250), ""),
-        (phase == 7 || ystate == 7, BAD, ""),
-        (now < st.green_until, OK, ""),
-        (finish == 3, Color32::from_rgb(12, 12, 12), ""),
-        (phase == 8 || finish == 1, Color32::WHITE, ""),
-    ];
-    for (i, (lit, color, text)) in items.iter().enumerate() {
-        let x = 16.0 + i as f32 * (cw + gap);
-        if !lit && !show_off {
-            continue;
+    if active.is_empty() {
+        // Rien à montrer en jeu. Dans l'éditeur, un repère permet de retrouver et de placer le widget.
+        if d.is_preview() {
+            let edge = Color32::from_white_alpha(40);
+            d.fill(0.0, 0.0, w, 1.5, edge);
+            d.fill(0.0, h - 1.5, w, 1.5, edge);
+            d.fill(0.0, 0.0, 1.5, h, edge);
+            d.fill(w - 1.5, 0.0, 1.5, h, edge);
+            d.text(w / 2.0, 13.0, "Drapeaux (aucun en ce moment)", 14.0, MUTED, Font::Ui, HAlign::Center);
         }
-        let fill = if *lit { *color } else { color.gamma_multiply(0.16) };
-        d.fill(x, y2, cw, 24.0, fill);
-        if i == 5 {
-            // Noir : contour clair pour le voir sur fond sombre.
-            let edge = Color32::from_white_alpha(if *lit { 200 } else { 40 });
-            d.fill(x, y2, cw, 1.5, edge);
-            d.fill(x, y2 + 22.5, cw, 1.5, edge);
-            d.fill(x, y2, 1.5, 24.0, edge);
-            d.fill(x + cw - 1.5, y2, 1.5, 24.0, edge);
+        return (w, h);
+    }
+    let shown = &active[..active.len().min(2)];
+    let gap = 8.0;
+    let bw = (w - gap * (shown.len() as f32 - 1.0)) / shown.len() as f32;
+    for (i, f) in shown.iter().enumerate() {
+        let x = i as f32 * (bw + gap);
+        d.fill(x, 0.0, bw, h, f.fill);
+        if f.fill == Color32::from_rgb(12, 12, 12) {
+            // Noir : contour clair pour le distinguer d'un fond sombre.
+            let edge = Color32::from_white_alpha(200);
+            d.fill(x, 0.0, bw, 1.5, edge);
+            d.fill(x, h - 1.5, bw, 1.5, edge);
+            d.fill(x, 0.0, 1.5, h, edge);
+            d.fill(x + bw - 1.5, 0.0, 1.5, h, edge);
         }
-        if i == 6 {
-            // Damier : 4 colonnes × 2 lignes alternées.
-            for cx in 0..4 {
-                for cy in 0..2 {
-                    if (cx + cy) % 2 == 0 {
-                        d.fill(x + cx as f32 * cw / 4.0, y2 + cy as f32 * 12.0, cw / 4.0, 12.0, Color32::from_rgb(12, 12, 12).gamma_multiply(if *lit { 1.0 } else { 0.3 }));
-                    }
-                }
-            }
-        }
-        if !text.is_empty() {
-            d.text(x + cw / 2.0, y2 + 5.0, text, 12.0, if *lit { Color32::from_rgb(17, 17, 17) } else { MUTED }, Font::Num, HAlign::Center);
-        }
+        let (text, size) = if shown.len() == 1 { (&f.long, 22.0) } else { (&f.short, 18.0) };
+        d.text(x + bw / 2.0, h / 2.0 - size * 0.62, text, size, f.ink, Font::Ui, HAlign::Center);
     }
     (w, h)
 }

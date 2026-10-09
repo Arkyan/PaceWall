@@ -72,11 +72,13 @@ pub struct D<'a> {
     bar: bool,
     /// Titres des widgets (« Pneus », « Classement »…) : masqués par défaut pour un affichage épuré.
     titles: bool,
+    /// Aperçu de l'éditeur : un widget qui n'affiche rien en jeu (drapeaux) montre alors un repère.
+    preview: bool,
 }
 
 impl<'a> D<'a> {
     pub fn new(canvas: &'a mut dyn Canvas, origin: (f32, f32), scale: f32, opacity: f32, bg: f32) -> Self {
-        Self { c: RefCell::new(canvas), o: origin, s: scale, a: opacity, bg, accent: ACCENT, bar: false, titles: false }
+        Self { c: RefCell::new(canvas), o: origin, s: scale, a: opacity, bg, accent: ACCENT, bar: false, titles: false, preview: false }
     }
 
     pub fn styled(mut self, accent: Color32, bar: bool) -> Self {
@@ -92,6 +94,15 @@ impl<'a> D<'a> {
 
     pub fn titles(&self) -> bool {
         self.titles
+    }
+
+    pub fn previewing(mut self, preview: bool) -> Self {
+        self.preview = preview;
+        self
+    }
+
+    pub fn is_preview(&self) -> bool {
+        self.preview
     }
 
     pub fn accent(&self) -> Color32 {
@@ -110,8 +121,9 @@ impl<'a> D<'a> {
     pub fn layer(&self, key: u64, x: f32, y: f32, w: f32, h: f32, draw: &mut dyn FnMut(&D)) {
         let (px, py) = self.pt(x, y);
         let (o, s, a, bg, accent, bar, titles) = (self.o, self.s, self.a, self.bg, self.accent, self.bar, self.titles);
+        let preview = self.preview;
         self.c.borrow_mut().layer(key, (px, py, w * s, h * s), &mut |canvas, (tx, ty)| {
-            let inner = D { c: RefCell::new(canvas), o: (o.0 - tx, o.1 - ty), s, a, bg, accent, bar, titles };
+            let inner = D { c: RefCell::new(canvas), o: (o.0 - tx, o.1 - ty), s, a, bg, accent, bar, titles, preview };
             draw(&inner);
         });
     }

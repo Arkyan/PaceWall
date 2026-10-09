@@ -481,30 +481,42 @@ PW.widgets.trackmap = {
 };
 
 /* ---------- Drapeaux ---------- */
-// Jaune par secteur (S1 S2 S3), puis full course jaune, bleu, blanc (dernier tour), rouge (course arrêtée), vert (relance,
-// allumé 8 s), noir (disqualifié) et damier (arrivée).
+// Un drapeau, ou les deux plus importants s'il y en a plusieurs, affichés en grand ; rien quand il n'y en a aucun.
+// Ordre : rouge, neutralisation, noir, jaune, bleu, blanc, vert (8 s après une relance), damier.
 PW.widgets.flags = {
   name: 'Drapeaux',
   keys: ['session.phase', 'session.yellow', 'session.sector_yellow.', 'player.blue_flag', 'player.finish_status'],
-  hz: 4, size: [290, 84],
-  options: [{ id: 'inactive', label: 'Afficher les drapeaux éteints', type: 'bool', def: true }],
+  hz: 4, size: [290, 44],
+  options: [],
   mount(root, o) {
-    const card = PW.tpl(`<div class="pw-card pw-flags${o.inactive === false ? ' hide-off' : ''}">
-      <div class="pw-title"><span>Drapeaux</span></div>
-      <div class="pw-fsec"><i data-k="s1">S1</i><i data-k="s2">S2</i><i data-k="s3">S3</i></div>
-      <div class="pw-fsw"><i data-k="fcy" style="--c:#ffb020">FCY</i><i data-k="blue" style="--c:#4f9dff"></i><i data-k="white" style="--c:#f0f4fa"></i><i data-k="red" style="--c:#ff4d5e"></i><i data-k="green" style="--c:#38e07b"></i><i data-k="black" class="black" style="--c:#0c0c0c"></i><i data-k="checker" class="checker" style="--c:#fff"></i></div></div>`).firstChild;
-    root.appendChild(card);
-    const el = k => card.querySelector(`[data-k="${k}"]`);
-    let before = null, greenUntil = 0;
+    const box = PW.tpl('<div class="pw-flags"></div>').firstChild;
+    root.appendChild(box);
+    let before = null, greenUntil = 0, key = '';
     return {
       update(g) {
         const phase = g('session.phase', 5), ystate = g('session.yellow', 0), finish = g('player.finish_status', 0), now = performance.now();
         if (before != null && phase === 5 && before !== 5 && before >= 0) greenUntil = now + 8000;
         before = phase;
-        [1, 2, 3].forEach(s => el('s' + s).classList.toggle('on', !!g('session.sector_yellow.' + s, false)));
-        const on = (k, v) => el(k.split(' ')[0]).classList.toggle('on', !!v);
-        on('fcy', phase === 6); on('blue', g('player.blue_flag', false)); on('white', ystate === 5); on('red', phase === 7 || ystate === 7);
-        on('green', now < greenUntil); on('black', finish === 3); on('checker', phase === 8 || finish === 1);
+        const list = [], add = (long, short, bg, fg, cls) => list.push({ long, short, bg, fg, cls: cls || '' });
+        if (phase === 7 || ystate === 7) add('Drapeau rouge', 'Rouge', '#ff4d5e', '#fff');
+        if (phase === 6) add('Full course jaune', 'FCY', '#ffb020', '#111');
+        if (finish === 3) add('Disqualifié', 'Noir', '#0c0c0c', '#fff', 'black');
+        const ys = [1, 2, 3].filter(s => g('session.sector_yellow.' + s, false)).map(s => 'S' + s);
+        if (ys.length) add('Jaune · ' + ys.join(' '), 'Jaune ' + ys.join(' '), '#ffd633', '#111');
+        if (g('player.blue_flag', false)) add('Drapeau bleu · laisse passer', 'Bleu', '#4f9dff', '#fff');
+        if (ystate === 5) add('Dernier tour', 'Dernier tour', '#f0f4fa', '#111');
+        if (now < greenUntil) add('Drapeau vert', 'Vert', '#38e07b', '#111');
+        if (phase === 8 || finish === 1) add('Arrivée', 'Arrivée', '#fff', '#111');
+        const shown = list.slice(0, 2), k = shown.map(f => f.long).join('|');
+        if (k === key) return;
+        key = k;
+        box.className = 'pw-flags ' + (shown.length === 1 ? 'one' : 'two');
+        box.replaceChildren(...shown.map(f => {
+          const el = document.createElement('div');
+          el.className = 'pw-fl ' + f.cls; el.style.background = f.bg; el.style.color = f.fg;
+          el.textContent = shown.length === 1 ? f.long : f.short;
+          return el;
+        }));
       },
     };
   },
