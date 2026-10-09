@@ -17,7 +17,7 @@ fn defaults() -> Map<String, Value> {
         "voice_volume": 80,            // volume de la voix (0 à 100)
         "voice_fuel": true,            // carburant et énergie
         "voice_tyres": true,           // pneus froids, chauds, usés, crevés
-        "voice_flags": true,           // drapeau jaune, full course jaune
+        "voice_flags": true,           // drapeau jaune, full course yellow
         "voice_weather": true,         // pluie
         "yellow_sector_order": "natural", // ordre des secteurs dans les drapeaux jaunes du jeu : "natural" (1, 2, 3) ou "game" (3, 1, 2)
         "overlay_monitor": 0,          // index de l'écran (0 = principal)

@@ -499,7 +499,7 @@ PW.widgets.flags = {
         before = phase;
         const list = [], add = (long, short, bg, fg, cls) => list.push({ long, short, bg, fg, cls: cls || '' });
         if (phase === 7 || ystate === 7) add('Drapeau rouge', 'Rouge', '#ff4d5e', '#fff');
-        if (phase === 6) add('Full course jaune', 'FCY', '#ffb020', '#111');
+        if (phase === 6) add('Full course yellow', 'FCY', '#ffb020', '#111');
         if (finish === 3) add('Disqualifié', 'Noir', '#0c0c0c', '#fff', 'black');
         const ys = [1, 2, 3].filter(s => g('session.sector_yellow.' + s, false)).map(s => 'S' + s);
         if (ys.length) add('Jaune · ' + ys.join(' '), 'Jaune ' + ys.join(' '), '#ffd633', '#111');

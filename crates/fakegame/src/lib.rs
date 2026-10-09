@@ -12,7 +12,7 @@ pub struct Options {
     /// Drapeau jaune de 4 s toutes les 12 s (essai simple des alertes).
     pub yellow: bool,
     /// Scénario complet de 90 s qui déclenche chaque alerte vocale : carburant, énergie, pneus froids puis chauds puis
-    /// usés, jaune, full course jaune, pluie, crevaison. Il se répète.
+    /// usés, jaune, full course yellow, pluie, crevaison. Il se répète.
     pub scenario: bool,
 }
 
@@ -38,7 +38,7 @@ pub struct Scene {
 }
 
 /// Déroulé du scénario : 0-20 s pneus froids, 20-50 s réchauffe, 50-65 s trop chauds, puis normaux ; carburant qui
-/// baisse par paliers de tours, jaune à 30 s, full course jaune à 50 s, pluie à 70 s, crevaison à 75 s, usure critique à 75 s.
+/// baisse par paliers de tours, jaune à 30 s, full course yellow à 50 s, pluie à 70 s, crevaison à 75 s, usure critique à 75 s.
 pub fn scene(c: f64) -> Scene {
     let carcass_c = if c < 20.0 {
         60.0
@@ -177,7 +177,7 @@ pub fn run(opts: Options, stop: &dyn Fn() -> bool) -> Result<(), String> {
             info.mLapDist = 4000.0;
             info.mNumVehicles = drivers.len() as i32;
             info.mGamePhase = sc.map_or(5, |s| s.phase);
-            // Jaune local dans le secteur 2 (ordre naturel : l'élément 1 du tableau). Le full course jaune passe par la phase 6.
+            // Jaune local dans le secteur 2 (ordre naturel : l'élément 1 du tableau). Le full course yellow passe par la phase 6.
             info.mSectorFlag = [0, (sc.map_or(opts.yellow && (t as u64 % 12) >= 8, |s| s.yellow)) as u8, 0];
             info.mInRealtime = 1;
             put(&mut info.mPlayerName, "Toi");

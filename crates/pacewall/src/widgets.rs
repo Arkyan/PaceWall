@@ -682,7 +682,7 @@ fn flags(d: &D, _spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (
         add("DRAPEAU ROUGE", "ROUGE", BAD, Color32::WHITE);
     }
     if phase == 6 {
-        add("FULL COURSE JAUNE", "FCY", WARN, dark);
+        add("FULL COURSE YELLOW", "FCY", WARN, dark);
     }
     if finish == 3 {
         add("DISQUALIFIÉ", "NOIR", Color32::from_rgb(12, 12, 12), Color32::WHITE);

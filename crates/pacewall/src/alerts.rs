@@ -103,7 +103,7 @@ impl Alerts {
             let yellow = [1, 2, 3].map(|s| data.flag(&format!("session.sector_yellow.{s}")));
             if let Some(before) = self.last_phase {
                 if phase == 6 && before != 6 {
-                    say.push(self::say("fcy", "Full course jaune"));
+                    say.push(self::say("fcy", "Full course yellow"));
                 } else if before == 6 && phase == 5 {
                     say.push(self::say("green", "Course relancée, drapeau vert"));
                 }
@@ -263,7 +263,7 @@ mod tests {
         assert!(a.update(&d(5, false, true, false), &cfg(), t + Duration::from_secs(1)).is_empty());
         // Un autre secteur passe au jaune : plusieurs secteurs, annonce sans précision.
         assert_eq!(texts(a.update(&d(5, true, true, false), &cfg(), t + Duration::from_secs(10))), vec!["Drapeau jaune"]);
-        assert_eq!(texts(a.update(&d(6, false, false, false), &cfg(), t + Duration::from_secs(20))), vec!["Full course jaune"]);
+        assert_eq!(texts(a.update(&d(6, false, false, false), &cfg(), t + Duration::from_secs(20))), vec!["Full course yellow"]);
         assert_eq!(texts(a.update(&d(5, false, false, false), &cfg(), t + Duration::from_secs(50))), vec!["Course relancée, drapeau vert"]);
     }
 

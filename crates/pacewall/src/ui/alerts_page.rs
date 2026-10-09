@@ -180,7 +180,7 @@ impl State {
             ui.add_space(6.0);
             let simulating = pwcore::live::simulation_running();
             let game = !simulating && pwcore::live::game_running();
-            ui.label(RichText::new("Lance un faux Le Mans Ultimate : les overlays, la carte et les alertes vocales se déclenchent comme en course (un cycle de 90 s qui se répète : pneus froids puis chauds puis usés, carburant, drapeau jaune, full course jaune, pluie, crevaison).").size(12.0).color(MUTED));
+            ui.label(RichText::new("Lance un faux Le Mans Ultimate : les overlays, la carte et les alertes vocales se déclenchent comme en course (un cycle de 90 s qui se répète : pneus froids puis chauds puis usés, carburant, drapeau jaune, full course yellow, pluie, crevaison).").size(12.0).color(MUTED));
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if simulating {

@@ -50,7 +50,7 @@ PHRASES = {
     "yellow_s1": (URGENT, ["Drapeau jaune, secteur un.", "Jaune dans le secteur un, lève le pied."]),
     "yellow_s2": (URGENT, ["Drapeau jaune, secteur deux.", "Jaune dans le secteur deux, lève le pied."]),
     "yellow_s3": (URGENT, ["Drapeau jaune, secteur trois.", "Jaune dans le secteur trois, lève le pied."]),
-    "fcy": (CALM, ["Full course jaune.", "Full course jaune, respecte les écarts et reste concentré."]),
+    "fcy": (CALM, ["Full course yellow.", "Full course yellow, respecte les écarts et reste concentré."]),
     "green": (CALM, ["Course relancée, drapeau vert.", "Feu vert, c'est reparti, bonne relance."]),
     "rain": (CALM, ["Pluie détectée.", "Il commence à pleuvoir, prépare tes pneus pluie."]),
     "test": (CALM, ["Radio check. Ici ton ingénieur, tu m'entends bien ?", "Alertes vocales activées, je suis avec toi."]),

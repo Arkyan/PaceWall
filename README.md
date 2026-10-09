@@ -57,7 +57,7 @@ Inspirée de TinyPedal. Au premier tour propre sur un circuit, PaceWall enregist
 
 La voix intégrée à Windows (hors ligne, voix française si elle est installée) prévient pendant que tu roules, uniquement
 en piste : carburant et énergie (5, 3, 2 puis 1 tour restant), pneus (froids, trop chauds, usés, crevaison), drapeau jaune,
-full course jaune et reprise, pluie. Chaque alerte a un délai de relance. Réglages > Alertes vocales : cases, volume, essai
+full course yellow et reprise, pluie. Chaque alerte a un délai de relance. Réglages > Alertes vocales : cases, volume, essai
 de la voix (`pacewall.exe --say "texte"` en ligne de commande). Problèmes de voix : `%TEMP%\pw-speech.log`.
 
 ### Voix de l'ingénieur et crédits
