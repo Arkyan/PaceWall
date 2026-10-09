@@ -18,6 +18,9 @@ pub const CLIPS_F: &[(&str, &[&[u8]])] = &[
     ("tyres_hot", &[include_bytes!("../assets/voice/f/tyres_hot_0.wav"), include_bytes!("../assets/voice/f/tyres_hot_1.wav")]),
     ("tyres_worn", &[include_bytes!("../assets/voice/f/tyres_worn_0.wav"), include_bytes!("../assets/voice/f/tyres_worn_1.wav")]),
     ("yellow", &[include_bytes!("../assets/voice/f/yellow_0.wav"), include_bytes!("../assets/voice/f/yellow_1.wav")]),
+    ("yellow_s1", &[include_bytes!("../assets/voice/f/yellow_s1_0.wav"), include_bytes!("../assets/voice/f/yellow_s1_1.wav")]),
+    ("yellow_s2", &[include_bytes!("../assets/voice/f/yellow_s2_0.wav"), include_bytes!("../assets/voice/f/yellow_s2_1.wav")]),
+    ("yellow_s3", &[include_bytes!("../assets/voice/f/yellow_s3_0.wav"), include_bytes!("../assets/voice/f/yellow_s3_1.wav")]),
 ];
 
 /// Clips de la voix « m » : (clé d'alerte, variantes WAV 16 bits mono 16 kHz).
@@ -38,4 +41,7 @@ pub const CLIPS_M: &[(&str, &[&[u8]])] = &[
     ("tyres_hot", &[include_bytes!("../assets/voice/m/tyres_hot_0.wav"), include_bytes!("../assets/voice/m/tyres_hot_1.wav")]),
     ("tyres_worn", &[include_bytes!("../assets/voice/m/tyres_worn_0.wav"), include_bytes!("../assets/voice/m/tyres_worn_1.wav")]),
     ("yellow", &[include_bytes!("../assets/voice/m/yellow_0.wav"), include_bytes!("../assets/voice/m/yellow_1.wav")]),
+    ("yellow_s1", &[include_bytes!("../assets/voice/m/yellow_s1_0.wav"), include_bytes!("../assets/voice/m/yellow_s1_1.wav")]),
+    ("yellow_s2", &[include_bytes!("../assets/voice/m/yellow_s2_0.wav"), include_bytes!("../assets/voice/m/yellow_s2_1.wav")]),
+    ("yellow_s3", &[include_bytes!("../assets/voice/m/yellow_s3_0.wav"), include_bytes!("../assets/voice/m/yellow_s3_1.wav")]),
 ];

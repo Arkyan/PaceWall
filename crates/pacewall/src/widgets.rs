@@ -605,8 +605,9 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let w = 280.0;
     let weather = spec.flag("weather", true);
     let phase = data.f("session.phase", 5.0) as i64;
-    let yellow = data.f("session.yellow", 0.0) as i64;
-    let flag = phase == 6 || yellow > 0;
+    // Secteurs en jaune (1, 2, 3) : le bandeau les nomme.
+    let yellow_sectors: Vec<usize> = (1..=3).filter(|s| data.flag(&format!("session.sector_yellow.{s}"))).collect();
+    let flag = phase == 6 || !yellow_sectors.is_empty();
     let top = if flag { 36.0 } else { 0.0 };
     // Circuit et type de session seulement si demandés.
     let hdr = if d.titles() { 16.0 } else { 0.0 };
@@ -614,7 +615,13 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     d.card(w, h);
     if flag {
         d.fill(16.0, 10.0, w - 32.0, 24.0, WARN);
-        d.text(w / 2.0, 14.0, if phase == 6 { "FULL COURSE YELLOW / SAFETY CAR" } else { "JAUNE" }, 12.0, Color32::from_rgb(17, 17, 17), Font::Ui, HAlign::Center);
+        let banner = if phase == 6 {
+            "FULL COURSE YELLOW / SAFETY CAR".to_string()
+        } else {
+            let list: Vec<String> = yellow_sectors.iter().map(|s| format!("S{s}")).collect();
+            format!("JAUNE · {}", list.join(" "))
+        };
+        d.text(w / 2.0, 14.0, &banner, 12.0, Color32::from_rgb(17, 17, 17), Font::Ui, HAlign::Center);
     }
     let y = 10.0 + top;
     if d.titles() {

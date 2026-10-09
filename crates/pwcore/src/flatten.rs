@@ -79,8 +79,14 @@ fn session(o: &mut Out, r: &Reader, i: &ScoringInfo) {
     o.int("weather.grip_level", "Gomme sur la piste", i.mTrackGripLevel as i64);
     let wind = i.mWind;
     o.num("weather.wind", "m/s", "Vent", (wind.x * wind.x + wind.y * wind.y + wind.z * wind.z).sqrt());
+    // Jaune local par secteur. Le jeu ne dit pas dans quel ordre il range ses trois secteurs : par défaut le premier
+    // élément est le secteur 1 ; le réglage « yellow_sector_order » = "game" applique l'ordre de `mSector` (0 = secteur 3,
+    // 1 = secteur 1, 2 = secteur 2) si l'essai en jeu montre que c'est lui. Lu une seule fois au lancement.
+    static GAME_ORDER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let game_order = *GAME_ORDER.get_or_init(|| crate::settings::str_of("yellow_sector_order", "natural") == "game");
     for (n, f) in i.mSectorFlag.iter().enumerate() {
-        o.flag(format!("session.sector_yellow.{}", n + 1), "Jaune de secteur", *f != 0);
+        let sector = if game_order { [3, 1, 2][n.min(2)] } else { n + 1 };
+        o.flag(format!("session.sector_yellow.{sector}"), "Jaune de secteur", *f != 0);
     }
     o.text("player.name", "Pilote", c_str(&i.mPlayerName));
 }

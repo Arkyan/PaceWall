@@ -299,6 +299,15 @@ orientation de la carte (l'option de rotation corrige un décalage).
   de tour aux changements 1→2 et 2→0 sur un tour sans stands et les range dans `tracks/<circuit>.json` (`sectors`,
   fractions du tour). ⚠️ À confirmer avec le vrai jeu.
 
+## 6 quater. Drapeaux jaunes par secteur
+
+- `mSectorFlag[3]` donne le jaune local de chaque secteur (TinyPedal ne regarde que « un secteur au moins »). PaceWall expose
+  `session.sector_yellow.1..3` et l'alerte vocale dit « Drapeau jaune, secteur N » (sans précision si plusieurs secteurs).
+- `mYellowFlagState` décrit l'état du full course jaune, pas un jaune local : il n'est plus utilisé pour l'alerte.
+- ⚠️ Ordre du tableau non confirmé : le jeu ne dit pas si l'élément 0 est le secteur 1 ou le secteur 3 (comme `mSector`,
+  où 0 = secteur 3). Par défaut l'élément 0 est le secteur 1. Si l'annonce nomme le mauvais secteur en jeu, mettre
+  `"yellow_sector_order": "game"` dans `settings.json` (ordre 3, 1, 2) et relancer PaceWall.
+
 ## 7. Mesure et vérification
 
 - `cargo test -p lmu` : vérifie que la disposition des structures correspond à celle du jeu

@@ -177,7 +177,8 @@ pub fn run(opts: Options, stop: &dyn Fn() -> bool) -> Result<(), String> {
             info.mLapDist = 4000.0;
             info.mNumVehicles = drivers.len() as i32;
             info.mGamePhase = sc.map_or(5, |s| s.phase);
-            info.mYellowFlagState = (sc.map_or(opts.yellow && (t as u64 % 12) >= 8, |s| s.yellow)) as i8;
+            // Jaune local dans le secteur 2 (ordre naturel : l'élément 1 du tableau). Le full course jaune passe par la phase 6.
+            info.mSectorFlag = [0, (sc.map_or(opts.yellow && (t as u64 % 12) >= 8, |s| s.yellow)) as u8, 0];
             info.mInRealtime = 1;
             put(&mut info.mPlayerName, "Toi");
             info.mRaining = sc.map_or(0.0, |s| s.rain);

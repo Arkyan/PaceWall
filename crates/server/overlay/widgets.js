@@ -340,9 +340,9 @@ PW.widgets.session = {
         b.text('time', F.hms(g('session.remaining')));
         const max = g('session.max_laps', 0), left = g('strategy.race_laps_left');
         b.text('laps', max > 0 && max < 10000 ? 'Tour ' + g('lap.number', 0) + ' / ' + max : left != null ? '≈ ' + Math.round(left) + ' tours' : '');
-        const phase = g('session.phase', 5), yellow = g('session.yellow', 0);
-        b.cls('flag', phase === 6 || yellow > 0 ? 'on' : '');
-        b.text('flag', phase === 6 ? 'Full course yellow / Safety car' : yellow > 0 ? 'Jaune' : '');
+        const phase = g('session.phase', 5), ys = [1, 2, 3].filter(s => g('session.sector_yellow.' + s, false));
+        b.cls('flag', phase === 6 || ys.length ? 'on' : '');
+        b.text('flag', phase === 6 ? 'Full course yellow / Safety car' : ys.length ? 'Jaune · ' + ys.map(s => 'S' + s).join(' ') : '');
         if (b.el.air) {
           b.text('air', F.n(g('weather.ambient'), 0) + '°');
           b.text('trk', F.n(g('weather.track'), 0) + '°');
@@ -486,7 +486,7 @@ PW.widgets.trackmap = {
 /* ---------- Données de démonstration (éditeur, ou sans jeu) ---------- */
 PW.demo = (() => {
   const d = {
-    'game.version': 1, 'demo.map': true, 'session.track_length': 4000, 'session.track': 'Circuit de la Sarthe', 'session.type': 10, 'session.phase': 5, 'session.yellow': 0,
+    'game.version': 1, 'demo.map': true, 'session.track_length': 4000, 'session.track': 'Circuit de la Sarthe', 'session.type': 10, 'session.phase': 5, 'session.sector_yellow.1': false, 'session.sector_yellow.2': false, 'session.sector_yellow.3': false,
     'session.remaining': 5 * 3600 + 1234, 'session.max_laps': 0, 'session.vehicles': 12, 'weather.ambient': 21, 'weather.track': 32, 'weather.rain': 0,
     'player.speed': 232, 'player.gear': 5, 'player.rpm': 7100, 'player.rpm_max': 8000, 'player.throttle': 82, 'player.brake': 0, 'player.clutch': 0, 'player.steering': 12,
     'fuel.level': 52.4, 'fuel.capacity': 90, 'fuel.percent': 58, 'energy.virtual': 61,

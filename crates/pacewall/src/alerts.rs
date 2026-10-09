@@ -60,7 +60,8 @@ pub struct Alerts {
     hot_since: Option<Instant>,
     worn_said: bool,
     last_phase: Option<i64>,
-    yellow_before: bool,
+    /// Secteurs en jaune à la lecture précédente (secteurs 1, 2, 3).
+    yellow_before: [bool; 3],
     raining_before: bool,
     last_said: HashMap<&'static str, Instant>,
 }
@@ -98,7 +99,8 @@ impl Alerts {
 
         if cfg.flags {
             let phase = data.f("session.phase", -1.0) as i64;
-            let yellow = data.f("session.yellow", 0.0) as i64 > 0;
+            // Jaune local : le jeu indique quels secteurs sont concernés.
+            let yellow = [1, 2, 3].map(|s| data.flag(&format!("session.sector_yellow.{s}")));
             if let Some(before) = self.last_phase {
                 if phase == 6 && before != 6 {
                     say.push(self::say("fcy", "Full course jaune"));
@@ -106,8 +108,16 @@ impl Alerts {
                     say.push(self::say("green", "Course relancée, drapeau vert"));
                 }
             }
-            if yellow && !self.yellow_before && phase != 6 && self.ready("yellow", now, 15) {
-                say.push(self::say("yellow", "Drapeau jaune"));
+            // Annonce quand un secteur passe au jaune : « Drapeau jaune, secteur 2 » (ou sans précision s'il y en a plusieurs).
+            let appeared = (0..3).any(|i| yellow[i] && !self.yellow_before[i]);
+            if appeared && phase != 6 && self.ready("yellow", now, 6) {
+                let sectors: Vec<usize> = (0..3).filter(|i| yellow[*i]).map(|i| i + 1).collect();
+                match sectors.as_slice() {
+                    [1] => say.push(self::say("yellow_s1", "Drapeau jaune, secteur un")),
+                    [2] => say.push(self::say("yellow_s2", "Drapeau jaune, secteur deux")),
+                    [3] => say.push(self::say("yellow_s3", "Drapeau jaune, secteur trois")),
+                    _ => say.push(self::say("yellow", "Drapeau jaune")),
+                }
             }
             self.last_phase = Some(phase);
             self.yellow_before = yellow;
@@ -237,13 +247,24 @@ mod tests {
     fn yellow_flag_and_safety_car() {
         let mut a = Alerts::default();
         let t = Instant::now();
-        let d = |phase: i64, yellow: i64| data(&[("session.realtime", json!(true)), ("session.phase", json!(phase)), ("session.yellow", json!(yellow))]);
-        assert!(a.update(&d(5, 0), &cfg(), t).is_empty());
-        assert_eq!(texts(a.update(&d(5, 1), &cfg(), t)), vec!["Drapeau jaune"]);
+        let d = |phase: i64, s1: bool, s2: bool, s3: bool| {
+            data(&[
+                ("session.realtime", json!(true)),
+                ("session.phase", json!(phase)),
+                ("session.sector_yellow.1", json!(s1)),
+                ("session.sector_yellow.2", json!(s2)),
+                ("session.sector_yellow.3", json!(s3)),
+            ])
+        };
+        assert!(a.update(&d(5, false, false, false), &cfg(), t).is_empty());
+        // Un seul secteur : on le nomme.
+        assert_eq!(texts(a.update(&d(5, false, true, false), &cfg(), t)), vec!["Drapeau jaune, secteur deux"]);
         // Tant que le jaune dure, pas de répétition.
-        assert!(a.update(&d(5, 1), &cfg(), t + Duration::from_secs(1)).is_empty());
-        assert_eq!(texts(a.update(&d(6, 1), &cfg(), t + Duration::from_secs(2))), vec!["Full course jaune"]);
-        assert_eq!(texts(a.update(&d(5, 0), &cfg(), t + Duration::from_secs(40))), vec!["Course relancée, drapeau vert"]);
+        assert!(a.update(&d(5, false, true, false), &cfg(), t + Duration::from_secs(1)).is_empty());
+        // Un autre secteur passe au jaune : plusieurs secteurs, annonce sans précision.
+        assert_eq!(texts(a.update(&d(5, true, true, false), &cfg(), t + Duration::from_secs(10))), vec!["Drapeau jaune"]);
+        assert_eq!(texts(a.update(&d(6, false, false, false), &cfg(), t + Duration::from_secs(20))), vec!["Full course jaune"]);
+        assert_eq!(texts(a.update(&d(5, false, false, false), &cfg(), t + Duration::from_secs(50))), vec!["Course relancée, drapeau vert"]);
     }
 
     #[test]

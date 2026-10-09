@@ -14,6 +14,8 @@ Utilisation :
     pip install piper-tts numpy scipy
     python tools/voice/generate.py f chemin/vers/fr_FR-siwis-medium.onnx
     python tools/voice/generate.py m chemin/vers/fr_FR-upmc-medium.onnx 1      # 1 = locuteur « pierre »
+Pour n'ajouter que quelques clés sans refaire les autres (les prises existantes sont conservées) :
+    python tools/voice/generate.py m chemin/vers/fr_FR-upmc-medium.onnx 1 yellow_s
 """
 import sys
 from pathlib import Path
@@ -45,6 +47,9 @@ PHRASES = {
     "tyres_worn": (CALM, ["Pneus usés, pense à ton arrêt.", "Les pneus sont en fin de vie."]),
     "flat": (URGENT, ["Crevaison ! Rentre au stand !", "Tu as une crevaison, rentre doucement !"]),
     "yellow": (URGENT, ["Drapeau jaune.", "Drapeau jaune, lève le pied."]),
+    "yellow_s1": (URGENT, ["Drapeau jaune, secteur un.", "Jaune dans le secteur un, lève le pied."]),
+    "yellow_s2": (URGENT, ["Drapeau jaune, secteur deux.", "Jaune dans le secteur deux, lève le pied."]),
+    "yellow_s3": (URGENT, ["Drapeau jaune, secteur trois.", "Jaune dans le secteur trois, lève le pied."]),
     "fcy": (CALM, ["Full course jaune.", "Full course jaune, respecte les écarts et reste concentré."]),
     "green": (CALM, ["Course relancée, drapeau vert.", "Feu vert, c'est reparti, bonne relance."]),
     "rain": (CALM, ["Pluie détectée.", "Il commence à pleuvoir, prépare tes pneus pluie."]),
@@ -93,15 +98,19 @@ def main():
     if len(sys.argv) < 3 or sys.argv[1] not in ("f", "m"):
         sys.exit(__doc__)
     name, model = sys.argv[1], sys.argv[2]
-    speaker = int(sys.argv[3]) if len(sys.argv) > 3 else None
+    speaker = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] != "-" else None
+    only = sys.argv[4] if len(sys.argv) > 4 else None  # préfixe de clés à (re)faire ; les autres clips restent tels quels
     voice = PiperVoice.load(model)
     out_dir = ASSETS / name
     out_dir.mkdir(parents=True, exist_ok=True)
     for old in out_dir.glob("*.wav"):
-        old.unlink()
+        if only is None or old.name.startswith(only):
+            old.unlink()
     rng = np.random.default_rng(7)
     count = 0
     for key, (params, texts) in PHRASES.items():
+        if only is not None and not key.startswith(only):
+            continue
         for i, text in enumerate(texts):
             chunks = list(voice.synthesize(text, syn_config=SynthesisConfig(speaker_id=speaker, **params[i % len(params)])))
             audio = np.concatenate([c.audio_float_array for c in chunks])

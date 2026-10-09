@@ -19,6 +19,7 @@ fn defaults() -> Map<String, Value> {
         "voice_tyres": true,           // pneus froids, chauds, usés, crevés
         "voice_flags": true,           // drapeau jaune, full course jaune
         "voice_weather": true,         // pluie
+        "yellow_sector_order": "natural", // ordre des secteurs dans les drapeaux jaunes du jeu : "natural" (1, 2, 3) ou "game" (3, 1, 2)
         "overlay_monitor": 0,          // index de l'écran (0 = principal)
         "autostart": false,            // lancer avec Windows
         "obs_server": false,           // serveur web pour OBS (source navigateur)
