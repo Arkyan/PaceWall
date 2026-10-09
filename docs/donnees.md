@@ -303,6 +303,7 @@ orientation de la carte (l'option de rotation corrige un décalage).
 
 - `mSectorFlag[3]` donne le jaune local de chaque secteur (TinyPedal ne regarde que « un secteur au moins »). PaceWall expose
   `session.sector_yellow.1..3` et l'alerte vocale dit « Drapeau jaune, secteur N » (sans précision si plusieurs secteurs).
+- Un secteur est en jaune seulement si `mSectorFlag[i] == 1` (comme TinyPedal) : en jeu, les trois secteurs s'affichaient en jaune au repos avec le test « différent de 0 ». La valeur brute est dans `session.sector_flag_raw.N` (page Données en direct).
 - `mYellowFlagState` décrit l'état du full course yellow, pas un jaune local : il n'est plus utilisé pour l'alerte.
 - ⚠️ Ordre du tableau non confirmé : le jeu ne dit pas si l'élément 0 est le secteur 1 ou le secteur 3 (comme `mSector`,
   où 0 = secteur 3). Par défaut l'élément 0 est le secteur 1. Si l'annonce nomme le mauvais secteur en jeu, mettre

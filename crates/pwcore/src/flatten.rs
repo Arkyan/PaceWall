@@ -86,7 +86,10 @@ fn session(o: &mut Out, r: &Reader, i: &ScoringInfo) {
     let game_order = *GAME_ORDER.get_or_init(|| crate::settings::str_of("yellow_sector_order", "natural") == "game");
     for (n, f) in i.mSectorFlag.iter().enumerate() {
         let sector = if game_order { [3, 1, 2][n.min(2)] } else { n + 1 };
-        o.flag(format!("session.sector_yellow.{sector}"), "Jaune de secteur", *f != 0);
+        // Jaune seulement si la valeur vaut exactement 1 (règle de TinyPedal, validée en jeu) : au repos le jeu peut
+        // renvoyer une autre valeur non nulle, qui n'est pas un drapeau. La valeur brute reste visible pour vérifier.
+        o.flag(format!("session.sector_yellow.{sector}"), "Jaune de secteur", *f == 1);
+        o.int(format!("session.sector_flag_raw.{sector}"), "Drapeau de secteur (valeur brute)", *f as i64);
     }
     o.text("player.name", "Pilote", c_str(&i.mPlayerName));
 }
