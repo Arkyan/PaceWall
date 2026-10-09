@@ -35,7 +35,11 @@ fn main() {
         install::uninstall(has("--purge"));
     } else if has("--simulate") {
         // Faux jeu intégré : le verrou nommé dit au reste de PaceWall qu'une simulation tourne (voir Réglages).
-        if win::single_instance("PaceWallSimulator") {
+        let log = std::env::temp_dir().join("pw-simulation.log");
+        let _ = std::fs::remove_file(&log);
+        if !win::single_instance("PaceWallSimulator") {
+            let _ = std::fs::write(&log, "Une simulation tourne déjà (ou vient de s'arrêter : attends une seconde).");
+        } else {
             let stop = win::simulator_stop_signal();
             // `--simulate` : scénario d'alertes (90 s). `--session race|practice|quali [--speed N] [--laps N]` : session réaliste.
             let value = |flag: &str| args.iter().skip_while(|a| *a != flag).nth(1).cloned();
@@ -50,7 +54,9 @@ fn main() {
                 cfg
             });
             let opts = fakegame::Options { lap_seconds: 10.0, frozen_events: true, yellow: false, scenario: realistic.is_none(), realistic };
-            let _ = fakegame::run(opts, &stop);
+            if let Err(e) = fakegame::run(opts, &stop) {
+                let _ = std::fs::write(&log, e);
+            }
         }
     } else if has("--say") {
         // `pacewall.exe --say "texte"` : essai de la voix des alertes.

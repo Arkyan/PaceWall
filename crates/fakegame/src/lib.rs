@@ -8,6 +8,34 @@ mod realistic;
 
 pub use sim::{Config as SessionConfig, Kind as SessionKind};
 
+/// Le vrai Le Mans Ultimate tourne-t-il ? La zone mémoire peut exister sans lui (une fenêtre de PaceWall la garde ouverte
+/// un moment après la fin d'une simulation) : seule la présence du programme du jeu interdit d'écrire dedans.
+#[cfg(windows)]
+pub(crate) fn real_game_running() -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return false };
+        let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut found = false;
+        if Process32FirstW(snap, &mut entry).is_ok() {
+            loop {
+                let len = entry.szExeFile.iter().position(|c| *c == 0).unwrap_or(entry.szExeFile.len());
+                let name = String::from_utf16_lossy(&entry.szExeFile[..len]).to_lowercase();
+                if name == "le mans ultimate.exe" || name == "lmu.exe" {
+                    found = true;
+                    break;
+                }
+                if Process32NextW(snap, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+        let _ = CloseHandle(snap);
+        found
+    }
+}
+
 /// Réglages de la simulation.
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
@@ -104,9 +132,9 @@ pub fn run(opts: Options, stop: &dyn Fn() -> bool) -> Result<(), String> {
         dst[n] = 0;
     }
 
-    // Garde-fou : si la zone existe déjà (vrai jeu ou autre simulation), on ne l'écrase surtout pas.
-    if lmu::reader::Reader::open().is_some() {
-        return Err("La zone LMU_Data existe déjà : le jeu (ou une autre simulation) tourne.".into());
+    // Garde-fou : on n'écrit jamais dans la zone d'un vrai jeu.
+    if real_game_running() {
+        return Err("Le Mans Ultimate tourne : la simulation ne peut pas écrire dans sa zone mémoire.".into());
     }
 
     let size = size_of::<ObjectOut>();

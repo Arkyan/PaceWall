@@ -7,7 +7,7 @@ use windows::Win32::Foundation::{GetLastError, BOOL, ERROR_ALREADY_EXISTS, HWND,
 use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
 use windows::core::PWSTR;
 use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
-use windows::Win32::System::Threading::{CreateEventW, OpenEventW, SetEvent, WaitForSingleObject, EVENT_MODIFY_STATE, CreateMutexW, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows::Win32::System::Threading::{ResetEvent, CreateEventW, OpenEventW, SetEvent, WaitForSingleObject, EVENT_MODIFY_STATE, CreateMutexW, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 use windows::Win32::UI::WindowsAndMessaging::{
     FindWindowW, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, PostMessageW, SetForegroundWindow, ShowWindow, SW_RESTORE, WM_CLOSE,
@@ -190,6 +190,12 @@ pub fn game_in_front() -> bool {
 pub fn simulator_stop_signal() -> impl Fn() -> bool {
     let name = wide("Local\\PaceWallSimulatorStop");
     let handle = unsafe { CreateEventW(None, true, false, PCWSTR(name.as_ptr())).ok() };
+    // Un événement resté signalé par un arrêt précédent ne doit pas arrêter la nouvelle simulation aussitôt.
+    if let Some(h) = &handle {
+        unsafe {
+            let _ = ResetEvent(*h);
+        }
+    }
     move || match &handle {
         Some(h) => unsafe { WaitForSingleObject(*h, 0) == WAIT_OBJECT_0 },
         None => false,

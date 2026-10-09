@@ -20,9 +20,9 @@ fn put(dst: &mut [u8], text: &str) {
 const KELVIN: f64 = 273.15;
 
 pub fn run(cfg: Config, stop: &dyn Fn() -> bool) -> Result<(), String> {
-    // Garde-fou : jamais d'écriture dans la zone d'un vrai jeu ni d'une autre simulation.
-    if lmu::reader::Reader::open().is_some() {
-        return Err("La zone LMU_Data existe déjà : le jeu (ou une autre simulation) tourne.".into());
+    // Garde-fou : jamais d'écriture dans la zone d'un vrai jeu.
+    if crate::real_game_running() {
+        return Err("Le Mans Ultimate tourne : la simulation ne peut pas écrire dans sa zone mémoire.".into());
     }
     let size = size_of::<ObjectOut>();
     let name: Vec<u16> = SHARED_MEMORY_FILE.encode_utf16().chain(Some(0)).collect();

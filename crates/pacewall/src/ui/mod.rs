@@ -49,6 +49,13 @@ pub struct Feed {
 }
 
 impl Feed {
+    /// Referme la lecture du jeu (la zone mémoire n'est plus tenue ouverte par cette fenêtre).
+    pub fn release(&mut self) {
+        self.live = Live::new();
+        self.data = Data::default();
+        self.game = false;
+    }
+
     /// `true` si de nouvelles données sont arrivées.
     pub fn poll(&mut self, with_grid: bool) -> bool {
         match self.live.poll(with_grid) {
@@ -152,6 +159,10 @@ impl App {
     /// Chargements propres à chaque page, faits quand on y arrive.
     fn enter(&mut self, page: Page) {
         self.page = page;
+        // Les pages qui ne lisent pas le jeu libèrent sa zone mémoire : sinon elle survit à la fin du jeu (ou d'une simulation).
+        if !matches!(page, Page::Home | Page::Overlays | Page::Data) {
+            self.feed.release();
+        }
         match page {
             Page::Home => self.home.refresh(),
             Page::History => self.history.reload(),

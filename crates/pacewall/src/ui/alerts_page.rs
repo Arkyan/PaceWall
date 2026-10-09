@@ -228,6 +228,17 @@ impl State {
                     }
                 }
             });
+            // Raison d'un échec de lancement (écrite par la simulation) : visible dix secondes.
+            if !simulating {
+                let log = std::env::temp_dir().join("pw-simulation.log");
+                let recent = std::fs::metadata(&log).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|d| d.as_secs() < 10);
+                if recent {
+                    if let Ok(text) = std::fs::read_to_string(&log) {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(format!("La simulation ne s'est pas lancée : {text}")).color(BAD));
+                    }
+                }
+            }
             ui.add_space(4.0);
             ui.label(RichText::new("Pour que l'overlay s'ouvre toute seule, PaceWall doit tourner en arrière-plan (icône près de l'horloge).").size(11.5).color(MUTED));
         });
