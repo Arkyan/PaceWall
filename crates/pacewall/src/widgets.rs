@@ -102,12 +102,17 @@ pub fn accent(spec: &WidgetSpec) -> Color32 {
 
 /// Barre latérale d'accent de la carte (réglage commun).
 pub fn bar(spec: &WidgetSpec) -> bool {
-    spec.flag("bar", true)
+    spec.flag("bar", false)
+}
+
+/// Titres des widgets (réglage commun) : masqués par défaut.
+pub fn titles(spec: &WidgetSpec) -> bool {
+    spec.flag("titles", false)
 }
 
 /// Opacité du fond en pourcentage : réglage commun à tous les widgets.
 pub fn bg(spec: &WidgetSpec) -> f32 {
-    (spec.num("bg", 78.0) / 100.0) as f32
+    (spec.num("bg", 55.0) / 100.0) as f32
 }
 
 /// Cadence de rafraîchissement voulue (images par seconde) : elle fixe le rythme de l'overlay.
@@ -184,36 +189,43 @@ fn resource(
     margin: f64,
 ) {
     let x0 = 16.0;
-    d.label(x0, y0 + 10.0, title, MUTED);
-    if limiting {
-        d.label_right(w - 16.0, y0 + 10.0, "limitant", d.accent());
+    // Titre seulement si demandé ; sinon les valeurs, avec leur unité, suffisent.
+    let t = if d.titles() { 16.0 } else { 0.0 };
+    if d.titles() {
+        d.label(x0, y0 + 10.0, title, MUTED);
+        if limiting {
+            d.label_right(w - 16.0, y0 + 10.0, "limitant", d.accent());
+        }
     }
-    let bw = d.text(x0, y0 + 24.0, &draw::n(level, 1), 34.0, TEXT, Font::Num, HAlign::Left);
-    d.text(x0 + bw + 6.0, y0 + 42.0, unit, 13.0, MUTED, Font::Ui, HAlign::Left);
+    let top = y0 + 8.0 + t;
+    let bw = d.text(x0, top, &draw::n(level, 1), 34.0, TEXT, Font::Num, HAlign::Left);
+    d.text(x0 + bw + 6.0, top + 18.0, unit, 13.0, MUTED, Font::Ui, HAlign::Left);
     if let Some(p) = pct {
-        d.text(w - 16.0, y0 + 36.0, &format!("{p:.0} %"), 14.0, MUTED, Font::Num, HAlign::Right);
+        d.text(w - 16.0, top + 12.0, &format!("{p:.0} %"), 14.0, MUTED, Font::Num, HAlign::Right);
     }
     let frac = (pct.unwrap_or(0.0) / 100.0) as f32;
-    d.bar(x0, y0 + 68.0, w - 32.0, 8.0, frac, bar_color(frac));
+    d.bar(x0, top + 44.0, w - 32.0, 8.0, frac, bar_color(frac));
 
-    let cols = [(x0, "Tours"), (x0 + 90.0, "Conso"), (x0 + 180.0, "À ajouter")];
-    for (x, l) in cols {
-        d.label(x, y0 + 86.0, l, MUTED);
-    }
-    d.text(cols[0].0, y0 + 98.0, &draw::n(laps, 1), 16.0, lap_color(laps), Font::Num, HAlign::Left);
-    d.text(cols[1].0, y0 + 98.0, &draw::n(per, 2), 16.0, TEXT, Font::Num, HAlign::Left);
+    // Tours restants, consommation par tour, quantité à ajouter : chacun avec son unité.
+    let laps_txt = laps.map(|l| format!("{l:.1} tours")).unwrap_or_else(|| "—".into());
+    let per_txt = per.map(|p| format!("{p:.2} {unit}/tour")).unwrap_or_else(|| "—".into());
     let add_txt = match (add, per) {
-        (Some(a), p) => format!("+{:.1}", a + margin * p.unwrap_or(0.0)),
+        (Some(a), p) => format!("+{:.1} {unit}", a + margin * p.unwrap_or(0.0)),
         _ => "—".into(),
     };
-    d.text(cols[2].0, y0 + 98.0, &add_txt, 16.0, TEXT, Font::Num, HAlign::Left);
+    let cols = [x0, x0 + 100.0, x0 + 200.0];
+    let lim_color = if limiting { d.accent() } else { lap_color(laps) };
+    d.text(cols[0], top + 60.0, &laps_txt, 14.0, if limiting { lim_color } else { lap_color(laps) }, Font::Num, HAlign::Left);
+    d.text(cols[1], top + 60.0, &per_txt, 14.0, MUTED, Font::Num, HAlign::Left);
+    d.text(cols[2], top + 60.0, &add_txt, 14.0, TEXT, Font::Num, HAlign::Left);
 }
 
 fn fuel(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let w = 300.0;
     let energy = spec.flag("energy", true);
     let margin = spec.num("margin", 1.0);
-    let h = if energy { 268.0 } else { 124.0 };
+    let block = 92.0 + if d.titles() { 16.0 } else { 0.0 };
+    let h = if energy { block * 2.0 + 6.0 } else { block };
     d.card(w, h);
     let lim = data.text("strategy.limiting");
     resource(
@@ -231,10 +243,10 @@ fn fuel(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         margin,
     );
     if energy {
-        d.sep(16.0, 132.0, w - 32.0);
+        d.sep(16.0, block + 1.0, w - 32.0);
         resource(
             d,
-            138.0,
+            block + 6.0,
             w,
             "Énergie virtuelle",
             "%",
@@ -260,18 +272,23 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let source = spec.choice("tempsrc", "carcass");
     let offset = spec.num("tempoffset", 0.0);
     let worn = spec.choice("wearmode", "state") == "used";
-    let h = 28.0 + 134.0 + 12.0 + if brakes { 40.0 } else { 0.0 };
+    // Titre et gomme seulement si demandés : la grille remonte alors en haut du widget.
+    let hdr = if d.titles() { 18.0 } else { 0.0 };
+    let base = 10.0 + hdr;
+    let h = base + 134.0 + 12.0 + if brakes { 40.0 } else { 0.0 };
     d.card(w, h);
-    d.label(16.0, 10.0, "Pneus", MUTED);
-    let comp = if !data.text("tyre.front.compound").is_empty() { data.text("tyre.front.compound") } else { data.text("tyre.rear.compound") };
-    d.label_right(w - 16.0, 10.0, comp, d.accent());
+    if d.titles() {
+        d.label(16.0, 10.0, "Pneus", MUTED);
+        let comp = if !data.text("tyre.front.compound").is_empty() { data.text("tyre.front.compound") } else { data.text("tyre.rear.compound") };
+        d.label_right(w - 16.0, 10.0, comp, d.accent());
+    }
 
     let names = ["fl", "fr", "rl", "rr"];
     let cw = (w - 30.0 - 8.0) / 2.0;
     let temp = |c: f64| if fahrenheit { c * 9.0 / 5.0 + 32.0 } else { c };
     for (i, n) in names.iter().enumerate() {
         let x = 16.0 + (i % 2) as f32 * (cw + 8.0);
-        let y = 28.0 + (i / 2) as f32 * 70.0;
+        let y = base + (i / 2) as f32 * 70.0;
         let t = offset
             + match source {
                 "surface" => (data.f(&format!("tyre.{n}.temp_left"), f64::NAN) + data.f(&format!("tyre.{n}.temp_center"), f64::NAN) + data.f(&format!("tyre.{n}.temp_right"), f64::NAN)) / 3.0,
@@ -291,7 +308,6 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         let dlt = (t - opt) as f32;
         let hue = if dlt < 0.0 { 130.0 + (-dlt / 25.0).min(1.0) * 80.0 } else { 130.0 - (dlt / 25.0).min(1.0) * 130.0 };
         let tint = if t.is_finite() { hsl(hue, 0.7, 0.52) } else { MUTED };
-        d.fill(x, y, cw, 64.0, Color32::from_white_alpha(13));
         d.fill(x, y, cw, 3.0, tint);
         let ttxt = if t.is_finite() { format!("{:.0}°", temp(t)) } else { "—".into() };
         d.text(x + cw / 2.0, y + 8.0, &ttxt, 24.0, TEXT, Font::Num, HAlign::Center);
@@ -314,8 +330,8 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         let bw = (w - 30.0) / 4.0;
         for (i, n) in names.iter().enumerate() {
             let x = 16.0 + i as f32 * bw;
-            d.text(x + bw / 2.0, 176.0, &n.to_uppercase(), 10.5, MUTED, Font::Ui, HAlign::Center);
-            d.text(x + bw / 2.0, 188.0, &format!("{:.0}°", temp(data.f(&format!("brake.{n}.temp"), 0.0))), 14.0, TEXT, Font::Num, HAlign::Center);
+            d.text(x + bw / 2.0, base + 148.0, &n.to_uppercase(), 10.5, MUTED, Font::Ui, HAlign::Center);
+            d.text(x + bw / 2.0, base + 160.0, &format!("{:.0}°", temp(data.f(&format!("brake.{n}.temp"), 0.0))), 14.0, TEXT, Font::Num, HAlign::Center);
         }
     }
     (w, h)
@@ -499,10 +515,14 @@ fn standings(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         "laps" => false,
         _ => is_race,
     };
-    let h = 30.0 + rows as f32 * 24.0 + 10.0;
+    // En-tête (titre et nature de la colonne) seulement si demandé.
+    let top = if d.titles() { 30.0 } else { 8.0 };
+    let h = top + rows as f32 * 24.0 + 10.0;
     d.card(w, h);
-    d.label(16.0, 10.0, "Classement", MUTED);
-    d.label_right(w - 16.0, 10.0, if show_gaps { "écarts" } else { "meilleur tour" }, d.accent());
+    if d.titles() {
+        d.label(16.0, 10.0, "Classement", MUTED);
+        d.label_right(w - 16.0, 10.0, if show_gaps { "écarts" } else { "meilleur tour" }, d.accent());
+    }
 
     let length = data.f("session.track_length", 0.0).max(1.0);
     let speed = data.f("player.speed", 0.0) / 3.6;
@@ -533,7 +553,7 @@ fn standings(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     start = start.min(shown.len().saturating_sub(rows));
     for (row, &j) in shown.iter().skip(start).take(rows).enumerate() {
         let c = &all[j];
-        let y = 30.0 + row as f32 * 24.0;
+        let y = top + row as f32 * 24.0;
         if c.me {
             d.fill(8.0, y, w - 8.0, 22.0, d.accent().gamma_multiply(0.22));
         }
@@ -588,16 +608,20 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let yellow = data.f("session.yellow", 0.0) as i64;
     let flag = phase == 6 || yellow > 0;
     let top = if flag { 36.0 } else { 0.0 };
-    let h = 10.0 + top + 16.0 + 46.0 + if weather { 52.0 } else { 6.0 };
+    // Circuit et type de session seulement si demandés.
+    let hdr = if d.titles() { 16.0 } else { 0.0 };
+    let h = 10.0 + top + hdr + 46.0 + if weather { 52.0 } else { 6.0 };
     d.card(w, h);
     if flag {
         d.fill(16.0, 10.0, w - 32.0, 24.0, WARN);
         d.text(w / 2.0, 14.0, if phase == 6 { "FULL COURSE YELLOW / SAFETY CAR" } else { "JAUNE" }, 12.0, Color32::from_rgb(17, 17, 17), Font::Ui, HAlign::Center);
     }
     let y = 10.0 + top;
-    d.label(16.0, y, data.text("session.track"), MUTED);
-    d.label_right(w - 16.0, y, session_name(data.f("session.type", -1.0) as i64), d.accent());
-    d.text(16.0, y + 16.0, &draw::hms(data.num("session.remaining")), 34.0, TEXT, Font::Num, HAlign::Left);
+    if d.titles() {
+        d.label(16.0, y, data.text("session.track"), MUTED);
+        d.label_right(w - 16.0, y, session_name(data.f("session.type", -1.0) as i64), d.accent());
+    }
+    d.text(16.0, y + hdr, &draw::hms(data.num("session.remaining")), 34.0, TEXT, Font::Num, HAlign::Left);
     let max = data.f("session.max_laps", 0.0);
     let left = data.num("strategy.race_laps_left");
     let laps = if max > 0.0 && max < 10_000.0 {
@@ -607,9 +631,9 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     } else {
         String::new()
     };
-    d.text(w - 16.0, y + 30.0, &laps, 14.0, MUTED, Font::Num, HAlign::Right);
+    d.text(w - 16.0, y + hdr + 14.0, &laps, 14.0, MUTED, Font::Num, HAlign::Right);
     if weather {
-        let wy = y + 66.0;
+        let wy = y + hdr + 50.0;
         d.sep(16.0, wy - 6.0, w - 32.0);
         let rain = data.f("weather.rain", 0.0);
         let cols = [

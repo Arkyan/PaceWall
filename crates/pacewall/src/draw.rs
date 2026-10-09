@@ -70,17 +70,28 @@ pub struct D<'a> {
     /// Couleur d'accent du widget et présence de la barre latérale de la carte.
     accent: Color32,
     bar: bool,
+    /// Titres des widgets (« Pneus », « Classement »…) : masqués par défaut pour un affichage épuré.
+    titles: bool,
 }
 
 impl<'a> D<'a> {
     pub fn new(canvas: &'a mut dyn Canvas, origin: (f32, f32), scale: f32, opacity: f32, bg: f32) -> Self {
-        Self { c: RefCell::new(canvas), o: origin, s: scale, a: opacity, bg, accent: ACCENT, bar: true }
+        Self { c: RefCell::new(canvas), o: origin, s: scale, a: opacity, bg, accent: ACCENT, bar: false, titles: false }
     }
 
     pub fn styled(mut self, accent: Color32, bar: bool) -> Self {
         self.accent = accent;
         self.bar = bar;
         self
+    }
+
+    pub fn titled(mut self, titles: bool) -> Self {
+        self.titles = titles;
+        self
+    }
+
+    pub fn titles(&self) -> bool {
+        self.titles
     }
 
     pub fn accent(&self) -> Color32 {
@@ -98,9 +109,9 @@ impl<'a> D<'a> {
     /// Dessine `draw` dans une couche mise en cache sous `key` (voir `Canvas::layer`). `(x, y, w, h)` en unités de base.
     pub fn layer(&self, key: u64, x: f32, y: f32, w: f32, h: f32, draw: &mut dyn FnMut(&D)) {
         let (px, py) = self.pt(x, y);
-        let (o, s, a, bg, accent, bar) = (self.o, self.s, self.a, self.bg, self.accent, self.bar);
+        let (o, s, a, bg, accent, bar, titles) = (self.o, self.s, self.a, self.bg, self.accent, self.bar, self.titles);
         self.c.borrow_mut().layer(key, (px, py, w * s, h * s), &mut |canvas, (tx, ty)| {
-            let inner = D { c: RefCell::new(canvas), o: (o.0 - tx, o.1 - ty), s, a, bg, accent, bar };
+            let inner = D { c: RefCell::new(canvas), o: (o.0 - tx, o.1 - ty), s, a, bg, accent, bar, titles };
             draw(&inner);
         });
     }

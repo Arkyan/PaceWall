@@ -1,7 +1,7 @@
 """Fabrique les phrases de la voix d'ingénieur de course (alertes vocales de PaceWall).
 
-Chaque phrase est synthétisée avec Piper (voix neuronale hors ligne), en plusieurs variantes, puis passée à l'effet
-« radio » : bande passante réduite, compression douce, souffle léger et petits bips de début et de fin. Les clips sont
+Chaque phrase est synthétisée avec Piper (voix neuronale hors ligne), en plusieurs variantes, puis légèrement filtrée
+(bande passante, compression douce ; aucun bruit ni bip). Les clips sont
 écrits dans crates/pacewall/assets/voice/<voix>/ et listés dans crates/pacewall/src/voice_clips.rs (intégrés au programme :
 rien à télécharger ni à calculer pendant la course).
 
@@ -57,29 +57,17 @@ def band(sig, lo, hi):
 
 
 def radio(voice_audio, sr_in, rng):
-    """Effet radio d'équipe : bande étroite, compression, souffle, bips de début et de fin."""
+    """Voix d'ingénieur au casque : léger filtrage de bande et compression douce, SANS bruit ni bip (le souffle et les
+    bips de début et de fin, essayés d'abord, gênaient). Un court silence au début et une fin en fondu évitent les claquements."""
     x = resample_poly(voice_audio, SR, sr_in).astype(np.float64)
-    x = band(x, 320, 3300)
-    x = np.tanh(2.4 * x) / np.tanh(2.4)  # compression douce : la voix reste « serrée », comme dans un casque
-    x = band(x, 300, 3400)
+    x = band(x, 130, 5200)  # coupe les graves inutiles et les aigus de souffle : voix nette, un peu « casque »
+    x = np.tanh(1.5 * x) / np.tanh(1.5)  # compression très douce : niveau régulier d'une alerte à l'autre
     x /= max(np.abs(x).max(), 1e-6)
-
-    def burst(ms, level, lo, hi):
-        n = int(SR * ms / 1000)
-        env = np.exp(-np.linspace(0, 6, n))
-        return band(rng.standard_normal(n), lo, hi) * env * level
-
-    lead, tail = int(SR * 0.16), int(SR * 0.22)
-    out = np.zeros(lead + len(x) + tail)
-    out[lead : lead + len(x)] += x * 0.82
-    # souffle de la liaison radio pendant toute la phrase
-    out += band(rng.standard_normal(len(out)), 1800, 3300) * 0.012
-    # bips : ouverture du micro (début) et relâchement (fin)
-    click_in = burst(70, 0.42, 900, 3200)
-    out[: len(click_in)] += click_in
-    click_out = burst(110, 0.34, 700, 3000)
-    out[lead + len(x) + 10 : lead + len(x) + 10 + len(click_out)] += click_out
-    out /= max(np.abs(out).max(), 1e-6)
+    fade = int(SR * 0.012)
+    x[:fade] *= np.linspace(0.0, 1.0, fade)
+    x[-fade:] *= np.linspace(1.0, 0.0, fade)
+    lead, tail = int(SR * 0.05), int(SR * 0.08)
+    out = np.concatenate([np.zeros(lead), x, np.zeros(tail)])
     return (out * 0.89 * 32767).astype(np.int16)
 
 

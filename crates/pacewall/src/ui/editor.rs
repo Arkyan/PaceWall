@@ -225,7 +225,7 @@ impl State {
             let st = self.states.entry(spec.id.clone()).or_default();
             let (bw, bh) = {
                 let mut canvas = EguiCanvas { painter: &painter };
-                let d = D::new(&mut canvas, (origin.x, origin.y), scale, spec.opacity, widgets::bg(&spec)).styled(widgets::accent(&spec), widgets::bar(&spec));
+                let d = D::new(&mut canvas, (origin.x, origin.y), scale, spec.opacity, widgets::bg(&spec)).styled(widgets::accent(&spec), widgets::bar(&spec)).titled(widgets::titles(&spec));
                 widgets::draw(&spec.kind, &d, &spec, data, st, now)
             };
             let rect = Rect::from_min_size(origin, vec2(bw, bh) * scale);
@@ -285,7 +285,7 @@ impl State {
             ui.add_space(4.0);
             changed |= field_slider(ui, "Taille", &mut spec.scale, 0.5..=2.5, None, Some(2));
             changed |= field_slider(ui, "Opacité", &mut spec.opacity, 0.1..=1.0, None, Some(2));
-            let mut bg = spec.num("bg", 78.0) as f32;
+            let mut bg = spec.num("bg", 55.0) as f32;
             if field_slider(ui, "Opacité du fond (%)", &mut bg, 0.0..=100.0, Some(5.0), Some(0)) {
                 spec.opts.insert("bg".into(), json!(bg.round()));
                 changed = true;
@@ -307,9 +307,14 @@ impl State {
                     }
                 }
             });
-            let mut bar = spec.flag("bar", true);
+            let mut bar = spec.flag("bar", false);
             if ui.checkbox(&mut bar, "Barre d'accent sur le côté").changed() {
                 spec.opts.insert("bar".into(), json!(bar));
+                changed = true;
+            }
+            let mut titles = spec.flag("titles", false);
+            if ui.checkbox(&mut titles, "Afficher le titre du widget").changed() {
+                spec.opts.insert("titles".into(), json!(titles));
                 changed = true;
             }
             apply_all |= ui.button("Appliquer le style à tous").clicked();
@@ -356,7 +361,7 @@ impl State {
         }
 
         if apply_all {
-            let style: Vec<(&str, Option<serde_json::Value>)> = ["accent", "bar"].iter().map(|k| (*k, layout.widgets[idx].opts.get(*k).cloned())).collect();
+            let style: Vec<(&str, Option<serde_json::Value>)> = ["accent", "bar", "titles", "bg"].iter().map(|k| (*k, layout.widgets[idx].opts.get(*k).cloned())).collect();
             for w in layout.widgets.iter_mut() {
                 for (k, v) in &style {
                     match v {

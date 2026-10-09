@@ -376,7 +376,7 @@ pub fn run() {
                 let mut probe = widgets::WState::default();
                 let (bw, bh) = {
                     let mut measure = Measure;
-                    let d = D::new(&mut measure, (0.0, 0.0), scale, spec.opacity, bg).styled(widgets::accent(spec), widgets::bar(spec));
+                    let d = D::new(&mut measure, (0.0, 0.0), scale, spec.opacity, bg).styled(widgets::accent(spec), widgets::bar(spec)).titled(widgets::titles(spec));
                     // La carte du circuit garde sa carte chargée entre deux images : la relire à chaque mesure coûterait cher.
                     if spec.kind == "trackmap" {
                         widgets::draw(&spec.kind, &d, spec, &data, &mut panel.state, time)
@@ -402,7 +402,7 @@ pub fn run() {
                     let tw = Instant::now();
                     if let Some(pm) = PixmapMut::from_bytes(bytes, pw as u32, ph as u32) {
                         let mut canvas = SoftCanvas { pm, fonts: &mut fonts };
-                        let d = D::new(&mut canvas, (0.0, 0.0), scale, spec.opacity, bg).styled(widgets::accent(spec), widgets::bar(spec));
+                        let d = D::new(&mut canvas, (0.0, 0.0), scale, spec.opacity, bg).styled(widgets::accent(spec), widgets::bar(spec)).titled(widgets::titles(spec));
                         widgets::draw(&spec.kind, &d, spec, &data, &mut panel.state, time);
                     }
                     t_widget += tw.elapsed();

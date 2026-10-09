@@ -116,7 +116,7 @@
       el.style.top = (s.y * 100) + '%';
       el.style.transform = 'scale(' + (s.scale * unit()).toFixed(4) + ')';
       el.style.opacity = s.opacity;
-      el.style.setProperty('--bg', (it.opts.bg ?? 78) / 100);
+      el.style.setProperty('--bg', (it.opts.bg ?? 55) / 100);
     };
     const g = (k, d) => Feed.get(k, d);
 
@@ -132,7 +132,9 @@
         el.dataset.id = s.id;
         const opts = PW.resolveOpts(def, s.opts);
         el.style.setProperty('--pw-accent', PW.accentHex(s.opts && s.opts.accent));
-        if (s.opts && s.opts.bar === false) el.classList.add('nobar');
+        // Affichage épuré par défaut : ni barre d'accent ni titres, sauf demande explicite.
+        if (!(s.opts && s.opts.bar === true)) el.classList.add('nobar');
+        if (!(s.opts && s.opts.titles === true)) el.classList.add('notitles');
         const inst = def.mount(el, opts);
         const it = { spec: s, def, el, inst, opts };
         place(it);

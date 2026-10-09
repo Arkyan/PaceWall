@@ -113,3 +113,5 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 .flat-noclip .pw-card { clip-path: none; }
 
 .pw-w.nobar .pw-card { border-left: 1px solid rgba(255,255,255, calc(var(--bg, .78) * .13)); }
+
+.pw-w.notitles .pw-title { display: none; }
