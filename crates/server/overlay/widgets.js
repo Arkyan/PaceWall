@@ -133,7 +133,7 @@ PW.widgets.tyres = {
 /* ---------- Chrono et écarts ---------- */
 PW.widgets.timing = {
   name: 'Chrono et écarts',
-  keys: ['position.', 'lap.', 'gap.'],
+  keys: ['position.', 'lap.', 'gap.', 'grid.', 'session.vehicles', 'session.track_length', 'player.speed'],
   hz: 5, size: [280, 170],
   options: [
     { id: 'gaps', label: 'Écarts devant / derrière', type: 'bool', def: true },
@@ -158,7 +158,24 @@ PW.widgets.timing = {
         b.text('last', F.lap(g('position.last_lap')));
         b.text('best', F.lap(g('position.best_lap')));
         if (b.el.ahead) {
-          const a = g('gap.car_ahead'), r = g('gap.car_behind');
+          // Voitures qui roulent juste devant et juste derrière sur la piste : distance sur le tour / notre vitesse.
+          const n = g('session.vehicles', 0), L = g('session.track_length', 0);
+          let a = g('gap.car_ahead') > 0 ? g('gap.car_ahead') : g('position.behind_next', 0), r = g('gap.car_behind', 0);
+          let me = -1;
+          for (let i = 0; i < n; i++) if (g('grid.' + String(i).padStart(3, '0') + '.is_player')) { me = i; break; }
+          if (me >= 0 && L > 100) {
+            const mp = 'grid.' + String(me).padStart(3, '0');
+            const md = g(mp + '.lap_dist', 0), myPit = g(mp + '.in_pits', false), v = Math.max(15, g('player.speed', 0) / 3.6);
+            let da = Infinity, db = Infinity;
+            for (let i = 0; i < n; i++) {
+              if (i === me) continue;
+              const p = 'grid.' + String(i).padStart(3, '0'), dist = g(p + '.lap_dist');
+              if (dist == null || (g(p + '.in_pits', false) && !myPit)) continue;
+              const d = (((dist - md) % L) + L) % L;
+              da = Math.min(da, d); db = Math.min(db, L - d);
+            }
+            if (da < Infinity) { a = Math.max(0.1, da / v); r = Math.max(0.1, db / v); }
+          }
           b.text('ahead', a > 0 ? F.n(a, 1) + ' s' : '—');
           b.text('behind', r > 0 ? F.n(r, 1) + ' s' : '—');
         }
@@ -339,7 +356,7 @@ PW.widgets.session = {
         b.text('type', SESSIONS[g('session.type', -1)] || '');
         b.text('time', F.hms(g('session.remaining')));
         const max = g('session.max_laps', 0), left = g('strategy.race_laps_left');
-        b.text('laps', max > 0 && max < 10000 ? 'Tour ' + g('lap.number', 0) + ' / ' + max : left != null ? '≈ ' + Math.round(left) + ' tours' : '');
+        b.text('laps', max > 0 && max < 10000 ? 'Tour ' + Math.min(g('lap.number', 0), max) + ' / ' + max : left != null ? '≈ ' + Math.round(left) + ' tours' : '');
         if (b.el.air) {
           b.text('air', F.n(g('weather.ambient'), 0) + '°');
           b.text('trk', F.n(g('weather.track'), 0) + '°');
@@ -359,8 +376,8 @@ PW.widgets.trackmap = {
   keys: ['grid.', 'session.track', 'session.vehicles', 'demo.map'],
   hz: o => +o.fps || 20, size: [300, 220],
   options: [
-    { id: 'size', label: 'Largeur de la zone', type: 'number', min: 160, max: 600, step: 10, def: 300 },
-    { id: 'height', label: 'Hauteur de la zone', type: 'number', min: 120, max: 600, step: 10, def: 220 },
+    { id: 'size', label: 'Largeur de la zone', type: 'number', min: 100, max: 1000, step: 10, def: 300 },
+    { id: 'height', label: 'Hauteur de la zone', type: 'number', min: 100, max: 1000, step: 10, def: 220 },
     { id: 'rotate', label: 'Orientation', type: 'select', choices: [['auto', 'Auto (circuit le plus grand)'], ['0', '0°'], ['90', '90°'], ['180', '180°'], ['270', '270°']], def: 'auto' },
     { id: 'others', label: 'Afficher les autres voitures', type: 'bool', def: true },
     { id: 'fps', label: 'Fluidité (images/s)', type: 'select', choices: [['10', '10'], ['20', '20'], ['30', '30']], def: '20' },

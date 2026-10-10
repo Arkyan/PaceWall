@@ -233,6 +233,115 @@ pub fn local_time(ts: i64) -> Option<(i32, u32, u32, u32, u32)> {
     }
 }
 
+/// Boîte « Ouvrir » de Windows pour choisir une image (PNG ou JPEG). `None` si on annule.
+pub fn pick_image() -> Option<std::path::PathBuf> {
+    use windows::Win32::UI::Controls::Dialogs::{GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_PATHMUSTEXIST, OPENFILENAMEW};
+    let mut file = [0u16; 1024];
+    let filter: Vec<u16> = "Images (png, jpg) *.png;*.jpg;*.jpeg  ".encode_utf16().collect();
+    let title = wide("Choisir une capture du jeu");
+    let mut ofn = OPENFILENAMEW {
+        lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
+        lpstrFilter: PCWSTR(filter.as_ptr()),
+        lpstrFile: PWSTR(file.as_mut_ptr()),
+        nMaxFile: file.len() as u32,
+        lpstrTitle: PCWSTR(title.as_ptr()),
+        Flags: OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST,
+        ..Default::default()
+    };
+    if !unsafe { GetOpenFileNameW(&mut ofn) }.as_bool() {
+        return None;
+    }
+    let len = file.iter().position(|c| *c == 0).unwrap_or(file.len());
+    Some(String::from_utf16_lossy(&file[..len]).into())
+}
+
+const HIDE_EVENT: &str = r"Local\PaceWallHideOverlay";
+
+/// Tant qu'elle existe, l'overlay se masque (demandé pour la capture d'écran du jeu).
+struct HideOverlay(Option<windows::Win32::Foundation::HANDLE>);
+
+impl HideOverlay {
+    fn new() -> Self {
+        let name = wide(HIDE_EVENT);
+        Self(unsafe { CreateEventW(None, true, true, PCWSTR(name.as_ptr())).ok() })
+    }
+}
+
+impl Drop for HideOverlay {
+    fn drop(&mut self) {
+        if let Some(h) = self.0.take() {
+            unsafe {
+                let _ = CloseHandle(h);
+            }
+        }
+    }
+}
+
+/// Une capture du jeu est-elle en cours (l'overlay doit rester masquée) ?
+pub fn overlay_hidden_for_capture() -> bool {
+    let name = wide(HIDE_EVENT);
+    unsafe {
+        match OpenEventW(windows::Win32::System::Threading::SYNCHRONIZATION_SYNCHRONIZE, false, PCWSTR(name.as_ptr())) {
+            Ok(h) => {
+                let _ = CloseHandle(h);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+}
+
+/// Prend UNE capture de la fenêtre du jeu (si elle est au premier plan) et l'écrit en PNG. Aucun coût en dehors de cet instant.
+/// Copie depuis l'écran sans les fenêtres translucides : l'overlay de PaceWall n'apparaît pas sur l'image.
+pub fn capture_game(out: &std::path::Path) -> Result<(), String> {
+    use windows::Win32::Graphics::Gdi::{BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, SRCCOPY};
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    if !game_in_front() {
+        return Err("Le jeu n'était pas au premier plan.".into());
+    }
+    // L'overlay de PaceWall est une autre fenêtre posée par-dessus : on la fait disparaître le temps de la capture.
+    let _hidden = HideOverlay::new();
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        let mut r = RECT::default();
+        GetWindowRect(hwnd, &mut r).map_err(|e| e.to_string())?;
+        let (w, h) = ((r.right - r.left).max(0), (r.bottom - r.top).max(0));
+        if w < 64 || h < 64 {
+            return Err("Fenêtre du jeu introuvable.".into());
+        }
+        let screen = GetDC(None);
+        let mem = CreateCompatibleDC(screen);
+        let bmp = CreateCompatibleBitmap(screen, w, h);
+        let old = SelectObject(mem, bmp);
+        let copied = BitBlt(mem, 0, 0, w, h, screen, r.left, r.top, SRCCOPY).is_ok();
+        let mut bgra = vec![0u8; (w * h * 4) as usize];
+        let mut info = BITMAPINFO::default();
+        info.bmiHeader = BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: w, biHeight: -h, biPlanes: 1, biBitCount: 32, biCompression: BI_RGB.0, ..Default::default() };
+        let lines = GetDIBits(mem, bmp, 0, h as u32, Some(bgra.as_mut_ptr() as *mut _), &mut info, DIB_RGB_COLORS);
+        SelectObject(mem, old);
+        let _ = DeleteObject(bmp);
+        let _ = DeleteDC(mem);
+        ReleaseDC(None, screen);
+        if !copied || lines == 0 {
+            return Err("Capture refusée par Windows.".into());
+        }
+        let mut rgb = Vec::with_capacity((w * h * 3) as usize);
+        for px in bgra.chunks_exact(4) {
+            rgb.extend_from_slice(&[px[2], px[1], px[0]]);
+        }
+        if rgb.iter().step_by(97).all(|b| *b == 0) {
+            return Err("L'image est noire (le jeu est peut-être en plein écran exclusif : passe-le en fenêtré sans bordure).".into());
+        }
+        let file = std::fs::File::create(out).map_err(|e| e.to_string())?;
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w as u32, h as u32);
+        enc.set_color(png::ColorType::Rgb);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.set_compression(png::Compression::Fast);
+        enc.write_header().and_then(|mut wr| wr.write_image_data(&rgb)).map_err(|e| e.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::local_time;

@@ -7,6 +7,7 @@
 use crate::db::{self, NewLap, NewSession};
 use crate::live::AliveCheck;
 use crate::pulse::Pulse;
+use crate::replay::{self, Car, Frame, Kind, Schema};
 use crate::trackmap::{self, Builder, SectorLearner};
 use lmu::reader::{c_str, Reader};
 use lmu::{ScoringInfo, VehicleScoring, VehicleTelemetry};
@@ -21,6 +22,11 @@ struct Session {
     last_et: f64,
     last_laps: i16,
     partial: bool,
+    /// Temps de session au dernier passage de la ligne (pour chronométrer un tour que le jeu n'a pas validé).
+    lap_start: f64,
+    /// Temps cumulés à la fin des secteurs 1 et 2 du tour en cours, tels que le jeu les a validés (0 = pas de temps).
+    cur_s1: f64,
+    cur_s2: f64,
     // Au début du tour courant
     fuel0: f64,
     energy0: f64,
@@ -31,6 +37,9 @@ struct Session {
     samples: u32,
     pit: bool,
     invalid: bool,
+    /// Replay en cours d'écriture et instant de la dernière image enregistrée.
+    replay: Option<replay::Writer>,
+    last_frame: f64,
 }
 
 pub fn run() {
@@ -78,6 +87,10 @@ pub fn run() {
         // Tant que la carte du circuit se construit, on échantillonne plus souvent (10 fois par seconde).
         std::thread::sleep(Duration::from_millis(if building { 100 } else { 500 }));
     }
+}
+
+fn laps_unchanged(now: i16, before: i16) -> bool {
+    now == before
 }
 
 fn averages(t: &VehicleTelemetry) -> (f64, f64, f64) {
@@ -156,6 +169,15 @@ fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<
     let Some(cur) = session.as_mut() else { return building };
     cur.last_et = et;
 
+    // Replay : une image toutes les 0,5 s de session, toutes les voitures.
+    if let Some(w) = cur.replay.as_mut() {
+        if et >= cur.last_frame + 0.45 || et < cur.last_frame {
+            cur.last_frame = et;
+            let (frame, roster, schema) = capture(r, &info);
+            w.push(&frame, &roster, &schema);
+        }
+    }
+
     let (tyre, brake, wear) = averages(&t);
     cur.tyre_sum += tyre;
     cur.brake_sum += brake;
@@ -163,13 +185,32 @@ fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<
     cur.pit |= s.mInPits != 0;
     cur.invalid |= t.mLapInvalidated != 0;
 
+    // Secteurs du tour en cours : relevés pendant le tour (au passage de la ligne, le jeu les a déjà remis à zéro).
+    if laps_unchanged(s.mTotalLaps, cur.last_laps) {
+        if s.mCurSector1 > 0.0 {
+            cur.cur_s1 = s.mCurSector1;
+        }
+        if s.mCurSector2 > 0.0 {
+            cur.cur_s2 = s.mCurSector2;
+        }
+    }
+
     let laps = s.mTotalLaps;
     if laps < cur.last_laps {
         cur.last_laps = laps; // retour au stand / remise à zéro
         return building;
     }
     if laps > cur.last_laps {
-        let time = s.mLastLapTime;
+        // Un tour invalidé n'a pas de chrono officiel (le jeu renvoie une valeur négative ou nulle) : on l'enregistre
+        // quand même, avec la durée mesurée entre les deux passages de la ligne, et marqué « non valide ».
+        let official = s.mLastLapTime;
+        // Le début du nouveau tour, donné par le jeu, est exact ; à défaut, l'instant où on a vu le compteur changer.
+        let crossing = if t.mLapStartET > cur.lap_start { t.mLapStartET } else { et };
+        let time = if official > 0.0 { official } else { crossing - cur.lap_start };
+        cur.invalid |= official <= 0.0;
+        // Temps par secteur : uniquement ceux que le jeu a validés. Le secteur 3 n'existe que si le tour a un chrono.
+        let (c1, c2) = (cur.cur_s1, cur.cur_s2);
+        let sectors = [(c1 > 0.0).then_some(c1), (c1 > 0.0 && c2 > c1).then(|| c2 - c1), (official > 0.0 && c2 > 0.0 && official > c2).then(|| official - c2)];
         if !cur.partial && time > 0.0 && cur.samples > 0 {
             let n = cur.samples as f64;
             let fuel = t.mFuel;
@@ -193,6 +234,7 @@ fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<
                 rain: info.mRaining,
                 place: s.mPlace as i32,
                 compound: &c_str(&t.mFrontTireCompoundName),
+                sectors,
             };
             if let Err(e) = db::add_lap(conn, &lap) {
                 eprintln!("Tour non enregistré : {e}");
@@ -200,6 +242,9 @@ fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<
         }
         cur.last_laps = laps;
         cur.partial = false;
+        cur.lap_start = crossing;
+        cur.cur_s1 = 0.0;
+        cur.cur_s2 = 0.0;
         cur.fuel0 = t.mFuel;
         cur.energy0 = t.mVirtualEnergy as f64 * 100.0;
         cur.wear0 = wear;
@@ -210,6 +255,96 @@ fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<
         cur.invalid = false;
     }
     building
+}
+
+/// Ouvre le fichier de replay de la session (sauf si l'option est coupée).
+fn open_replay(id: i64, track: &str, info: &ScoringInfo, s: &VehicleScoring, t: &VehicleTelemetry) -> Option<replay::Writer> {
+    if !crate::settings::bool_of("replay_record", true) {
+        return None;
+    }
+    let header = replay::Header {
+        track: track.to_string(),
+        session_type: info.mSession,
+        track_length: info.mLapDist as f32,
+        max_laps: info.mMaxLaps,
+        player: c_str(&info.mPlayerName),
+        car: c_str(&t.mVehicleName),
+        class: c_str(&s.mVehicleClass),
+        started_at: db::now(),
+    };
+    let w = replay::Writer::create(&replay::path_of(id), &header).ok()?;
+    replay::prune(crate::settings::int_of("replay_keep", 15).clamp(1, 200) as usize);
+    Some(w)
+}
+
+/// Une image de la course : toutes les voitures du classement.
+fn capture(r: &Reader, info: &ScoringInfo) -> (Frame, replay::Roster, Schema) {
+    let n = (info.mNumVehicles.max(0) as usize).min(lmu::MAX_MAPPED_VEHICLES);
+    let mut cars = Vec::with_capacity(n);
+    let mut roster: replay::Roster = Vec::new();
+    for i in 0..n {
+        let Some(v) = r.vehicle_scoring(i) else { continue };
+        // Identité de la voiture : son identifiant de jeu (`mID`), stable toute la session. L'ordre du tableau, lui,
+        // peut changer (certaines sources le rangent par place) : s'en servir mélangerait les voitures entre elles.
+        let id = v.mID.clamp(0, 255) as usize;
+        if roster.len() <= id {
+            roster.resize(id + 1, (String::new(), String::new()));
+        }
+        roster[id] = (c_str(&v.mDriverName), c_str(&v.mVehicleClass));
+        let pos = v.mPos;
+        cars.push(Car {
+            idx: id as u8,
+            place: v.mPlace.clamp(0, 255) as u8,
+            laps: v.mTotalLaps.clamp(0, i16::MAX) as u16,
+            in_pits: v.mInPits != 0,
+            is_player: v.mIsPlayer != 0,
+            x: pos.x as f32,
+            z: pos.z as f32,
+            lap_dist: v.mLapDist as f32,
+            last_lap: v.mLastLapTime as f32,
+            best_lap: v.mBestLapTime as f32,
+            behind_next: v.mTimeBehindNext as f32,
+            behind_leader: v.mTimeBehindLeader as f32, stops: 0, start_place: 0,
+        });
+    }
+    let flags = info.mSectorFlag;
+    let sectors = flags.iter().take(3).enumerate().fold(0u8, |m, (i, f)| m | ((*f == 1) as u8) << i);
+    // Voiture du joueur : tout ce que lisent les widgets (carburant, pneus, pédales, tours, écarts…).
+    let (mut keys, mut nums, mut texts) = (Vec::new(), Vec::new(), Vec::new());
+    for f in crate::flatten::read_all(r, false) {
+        if ["session.", "weather.", "game.", "grid."].iter().any(|p| f.key.starts_with(p)) {
+            continue;
+        }
+        match &f.value {
+            serde_json::Value::Bool(b) => {
+                keys.push((f.key, Kind::Bool));
+                nums.push(*b as u8 as f32);
+            }
+            serde_json::Value::Number(n) => {
+                keys.push((f.key, if n.is_i64() { Kind::Int } else { Kind::Num }));
+                nums.push(n.as_f64().unwrap_or(0.0) as f32);
+            }
+            serde_json::Value::String(s) => {
+                keys.push((f.key, Kind::Text));
+                texts.push(s.clone());
+            }
+            _ => {}
+        }
+    }
+    let frame = Frame {
+        et: info.mCurrentET,
+        phase: info.mGamePhase,
+        yellow: info.mYellowFlagState,
+        remaining: info.mSessionTimeRemaining as f32,
+        rain: (info.mRaining * 100.0) as f32,
+        track_temp: info.mTrackTemp as f32,
+        ambient: info.mAmbientTemp as f32,
+        sectors,
+        cars,
+        nums,
+        texts,
+    };
+    (frame, roster, Schema(keys))
 }
 
 fn begin(
@@ -232,7 +367,11 @@ fn begin(
         last_et: info.mCurrentET,
         last_laps: s.mTotalLaps,
         // On se branche en cours de tour, sauf dans les premiers mètres : ce tour-là est incomplet.
-        partial: s.mLapDist > 300.0,
+        // (Au stand, ou sur la grille avant le feu vert, on voit le tour depuis son début : il compte.)
+        partial: s.mLapDist > 300.0 && s.mInPits == 0 && !(s.mTotalLaps == 0 && info.mGamePhase < 5),
+        lap_start: t.mLapStartET,
+        cur_s1: 0.0,
+        cur_s2: 0.0,
         fuel0: t.mFuel,
         energy0: t.mVirtualEnergy as f64 * 100.0,
         wear0: wear,
@@ -241,5 +380,7 @@ fn begin(
         samples: 0,
         pit: s.mInPits != 0,
         invalid: false,
+        replay: open_replay(id, track, info, &s, &t),
+        last_frame: f64::MIN,
     })
 }

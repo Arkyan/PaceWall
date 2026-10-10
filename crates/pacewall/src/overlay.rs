@@ -284,7 +284,7 @@ pub fn run() {
             }
         }
 
-        let with_grid = layout.widgets.iter().any(|w| w.kind == "standings" || w.kind == "trackmap");
+        let with_grid = layout.widgets.iter().any(|w| w.kind == "standings" || w.kind == "trackmap" || (w.kind == "timing" && w.opts.get("gaps").and_then(|v| v.as_bool()).unwrap_or(true)));
         // On ne lit le jeu en entier que si un widget doit être redessiné (le jeu publie plus vite que les widgets n'en ont besoin).
         let alert_due = voice.enabled && now >= next_alert;
         let want = alert_due
@@ -336,7 +336,7 @@ pub fn run() {
         // Premier plan : interrogé 4 fois par seconde seulement.
         if now >= next_fg {
             next_fg = now + Duration::from_millis(250);
-            fg_ok = !fg_only || win::game_in_front();
+            fg_ok = (!fg_only || win::game_in_front()) && !win::overlay_hidden_for_capture();
         }
         // En pause ou au menu, plus rien ne bouge (temps du jeu figé) ou « en piste » est faux : on masque.
         let driving = !hide_idle || (data.flag("session.realtime") && live.idle() < Duration::from_millis(1500));

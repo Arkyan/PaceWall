@@ -34,6 +34,7 @@ struct Lap {
     rain: f64,
     place: i64,
     compound: String,
+    sectors: [Option<f64>; 3],
 }
 
 #[derive(Default)]
@@ -43,6 +44,8 @@ pub struct State {
     laps: Vec<Lap>,
     confirm_delete: bool,
     error: Option<String>,
+    replay: Option<super::replay::View>,
+    open_replay: Option<i64>,
 }
 
 fn session_name(t: i64) -> &'static str {
@@ -94,6 +97,10 @@ fn duration(a: i64, b: Option<i64>) -> String {
 impl State {
     pub fn reload(&mut self) {
         self.error = None;
+        // Développement : ouvre directement le replay d'une session (PACEWALL_OPEN_REPLAY=<id>).
+        if let Some(id) = std::env::var("PACEWALL_OPEN_REPLAY").ok().and_then(|v| v.parse().ok()) {
+            self.open_replay = Some(id);
+        }
         let conn = match db::open() {
             Ok(c) => c,
             Err(e) => {
@@ -149,11 +156,24 @@ impl State {
                 rain: l["rain"].as_f64().unwrap_or(0.0),
                 place: l["place"].as_i64().unwrap_or(0),
                 compound: l["compound"].as_str().unwrap_or("").into(),
+                sectors: [l["s1"].as_f64(), l["s2"].as_f64(), l["s3"].as_f64()],
             })
             .collect();
     }
 
     pub fn show(&mut self, ui: &mut Ui) {
+        if let Some(id) = self.open_replay.take() {
+            match super::replay::View::open(id) {
+                Ok(v) => self.replay = Some(v),
+                Err(e) => self.error = Some(format!("Replay impossible : {e}")),
+            }
+        }
+        if let Some(view) = self.replay.as_mut() {
+            if view.show(ui) {
+                self.replay = None;
+            }
+            return;
+        }
         if let Some(e) = &self.error {
             ui.label(RichText::new(e).color(BAD));
             return;
@@ -229,8 +249,17 @@ impl State {
                                 if kit::button(ui, "Annuler").clicked() {
                                     self.confirm_delete = false;
                                 }
-                            } else if kit::button(ui, "Supprimer").clicked() {
-                                self.confirm_delete = true;
+                            } else {
+                                if kit::button(ui, "Supprimer").clicked() {
+                                    self.confirm_delete = true;
+                                }
+                                if pwcore::replay::exists(id) {
+                                    if kit::primary(ui, "Revoir la course").clicked() {
+                                        self.open_replay = Some(id);
+                                    }
+                                } else {
+                                    ui.label(RichText::new("Pas de replay pour cette session").size(12.0).color(MUTED));
+                                }
                             }
                         });
                     });
@@ -339,8 +368,8 @@ impl State {
             ui.set_width(ui.available_width());
             kit::section(ui, "Tours");
             egui::ScrollArea::horizontal().show(ui, |ui| {
-            egui::Grid::new("laps").num_columns(12).spacing([18.0, 4.0]).striped(true).show(ui, |ui| {
-                for h in ["Tour", "Temps", "Carbu (L)", "Énergie (%)", "Usure/tour", "État (%)", "Pneus °C", "Freins °C", "Piste °C", "Pluie", "Pos.", "Gomme"] {
+            egui::Grid::new("laps").num_columns(15).spacing([18.0, 4.0]).striped(true).show(ui, |ui| {
+                for h in ["Tour", "Temps", "S1", "S2", "S3", "Carbu (L)", "Énergie (%)", "Usure/tour", "État (%)", "Pneus °C", "Freins °C", "Piste °C", "Pluie", "Pos.", "Gomme"] {
                     ui.label(RichText::new(h.to_uppercase()).size(10.5).color(MUTED));
                 }
                 ui.end_row();
@@ -353,7 +382,11 @@ impl State {
                         ui.label(RichText::new(s).font(num_font(12.5)).color(color));
                     };
                     cell(ui, tags);
-                    cell(ui, draw::lap(Some(l.time)));
+                    // Un tour invalidé n'a pas de chrono : on garde ses statistiques et les secteurs que le jeu a validés.
+                    cell(ui, if l.valid { draw::lap(Some(l.time)) } else { "—".into() });
+                    for s in l.sectors {
+                        cell(ui, s.map_or("—".into(), |v| format!("{v:.3}")));
+                    }
                     cell(ui, draw::n(l.fuel, 2));
                     cell(ui, draw::n(l.energy, 1));
                     cell(ui, draw::n(l.wear, 2));

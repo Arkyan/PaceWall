@@ -303,6 +303,9 @@ pub struct Car {
     pub brake_temp: f64,
     pub sector_mark: f64,
     pub last_sector: i8,
+    /// Temps cumulés aux fins des secteurs 1 et 2 : tour en cours, puis dernier tour bouclé.
+    pub cur_sectors: [f64; 2],
+    pub last_sectors: [f64; 2],
 }
 
 /// Événement planifié de la session.
@@ -386,6 +389,8 @@ impl Sim {
                     brake_temp: 350.0,
                     sector_mark: 0.0,
                     last_sector: 1,
+                    cur_sectors: [0.0; 2],
+                    last_sectors: [0.0; 2],
                 });
             }
         }
@@ -557,6 +562,7 @@ impl Sim {
         let (yellow, wet, leader_done) = (self.sector_flags, self.wetness, self.leader_done);
         let racing = !race || self.phase != 4;
         let end_laps = self.race_laps();
+        let invalid_laps = std::env::var("PACEWALL_SIM_INVALID").is_ok();
         let mut new_leader_done = leader_done;
         let mut finishers: Vec<usize> = Vec::new();
 
@@ -631,7 +637,12 @@ impl Sim {
                 c.s -= len;
                 let lap_time = t - c.lap_start;
                 c.laps += 1;
-                {
+                c.last_sectors = c.cur_sectors;
+                c.cur_sectors = [0.0; 2];
+                // Essai des tours invalidés (PACEWALL_SIM_INVALID=1) : un tour sur trois du joueur n'a pas de chrono.
+                if i == 0 && c.laps % 3 == 0 && invalid_laps {
+                    c.last_lap = -1.0;
+                } else {
                     c.last_lap = lap_time;
                     if !c.lap_in_pit && lap_time > ref_lap * 0.8 && (c.best_lap <= 0.0 || lap_time < c.best_lap) {
                         c.best_lap = lap_time;
@@ -651,7 +662,15 @@ impl Sim {
                 }
             }
             c.sector_mark = c.s;
-            c.last_sector = track.sector_code(c.s);
+            let code = track.sector_code(c.s);
+            if c.started && code != c.last_sector {
+                match (c.last_sector, code) {
+                    (1, 2) => c.cur_sectors[0] = t - c.lap_start,
+                    (2, 0) => c.cur_sectors[1] = t - c.lap_start,
+                    _ => {}
+                }
+            }
+            c.last_sector = code;
 
             // Arrêts aux stands.
             let stint = (c.laps - c.stint_start_lap) as f64;

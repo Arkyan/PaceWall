@@ -15,6 +15,7 @@ pub mod live;
 #[cfg(windows)]
 pub mod pulse;
 pub mod recorder;
+pub mod replay;
 pub mod settings;
 pub mod strategy;
 pub mod trackmap;

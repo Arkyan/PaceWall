@@ -24,11 +24,16 @@ pub struct State {
     /// Panneaux latéraux : `None` = automatique selon la largeur de la fenêtre.
     left_open: Option<bool>,
     right_open: Option<bool>,
+    /// Capture du jeu affichée derrière les widgets (chemin, image).
+    backdrop: Option<(String, egui::TextureHandle)>,
+    /// Capture du jeu programmée : instant de la prise de vue, puis résultat reçu du fil d'exécution.
+    capture_at: Option<std::time::Instant>,
+    capture_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
 }
 
 impl Default for State {
     fn default() -> Self {
-        Self { layouts: layout::load(), target: "player".into(), selected: std::env::var("PACEWALL_EDITOR_SELECT").ok(), dirty: false, live: false, states: HashMap::new(), status: String::new(), left_open: None, right_open: None }
+        Self { layouts: layout::load(), target: "player".into(), selected: std::env::var("PACEWALL_EDITOR_SELECT").ok(), dirty: false, live: false, states: HashMap::new(), status: String::new(), left_open: None, right_open: None, backdrop: None, capture_at: None, capture_rx: None }
     }
 }
 
@@ -64,6 +69,7 @@ impl State {
         if self.live {
             feed.poll(true);
         }
+        self.poll_capture();
         let use_demo = !self.live || !feed.game;
         let demo;
         let data: &Data = if use_demo {
@@ -97,6 +103,31 @@ impl State {
         egui::CentralPanel::default().frame(Frame::NONE.fill(BG).inner_margin(Margin::same(16))).show(ui, |ui| self.stage(ui, data, now));
     }
 
+    /// Récupère le résultat d'une capture du jeu terminée.
+    fn poll_capture(&mut self) {
+        let Some(rx) = &self.capture_rx else { return };
+        match rx.try_recv() {
+            Ok(res) => {
+                self.capture_rx = None;
+                self.capture_at = None;
+                match res {
+                    Ok(path) => {
+                        // Même chemin que la capture précédente : on force le rechargement de la texture.
+                        self.backdrop = None;
+                        let _ = pwcore::settings::set("editor_background", json!(path));
+                        self.status = "Capture enregistrée".into();
+                    }
+                    Err(e) => self.status = format!("Capture impossible : {e}"),
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(_) => {
+                self.capture_rx = None;
+                self.capture_at = None;
+            }
+        }
+    }
+
     fn top_bar(&mut self, ui: &mut Ui, live_missing: bool, show_left: bool, show_right: bool) {
         // Une seule ligne si la fenêtre est large ; sinon les réglages et l'enregistrement passent sur une seconde ligne.
         let one_line = ui.available_width() >= 1040.0;
@@ -114,6 +145,31 @@ impl State {
             ui.selectable_value(&mut this.live, true, "JEU EN DIRECT");
             if live_missing {
                 ui.label(RichText::new("jeu absent : démo").size(12.0).color(WARN));
+            }
+            ui.add_space(14.0);
+            if ui.button("IMAGE DE FOND…").on_hover_text("Choisis une capture d'écran du jeu pour voir les widgets en situation").clicked() {
+                if let Some(p) = crate::win::pick_image() {
+                    let _ = pwcore::settings::set("editor_background", json!(p.to_string_lossy()));
+                }
+            }
+            let waiting = this.capture_at.map(|t| t.elapsed().as_secs());
+            let label = match waiting {
+                Some(s) if s < 5 => format!("PASSE SUR LE JEU… {}", 5 - s),
+                Some(_) => "CAPTURE…".to_string(),
+                None => "CAPTURER LE JEU".to_string(),
+            };
+            if ui.add_enabled(waiting.is_none(), egui::Button::new(label)).on_hover_text("Clique, puis reviens sur le jeu : une seule capture est prise après 5 secondes (aucun coût ensuite)").clicked() {
+                this.capture_at = Some(std::time::Instant::now());
+                let (tx, rx) = std::sync::mpsc::channel();
+                this.capture_rx = Some(rx);
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(5));
+                    let path = pwcore::settings::path().with_file_name("editor_background.png");
+                    let _ = tx.send(crate::win::capture_game(&path).map(|_| path.to_string_lossy().into_owned()));
+                });
+            }
+            if !pwcore::settings::str_of("editor_background", "").is_empty() && ui.button("RETIRER").clicked() {
+                let _ = pwcore::settings::set("editor_background", json!(""));
             }
             ui.add_space(14.0);
             if ui.selectable_label(show_left, "WIDGETS").clicked() {
@@ -195,6 +251,27 @@ impl State {
         ui.label(RichText::new(hint).size(12.0).color(MUTED));
     }
 
+    /// Charge (ou retire) l'image de fond quand le réglage change ; réduite à 1920 px de large au plus.
+    fn sync_backdrop(&mut self, ctx: &egui::Context) {
+        let want = pwcore::settings::str_of("editor_background", "");
+        if self.backdrop.as_ref().map(|(p, _)| p.as_str()) == Some(want.as_str()) || (want.is_empty() && self.backdrop.is_none()) {
+            return;
+        }
+        self.backdrop = None;
+        if want.is_empty() {
+            return;
+        }
+        let Ok(img) = image::open(&want) else {
+            self.status = "Image illisible (PNG ou JPEG attendu)".into();
+            let _ = pwcore::settings::set("editor_background", json!(""));
+            return;
+        };
+        let img = if img.width() > 1920 { img.resize(1920, 1920 * 4, image::imageops::FilterType::Triangle) } else { img };
+        let rgba = img.to_rgba8();
+        let color = egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw());
+        self.backdrop = Some((want, ctx.load_texture("pw-backdrop", color, egui::TextureOptions::LINEAR)));
+    }
+
     fn stage(&mut self, ui: &mut Ui, data: &Data, now: f64) {
         let avail = ui.available_rect_before_wrap();
         let (mut w, mut h) = (avail.width(), avail.width() * 9.0 / 16.0);
@@ -206,6 +283,20 @@ impl State {
         ui.allocate_rect(avail, Sense::hover());
         let painter = ui.painter_at(stage);
         painter.rect_filled(stage, 0.0, Color32::from_rgb(14, 19, 27));
+        self.sync_backdrop(ui.ctx());
+        if let Some((_, tex)) = &self.backdrop {
+            // L'image remplit tout l'aperçu (rognée si elle n'est pas en 16:9).
+            let [iw, ih] = tex.size();
+            let (sa, ia) = (stage.width() / stage.height(), iw as f32 / ih as f32);
+            let uv = if ia > sa {
+                let k = sa / ia;
+                Rect::from_min_max(egui::pos2((1.0 - k) / 2.0, 0.0), egui::pos2((1.0 + k) / 2.0, 1.0))
+            } else {
+                let k = ia / sa;
+                Rect::from_min_max(egui::pos2(0.0, (1.0 - k) / 2.0), egui::pos2(1.0, (1.0 + k) / 2.0))
+            };
+            painter.image(tex.id(), stage, uv, Color32::WHITE);
+        }
         for i in 1..20 {
             let x = stage.min.x + stage.width() * i as f32 / 20.0;
             painter.line_segment([egui::pos2(x, stage.min.y), egui::pos2(x, stage.max.y)], Stroke::new(1.0, Color32::from_rgba_unmultiplied(25, 211, 243, 12)));
@@ -260,6 +351,39 @@ impl State {
             }
             if self.selected.as_deref() == Some(spec.id.as_str()) {
                 painter.rect_stroke(rect.expand(3.0), 0.0, Stroke::new(2.0, ACCENT), StrokeKind::Outside);
+            }
+            // Carte : on trace sa zone en tirant sur les coins ; le circuit s'y adapte et s'y tourne tout seul.
+            if spec.kind == "trackmap" && self.selected.as_deref() == Some(spec.id.as_str()) {
+                let mut zone = (rect.min, rect.max);
+                let mut changed = false;
+                for (cx, cy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let corner = egui::pos2(if cx == 0 { rect.min.x } else { rect.max.x }, if cy == 0 { rect.min.y } else { rect.max.y });
+                    let hit = Rect::from_center_size(corner, vec2(16.0, 16.0));
+                    let r = ui.interact(hit, Id::new(("pw-zone", &spec.id, cx, cy)), Sense::drag());
+                    painter.rect_filled(Rect::from_center_size(corner, vec2(9.0, 9.0)), 0.0, if r.hovered() || r.dragged() { Color32::WHITE } else { ACCENT });
+                    if r.hovered() || r.dragged() {
+                        ui.ctx().set_cursor_icon(if cx == cy { egui::CursorIcon::ResizeNwSe } else { egui::CursorIcon::ResizeNeSw });
+                    }
+                    if r.dragged() {
+                        let d = r.drag_delta();
+                        if cx == 0 { zone.0.x += d.x } else { zone.1.x += d.x }
+                        if cy == 0 { zone.0.y += d.y } else { zone.1.y += d.y }
+                        changed = true;
+                    }
+                }
+                if changed {
+                    // Taille en unités du widget (limites de l'option), position ramenée dans l'écran.
+                    let nw = ((zone.1.x - zone.0.x) / scale).clamp(100.0, 1000.0);
+                    let nh = ((zone.1.y - zone.0.y) / scale).clamp(100.0, 1000.0);
+                    let anchor_x = if zone.0.x != rect.min.x { rect.max.x - nw * scale } else { rect.min.x };
+                    let anchor_y = if zone.0.y != rect.min.y { rect.max.y - nh * scale } else { rect.min.y };
+                    let w = &mut self.cur().widgets[i];
+                    w.opts.insert("size".into(), serde_json::json!(nw.round()));
+                    w.opts.insert("height".into(), serde_json::json!(nh.round()));
+                    w.x = ((anchor_x - stage.min.x) / stage.width()).clamp(0.0, (1.0 - nw * scale / stage.width()).max(0.0));
+                    w.y = ((anchor_y - stage.min.y) / stage.height()).clamp(0.0, (1.0 - nh * scale / stage.height()).max(0.0));
+                    self.dirty = true;
+                }
             }
         }
     }
@@ -340,7 +464,7 @@ impl State {
                         let shown = choices.iter().find(|(v, _)| *v == cur).map(|(_, l)| *l).unwrap_or("");
                         ui.add_space(4.0);
                         ui.label(RichText::new(opt.label).size(12.0).color(MUTED));
-                        egui::ComboBox::from_id_salt(("opt", opt.id)).width((ui.available_width() - 8.0).max(60.0)).selected_text(shown).show_ui(ui, |ui| {
+                        egui::ComboBox::from_id_salt(("opt", opt.id)).width((ui.available_width() - 14.0).max(60.0)).truncate().selected_text(shown).show_ui(ui, |ui| {
                             for (value, label) in choices.iter() {
                                 if ui.selectable_label(cur == *value, *label).clicked() {
                                     spec.opts.insert(opt.id.into(), json!(value));

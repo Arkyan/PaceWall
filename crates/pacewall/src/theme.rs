@@ -33,8 +33,10 @@ pub fn num_font(size: f32) -> FontId {
     FontId::new(size, num_family())
 }
 
-fn load(path: &str) -> Option<FontData> {
-    std::fs::read(path).ok().map(FontData::from_owned)
+fn load(path: &str, y_offset_factor: f32) -> Option<FontData> {
+    // Bahnschrift place ses glyphes trop haut dans la ligne : on les redescend pour qu'ils soient centrés
+    // sur les icônes, cases à cocher et boutons.
+    std::fs::read(path).ok().map(|d| FontData::from_owned(d).tweak(egui::FontTweak { y_offset_factor, ..Default::default() }))
 }
 
 /// Polices, couleurs et formes. À appeler une fois au démarrage de chaque fenêtre.
@@ -44,7 +46,7 @@ pub fn install(ctx: &egui::Context) {
     for (name, file, fallback) in [("pw-ui", "bahnschrift.ttf", FontFamily::Proportional), ("pw-num", "consola.ttf", FontFamily::Monospace)] {
         let family = if name == "pw-ui" { ui_family() } else { num_family() };
         let mut chain = vec![];
-        if let Some(data) = load(&format!(r"{windir}\Fonts\{file}")) {
+        if let Some(data) = load(&format!(r"{windir}\Fonts\{file}"), if name == "pw-ui" { 0.12 } else { 0.0 }) {
             fonts.font_data.insert(name.into(), Arc::new(data));
             chain.push(name.to_string());
         }

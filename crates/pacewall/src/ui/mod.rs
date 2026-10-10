@@ -6,6 +6,7 @@ mod canvas;
 mod editor;
 mod explorer;
 mod history;
+mod replay;
 mod home;
 mod kit;
 mod settings_page;

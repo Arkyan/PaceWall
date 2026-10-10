@@ -80,6 +80,12 @@ Windows), fabriqués avec Piper (`tools/voice/generate.py`) puis passés à un e
   [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) : les clips en dérivent et se repartagent sous la même licence ;
 - femme : fr_FR-siwis-medium, données SIWIS (Université d'Édimbourg), licence [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
+## Replays de course
+
+Pendant une session, l'enregistreur note deux fois par seconde la position et le classement de **toutes** les voitures (fichier `replays\<session>.pwr` à côté de la base, compressé par blocs d'une minute : quelques Mo pour deux heures). Aucun coût en dehors de cet échantillon et d'une écriture par minute.
+
+Historique > une session > **Revoir la course** : la carte, le classement, la session et le chrono sont rejoués (lecture, pause, ×1 à ×32, barre de temps) ; les voitures glissent entre deux images. Réglages `replay_record` (true) et `replay_keep` (15 replays gardés, les plus anciens sont supprimés).
+
 ## Simulation sans le jeu
 
 Onglet Alertes > Simulation (ou `pacewall.exe --simulate`) : un faux Le Mans Ultimate pour tout essayer.

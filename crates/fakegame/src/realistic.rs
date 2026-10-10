@@ -38,6 +38,8 @@ pub fn run(cfg: Config, stop: &dyn Fn() -> bool) -> Result<(), String> {
 
     let mut sim = Sim::new(cfg);
     let mut last = Instant::now();
+    // Session terminée (drapeau à damier, fin du temps) : on laisse 12 s pour voir l'arrivée, puis la simulation s'arrête.
+    let mut over_since: Option<Instant> = None;
     while !stop() {
         let now = Instant::now();
         let real_dt = now.duration_since(last).as_secs_f64().min(0.25);
@@ -45,6 +47,9 @@ pub fn run(cfg: Config, stop: &dyn Fn() -> bool) -> Result<(), String> {
         // Au-delà de 8×, l'enregistrement de la carte de PaceWall voit des « téléportations » (plus de 100 m entre deux lectures).
         sim.step(real_dt * cfg.speed.clamp(1.0, 8.0));
         unsafe { publish(base, &sim) };
+        if sim.phase == 8 && over_since.get_or_insert(now).elapsed() > Duration::from_secs(12) {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(16));
     }
     Ok(())
@@ -165,6 +170,10 @@ unsafe fn publish(base: *mut ObjectOut, sim: &Sim) {
         s.mPos = Vect3 { x: pos[0], y: 0.0, z: pos[1] };
         s.mBestLapTime = c.best_lap;
         s.mLastLapTime = c.last_lap;
+        s.mCurSector1 = c.cur_sectors[0];
+        s.mCurSector2 = c.cur_sectors[1];
+        s.mLastSector1 = c.last_sectors[0];
+        s.mLastSector2 = c.last_sectors[1];
         s.mIsPlayer = (c.id == 0) as u8;
         s.mPlace = (rank + 1) as u8;
         s.mInPits = (c.pit != Pit::Track) as u8;

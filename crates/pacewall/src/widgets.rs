@@ -73,8 +73,8 @@ pub fn options(kind: &str) -> &'static [Opt] {
         ],
         "session" => &[Opt { id: "weather", label: "Météo", kind: Bool(true) }],
         "trackmap" => &[
-            Opt { id: "size", label: "Largeur de la zone", kind: Num { min: 160.0, max: 600.0, step: 10.0, def: 300.0 } },
-            Opt { id: "height", label: "Hauteur de la zone", kind: Num { min: 120.0, max: 600.0, step: 10.0, def: 220.0 } },
+            Opt { id: "size", label: "Largeur de la zone", kind: Num { min: 100.0, max: 1000.0, step: 10.0, def: 300.0 } },
+            Opt { id: "height", label: "Hauteur de la zone", kind: Num { min: 100.0, max: 1000.0, step: 10.0, def: 220.0 } },
             Opt { id: "rotate", label: "Orientation", kind: Choice(&[("auto", "Auto (circuit le plus grand)"), ("0", "0°"), ("90", "90°"), ("180", "180°"), ("270", "270°")], "auto") },
             Opt { id: "others", label: "Afficher les autres voitures", kind: Bool(true) },
             Opt { id: "fps", label: "Fluidité (images/s)", kind: Choice(&[("10", "10"), ("20", "20"), ("30", "30")], "20") },
@@ -366,15 +366,16 @@ fn timing(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     d.text(w - 16.0, 12.0, &draw::signed(delta, 2), 30.0, dc, Font::Num, HAlign::Right);
     d.sep(16.0, 58.0, w - 32.0);
 
-    let gap = |k: &str| data.num(k).filter(|v| *v > 0.0).map(|v| format!("{v:.1} s")).unwrap_or_else(|| "—".into());
+    let fmt_gap = |v: Option<f64>| v.filter(|v| *v > 0.0).map(|v| format!("{v:.1} s")).unwrap_or_else(|| "—".into());
+    let (ahead, behind) = neighbour_gaps(data);
     let mut list: Vec<(&str, String)> = vec![
         ("Tour", data.num("lap.number").map(|v| format!("{v:.0}")).unwrap_or_else(|| "—".into())),
         ("Dernier", draw::lap(data.num("position.last_lap"))),
         ("Meilleur", draw::lap(data.num("position.best_lap"))),
     ];
     if gaps {
-        list.push(("Devant", gap("gap.car_ahead")));
-        list.push(("Derrière", gap("gap.car_behind")));
+        list.push(("Devant", fmt_gap(ahead)));
+        list.push(("Derrière", fmt_gap(behind)));
     }
     for (i, (l, v)) in list.iter().enumerate() {
         let y = 66.0 + i as f32 * 22.0;
@@ -463,7 +464,7 @@ fn inputs(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (
 
 /* ---------- Classement ---------- */
 
-fn class_color(c: &str) -> Color32 {
+pub(crate) fn class_color(c: &str) -> Color32 {
     let c = c.to_lowercase();
     if c.contains("hyper") {
         Color32::from_rgb(229, 57, 59)
@@ -491,6 +492,42 @@ struct Car {
     best: f64,
     pit: bool,
     me: bool,
+}
+
+/// Écarts avec la voiture qui roule juste devant et juste derrière sur la piste, en secondes.
+/// Calculés d'après la distance qui nous sépare sur le tour et notre vitesse : ça marche en course comme en essais,
+/// même en tête du classement. Les voitures aux stands sont ignorées (sauf si on y est aussi).
+/// Sans classement disponible, on se rabat sur les écarts donnés par le jeu.
+fn neighbour_gaps(data: &Data) -> (Option<f64>, Option<f64>) {
+    let positive = |v: Option<f64>| v.filter(|v| *v > 0.0);
+    let length = data.f("session.track_length", 0.0);
+    let n = (data.f("session.vehicles", 0.0) as usize).min(104);
+    let me = (0..n).find(|i| data.flag(&format!("grid.{i:03}.is_player")));
+    if let (Some(me), true) = (me, length > 100.0) {
+        let my_dist = data.f(&format!("grid.{me:03}.lap_dist"), 0.0);
+        let my_pit = data.flag(&format!("grid.{me:03}.in_pits"));
+        // Au moins 15 m/s : à l'arrêt, l'écart en secondes n'aurait pas de sens.
+        let speed = (data.f("player.speed", 0.0) / 3.6).max(15.0);
+        let (mut ahead, mut behind) = (f64::MAX, f64::MAX);
+        for i in (0..n).filter(|i| *i != me) {
+            let p = format!("grid.{i:03}");
+            let Some(dist) = data.num(&format!("{p}.lap_dist")) else { continue };
+            if data.flag(&format!("{p}.in_pits")) && !my_pit {
+                continue;
+            }
+            let d = (dist - my_dist).rem_euclid(length);
+            ahead = ahead.min(d);
+            behind = behind.min(length - d);
+        }
+        let secs = |d: f64| (d < f64::MAX).then(|| (d / speed).max(0.1));
+        if ahead < f64::MAX || behind < f64::MAX {
+            return (secs(ahead), secs(behind));
+        }
+    }
+    (
+        positive(data.num("gap.car_ahead")).or_else(|| positive(data.num("position.behind_next"))),
+        positive(data.num("gap.car_behind")),
+    )
 }
 
 /// Écart en secondes entre le joueur et la voiture `j` (positif si elle est derrière lui).
@@ -628,7 +665,7 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let max = data.f("session.max_laps", 0.0);
     let left = data.num("strategy.race_laps_left");
     let laps = if max > 0.0 && max < 10_000.0 {
-        format!("Tour {:.0} / {max:.0}", data.f("lap.number", 0.0))
+        format!("Tour {:.0} / {max:.0}", data.f("lap.number", 0.0).min(max))
     } else if let Some(l) = left {
         format!("≈ {l:.0} tours")
     } else {
@@ -771,6 +808,7 @@ fn flags(d: &D, _spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (
 /// Position d'une voiture sur la carte : (x, -z), repère de TinyPedal.
 struct MapCar {
     idx: usize,
+    driver: String,
     xy: [f32; 2],
     lap_dist: f64,
     class: String,
@@ -825,8 +863,8 @@ fn best_angle(points: &[[f32; 2]], aw: f32, ah: f32) -> f32 {
 fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
     // Zone choisie par le pilote : sa taille ne change jamais, c'est le circuit qui s'y adapte (et se tourne
     // pour y être le plus grand possible).
-    let w = spec.num("size", 300.0).clamp(160.0, 600.0) as f32;
-    let h = spec.num("height", 220.0).clamp(120.0, 600.0) as f32;
+    let w = spec.num("size", 300.0).clamp(100.0, 1000.0) as f32;
+    let h = spec.num("height", 220.0).clamp(100.0, 1000.0) as f32;
     if d.measuring() {
         return (w, h);
     }
@@ -887,6 +925,7 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
             let (x, z) = (data.num(&format!("{p}.x"))?, data.num(&format!("{p}.z"))?);
             Some(MapCar {
                 idx: i,
+                driver: data.text(&format!("{p}.driver")).to_string(),
                 xy: [x as f32, -z as f32],
                 lap_dist: data.f(&format!("{p}.lap_dist"), 0.0),
                 class: data.text(&format!("{p}.class")).to_string(),
@@ -899,13 +938,17 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         .collect();
     // Fluidité : le jeu ne publie la position des voitures que ~5 fois par seconde. Entre deux mesures on prolonge
     // le mouvement à la vitesse observée (au plus 0,25 s), ce qui évite les sauts.
-    for c in cars.iter_mut() {
+    // (Dans un replay, les positions sont déjà interpolées : on ne prolonge rien.)
+    let extrapolate = spec.flag("extrapolate", true);
+    for c in cars.iter_mut().filter(|_| extrapolate) {
         let e = st.car_pos.entry(c.idx).or_insert((c.xy[0], c.xy[1], now, 0.0, 0.0));
         if (c.xy[0], c.xy[1]) != (e.0, e.1) {
             let dt = (now - e.2) as f32;
             let (dx, dy) = (c.xy[0] - e.0, c.xy[1] - e.1);
             // Saut brutal (retour au stand, téléportation) ou trou dans les mesures : pas de vitesse.
             let (vx, vy) = if dt > 0.005 && dt < 1.0 && dx.abs() + dy.abs() < 150.0 { (dx / dt, dy / dt) } else { (0.0, 0.0) };
+            // Vitesse impossible (plus de 430 km/h) : c'est un saut, pas un déplacement.
+            let (vx, vy) = if vx.abs() + vy.abs() > 120.0 { (0.0, 0.0) } else { (vx, vy) };
             *e = (c.xy[0], c.xy[1], now, vx, vy);
         }
         let ahead = ((now - e.2) as f32).clamp(0.0, 0.25);
@@ -922,7 +965,10 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
     }
     cars.retain(|c| c.me || show_others);
     // Les premiers au-dessus des suivants, le joueur tout en haut.
-    cars.sort_by_key(|c| (c.me, -c.place));
+    // Voitures suivies (écran de replay) : entourées, et dessinées au-dessus des autres.
+    let (focus, focus2) = (spec.choice("focus", "").to_string(), spec.choice("focus2", "").to_string());
+    let followed = |c: &MapCar| !c.driver.is_empty() && (c.driver == focus || c.driver == focus2);
+    cars.sort_by_key(|c| (c.me, followed(c), -c.place));
 
     let outline = Color32::from_rgba_unmultiplied(6, 8, 12, 230);
     let dot = |c: &MapCar, x: f32, y: f32| {
@@ -932,6 +978,10 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
             _ => c.rank,
         };
         let label = (num > 0).then(|| num.to_string());
+        if followed(c) {
+            let ring = if c.driver == focus { WARN } else { Color32::from_rgb(214, 104, 255) };
+            d.circle(x, y, 17.0 * k, Color32::TRANSPARENT, Some((2.5 * k, ring)));
+        }
         if c.me {
             d.circle(x, y, 14.0 * k, Color32::from_rgba_unmultiplied(25, 211, 243, 55), None);
             d.circle(x, y, 9.0 * k, d.accent(), Some((2.0 * k, TEXT)));
@@ -1044,4 +1094,38 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
         d.text(w / 2.0, cy - 6.0, "Un tour propre trace la carte", 10.5, MUTED, Font::Ui, HAlign::Center);
     }
     (w, h)
+}
+
+#[cfg(test)]
+mod gap_tests {
+    use super::neighbour_gaps;
+    use pwcore::flatten::Field;
+    use pwcore::Data;
+    use serde_json::json;
+
+    fn data(cars: &[(f64, bool, bool)], speed: f64) -> Data {
+        let mut f = vec![
+            Field { key: "session.track_length".into(), unit: "", label: "", value: json!(5000.0) },
+            Field { key: "session.vehicles".into(), unit: "", label: "", value: json!(cars.len()) },
+            Field { key: "player.speed".into(), unit: "", label: "", value: json!(speed) },
+        ];
+        for (i, (dist, me, pit)) in cars.iter().enumerate() {
+            for (k, v) in [("lap_dist", json!(dist)), ("is_player", json!(me)), ("in_pits", json!(pit))] {
+                f.push(Field { key: format!("grid.{i:03}.{k}"), unit: "", label: "", value: v });
+            }
+        }
+        Data::new(f)
+    }
+
+    #[test]
+    fn gaps_follow_the_cars_on_track() {
+        // Joueur à 1000 m à 180 km/h (50 m/s) : une voiture 200 m devant, une 4900 m « devant » (donc 100 m derrière),
+        // une aux stands juste devant (ignorée).
+        let d = data(&[(1000.0, true, false), (1200.0, false, false), (900.0, false, false), (1010.0, false, true)], 180.0);
+        let (ahead, behind) = neighbour_gaps(&d);
+        assert!((ahead.unwrap() - 4.0).abs() < 1e-6);
+        assert!((behind.unwrap() - 2.0).abs() < 1e-6);
+        // Seul en piste : rien à afficher.
+        assert_eq!(neighbour_gaps(&data(&[(1000.0, true, false)], 180.0)), (None, None));
+    }
 }

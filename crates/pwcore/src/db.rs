@@ -62,6 +62,10 @@ pub fn open() -> rusqlite::Result<Connection> {
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     conn.execute_batch(SCHEMA)?;
+    // Colonnes ajoutées après coup (temps par secteur) : sans effet si elles existent déjà.
+    for col in ["s1", "s2", "s3"] {
+        let _ = conn.execute(&format!("ALTER TABLE laps ADD COLUMN {col} REAL"), []);
+    }
     Ok(conn)
 }
 
@@ -116,16 +120,18 @@ pub struct NewLap<'a> {
     pub rain: f64,
     pub place: i32,
     pub compound: &'a str,
+    /// Temps des secteurs validés par le jeu (`None` si le secteur n'a pas de temps).
+    pub sectors: [Option<f64>; 3],
 }
 
 pub fn add_lap(conn: &Connection, l: &NewLap) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO laps (session_id, lap, time, valid, pit, fuel_used, energy_used, wear_used, wear_end,
-                           tyre_temp, brake_temp, ambient, track_temp, rain, place, compound, created_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+                           tyre_temp, brake_temp, ambient, track_temp, rain, place, compound, created_at, s1, s2, s3)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
         params![
             l.session_id, l.lap, l.time, l.valid, l.pit, l.fuel_used, l.energy_used, l.wear_used, l.wear_end,
-            l.tyre_temp, l.brake_temp, l.ambient, l.track_temp, l.rain, l.place, l.compound, now()
+            l.tyre_temp, l.brake_temp, l.ambient, l.track_temp, l.rain, l.place, l.compound, now(), l.sectors[0], l.sectors[1], l.sectors[2]
         ],
     )?;
     Ok(())
@@ -151,7 +157,7 @@ pub fn list_sessions(conn: &Connection) -> rusqlite::Result<Vec<Value>> {
 pub fn laps(conn: &Connection, session_id: i64) -> rusqlite::Result<Vec<Value>> {
     let mut q = conn.prepare(
         "SELECT lap, time, valid, pit, fuel_used, energy_used, wear_used, wear_end, tyre_temp, brake_temp,
-                ambient, track_temp, rain, place, compound
+                ambient, track_temp, rain, place, compound, s1, s2, s3
          FROM laps WHERE session_id = ?1 ORDER BY lap",
     )?;
     let rows = q.query_map([session_id], |r| {
@@ -162,11 +168,13 @@ pub fn laps(conn: &Connection, session_id: i64) -> rusqlite::Result<Vec<Value>> 
             "tyre_temp": r.get::<_, f64>(8)?, "brake_temp": r.get::<_, f64>(9)?,
             "ambient": r.get::<_, f64>(10)?, "track_temp": r.get::<_, f64>(11)?, "rain": r.get::<_, f64>(12)?,
             "place": r.get::<_, i64>(13)?, "compound": r.get::<_, String>(14)?,
+            "s1": r.get::<_, Option<f64>>(15)?, "s2": r.get::<_, Option<f64>>(16)?, "s3": r.get::<_, Option<f64>>(17)?,
         }))
     })?;
     rows.collect()
 }
 
 pub fn delete_session(conn: &Connection, id: i64) -> rusqlite::Result<usize> {
+    crate::replay::delete(id);
     conn.execute("DELETE FROM sessions WHERE id = ?1", [id])
 }

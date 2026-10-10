@@ -17,6 +17,7 @@ ab_glyph = "0.2"
 tray-icon = "0.26"
 global-hotkey = "0.8"
 png = "0.17"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 winreg = "0.56"
 windows = { version = "0.58", features = [
   "Win32_Foundation",
@@ -27,6 +28,7 @@ windows = { version = "0.58", features = [
   "Win32_System_Com",
   "Win32_Storage_FileSystem",
   "Win32_UI_Shell",
+  "Win32_UI_Controls_Dialogs",
   "Win32_System_Time",
   "Win32_Security",
   "Win32_System_Threading",

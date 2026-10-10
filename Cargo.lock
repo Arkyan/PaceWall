@@ -1503,6 +1503,8 @@ dependencies = [
  "num-traits",
  "png 0.18.1",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -2255,6 +2257,7 @@ dependencies = [
  "egui_plot",
  "fakegame",
  "global-hotkey",
+ "image",
  "lmu",
  "png 0.17.16",
  "pwcore",
@@ -2502,6 +2505,7 @@ name = "pwcore"
 version = "0.1.0"
 dependencies = [
  "lmu",
+ "miniz_oxide 0.8.9",
  "rusqlite",
  "serde",
  "serde_json",

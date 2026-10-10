@@ -124,7 +124,8 @@ fn player(o: &mut Out, s: &VehicleScoring, t: &VehicleTelemetry) {
     o.num("energy.regen", "kW", "Récupération", t.mRegen as f64);
     o.int("energy.motor_state", "État moteur électrique", t.mElectricBoostMotorState as i64);
 
-    o.int("lap.number", "Tour", t.mLapNumber as i64);
+    // Tour en cours, à partir de 1 (le tour de sortie des stands est le tour 1) : tours terminés + 1.
+    o.int("lap.number", "Tour", s.mTotalLaps as i64 + 1);
     o.num("lap.delta_best", "s", "Delta meilleur tour", t.mDeltaBest);
     o.flag("lap.invalid", "Tour invalidé", t.mLapInvalidated != 0);
     o.num("lap.start", "s", "Début du tour", t.mLapStartET);
