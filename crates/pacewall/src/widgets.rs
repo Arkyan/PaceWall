@@ -60,7 +60,14 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "wearmode", label: "Affichage de l'usure", kind: Choice(&[("state", "État du pneu (100 → 0 %)"), ("used", "Usure (0 → 100 %)")], "state") },
             Opt { id: "unit", label: "Unité de température", kind: Choice(&[("auto", "Unité des réglages"), ("c", "°C"), ("f", "°F")], "auto") },
         ],
-        "timing" => &[Opt { id: "gaps", label: "Écarts devant / derrière", kind: Bool(true) }],
+        "timing" => &[
+            Opt { id: "gaps", label: "Écarts devant / derrière", kind: Bool(true) },
+            Opt { id: "place", label: "Place affichée", kind: Choice(&[("class", "En classe"), ("overall", "Au général")], "class") },
+        ],
+        "flags" => &[
+            Opt { id: "anim", label: "Clignotement (jaune, bleu, rouge)", kind: Bool(true) },
+            Opt { id: "blueclass", label: "Bleu « LMP » quand une classe plus rapide arrive", kind: Bool(true) },
+        ],
         "inputs" => &[
             Opt { id: "fps", label: "Fluidité (images/s)", kind: Choice(&[("10", "10"), ("15", "15"), ("20", "20"), ("30", "30")], "20") },
             Opt { id: "graph", label: "Graphe des inputs", kind: Bool(true) },
@@ -88,13 +95,14 @@ pub fn options(kind: &str) -> &'static [Opt] {
         "relative" => &[
             Opt { id: "ahead", label: "Voitures devant", kind: Num { min: 0.0, max: 6.0, step: 1.0, def: 3.0 } },
             Opt { id: "behind", label: "Voitures derrière", kind: Num { min: 0.0, max: 6.0, step: 1.0, def: 3.0 } },
-            Opt { id: "place", label: "Place affichée", kind: Choice(&[("overall", "Au général"), ("class", "En classe")], "overall") },
+            Opt { id: "place", label: "Place affichée", kind: Choice(&[("class", "En classe"), ("overall", "Au général")], "class") },
         ],
         "pit" => &[Opt { id: "loss", label: "Temps perdu par un arrêt (s)", kind: Num { min: 20.0, max: 150.0, step: 1.0, def: 60.0 } }],
         "radar" => &[
-            Opt { id: "range", label: "Portée devant et derrière (m)", kind: Num { min: 6.0, max: 30.0, step: 1.0, def: 12.0 } },
+            Opt { id: "range", label: "Rayon affiché (m)", kind: Num { min: 8.0, max: 40.0, step: 1.0, def: 20.0 } },
             Opt { id: "autohide", label: "Masquer quand personne n'est proche", kind: Bool(true) },
-            Opt { id: "fps", label: "Fluidité (images/s)", kind: Choice(&[("10", "10"), ("20", "20"), ("30", "30")], "20") },
+            Opt { id: "show", label: "Apparaît quand une voiture est à moins de (m)", kind: Num { min: 10.0, max: 80.0, step: 5.0, def: 35.0 } },
+            Opt { id: "fps", label: "Fluidité (images/s)", kind: Choice(&[("15", "15"), ("30", "30"), ("60", "60 (le plus fluide)")], "60") },
         ],
         _ => NO_OPTS,
     }
@@ -141,9 +149,9 @@ pub fn hz(kind: &str, spec: &WidgetSpec) -> f32 {
         "tyres" => 1.0,
         "standings" => 1.0,
         "trackmap" => spec.num("fps", 20.0) as f32,
-        "flags" => 4.0,
+        "flags" => 15.0,
         "relative" => 4.0,
-        "radar" => spec.num("fps", 20.0) as f32,
+        "radar" => spec.num("fps", 60.0) as f32,
         _ => 1.0,
     }
 }
@@ -166,6 +174,16 @@ pub struct WState {
     /// Radar : dernière position du joueur et direction de marche (repère de la carte), pour orienter les voitures voisines.
     radar_last: Option<(f32, f32)>,
     radar_dir: Option<(f32, f32)>,
+    /// Radar : (temps du jeu, horloge du widget) à la dernière mesure de la voiture du joueur.
+    radar_clock: Option<(f64, f64)>,
+    /// Le widget s'anime en ce moment (drapeau qui flotte) : il doit être redessiné même sans nouvelle donnée.
+    animating: bool,
+}
+
+impl WState {
+    pub fn animating(&self) -> bool {
+        self.animating
+    }
 }
 
 pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
@@ -406,7 +424,9 @@ fn timing(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let h = 66.0 + rows as f32 * 22.0 + 8.0;
     d.card(w, h);
     d.fill(16.0, 10.0, 56.0, 38.0, d.accent());
-    let place = data.num("position.place").map(|p| format!("P{p:.0}")).unwrap_or_else(|| "P—".into());
+    // Place en classe par défaut (celle qui compte en multi-classes) ; au général si demandé ou si le classement manque.
+    let in_class = if spec.choice("place", "class") == "class" { near_cars(data).iter().find(|c| c.me).map(|c| c.rank as f64) } else { None };
+    let place = in_class.or(data.num("position.place")).map(|p| format!("P{p:.0}")).unwrap_or_else(|| "P—".into());
     d.text(44.0, 14.0, &place, 28.0, ACCENT_INK, Font::Num, HAlign::Center);
     let delta = data.num("lap.delta_best");
     let dc = match delta {
@@ -543,36 +563,23 @@ struct Car {
     best: f64,
     pit: bool,
     me: bool,
+    /// Temps écoulé dans le tour et temps au tour estimés par le jeu (0 s'ils manquent).
+    time_into: f64,
+    est_lap: f64,
 }
 
-/// Écarts avec la voiture qui roule juste devant et juste derrière sur la piste, en secondes.
-/// Calculés d'après la distance qui nous sépare sur le tour et notre vitesse : ça marche en course comme en essais,
-/// même en tête du classement. Les voitures aux stands sont ignorées (sauf si on y est aussi).
+/// Écarts avec la voiture qui roule juste devant et juste derrière sur la piste, en secondes (voir `near_cars`).
 /// Sans classement disponible, on se rabat sur les écarts donnés par le jeu.
 fn neighbour_gaps(data: &Data) -> (Option<f64>, Option<f64>) {
     let positive = |v: Option<f64>| v.filter(|v| *v > 0.0);
-    let length = data.f("session.track_length", 0.0);
-    let n = (data.f("session.vehicles", 0.0) as usize).min(104);
-    let me = (0..n).find(|i| data.flag(&format!("grid.{i:03}.is_player")));
-    if let (Some(me), true) = (me, length > 100.0) {
-        let my_dist = data.f(&format!("grid.{me:03}.lap_dist"), 0.0);
-        let my_pit = data.flag(&format!("grid.{me:03}.in_pits"));
-        // Au moins 15 m/s : à l'arrêt, l'écart en secondes n'aurait pas de sens.
-        let speed = (data.f("player.speed", 0.0) / 3.6).max(15.0);
-        let (mut ahead, mut behind) = (f64::MAX, f64::MAX);
-        for i in (0..n).filter(|i| *i != me) {
-            let p = format!("grid.{i:03}");
-            let Some(dist) = data.num(&format!("{p}.lap_dist")) else { continue };
-            if data.flag(&format!("{p}.in_pits")) && !my_pit {
-                continue;
-            }
-            let d = (dist - my_dist).rem_euclid(length);
-            ahead = ahead.min(d);
-            behind = behind.min(length - d);
-        }
-        let secs = |d: f64| (d < f64::MAX).then(|| (d / speed).max(0.1));
+    let cars = near_cars(data);
+    if let Some(me) = cars.iter().find(|c| c.me) {
+        let on_track = |c: &&Near| !c.me && (!c.pit || me.pit);
+        let ahead = cars.iter().filter(on_track).filter(|c| c.secs > 0.0).map(|c| c.secs).fold(f64::MAX, f64::min);
+        let behind = cars.iter().filter(on_track).filter(|c| c.secs <= 0.0).map(|c| -c.secs).fold(f64::MAX, f64::min);
+        let some = |v: f64| (v < f64::MAX).then(|| v.max(0.1));
         if ahead < f64::MAX || behind < f64::MAX {
-            return (secs(ahead), secs(behind));
+            return (some(ahead), some(behind));
         }
     }
     (
@@ -581,9 +588,55 @@ fn neighbour_gaps(data: &Data) -> (Option<f64>, Option<f64>) {
     )
 }
 
+/// Les voitures du classement, rangées par place.
+fn grid_cars(data: &Data) -> Vec<Car> {
+    let length = data.f("session.track_length", 0.0).max(1.0);
+    let n = (data.f("session.vehicles", 0.0) as usize).min(104);
+    let mut all: Vec<Car> = (0..n)
+        .filter_map(|i| {
+            let p = format!("grid.{i:03}");
+            let place = data.num(&format!("{p}.place"))? as i64;
+            Some(Car {
+                place,
+                name: data.text(&format!("{p}.driver")).to_string(),
+                class: data.text(&format!("{p}.class")).to_string(),
+                dist: data.f(&format!("{p}.laps"), 0.0) * length + data.f(&format!("{p}.lap_dist"), 0.0),
+                behind_next: data.f(&format!("{p}.behind_next"), 0.0).max(0.0),
+                best: data.f(&format!("{p}.best_lap"), 0.0),
+                pit: data.flag(&format!("{p}.in_pits")),
+                me: data.flag(&format!("{p}.is_player")),
+                time_into: data.f(&format!("{p}.time_into"), 0.0),
+                est_lap: data.f(&format!("{p}.est_lap"), 0.0),
+            })
+        })
+        .collect();
+    all.sort_by_key(|c| c.place);
+    all
+}
+
+/// Retard, en secondes, de `behind` sur `ahead` (classé devant lui), calculé comme TinyPedal : la différence de leurs
+/// temps écoulés dans le tour, tels que le jeu les estime ; si celui de devant vient de passer la ligne, on ajoute
+/// un tour de celui de derrière. `None` si le jeu ne donne pas ces temps (ancien replay, démonstration).
+fn interval(ahead: &Car, behind: &Car, length: f64) -> Option<f64> {
+    if ahead.est_lap <= 1.0 || behind.est_lap <= 1.0 {
+        return None;
+    }
+    let lap_diff = (ahead.dist - behind.dist) / length.max(1.0);
+    if lap_diff < 0.0 {
+        return Some(0.0); // ordre pas encore à jour (départ lancé, dépassement en cours)
+    }
+    let gap = ahead.time_into - behind.time_into;
+    Some(if gap >= 0.0 { gap } else { gap + behind.est_lap })
+}
+
 /// Écart en secondes entre le joueur et la voiture `j` (positif si elle est derrière lui).
-/// On additionne les retards « sur la voiture devant » donnés par le jeu ; s'ils manquent, on estime d'après la distance.
-fn gap_seconds(all: &[Car], me: usize, j: usize, speed: f64) -> f64 {
+/// D'abord d'après les temps dans le tour ; sinon la somme des retards « sur la voiture devant » donnés par le jeu ;
+/// en dernier recours la distance divisée par la vitesse.
+fn gap_seconds(all: &[Car], me: usize, j: usize, speed: f64, length: f64) -> f64 {
+    let timed = if j < me { interval(&all[j], &all[me], length).map(|g| -g) } else { interval(&all[me], &all[j], length) };
+    if let Some(g) = timed {
+        return g;
+    }
     let chain = if j < me {
         -all[j + 1..=me].iter().map(|c| c.behind_next).sum::<f64>()
     } else {
@@ -623,24 +676,7 @@ fn standings(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
 
     let length = data.f("session.track_length", 0.0).max(1.0);
     let speed = data.f("player.speed", 0.0) / 3.6;
-    let n = (data.f("session.vehicles", 0.0) as usize).min(104);
-    let mut all: Vec<Car> = (0..n)
-        .filter_map(|i| {
-            let p = format!("grid.{i:03}");
-            let place = data.num(&format!("{p}.place"))? as i64;
-            Some(Car {
-                place,
-                name: data.text(&format!("{p}.driver")).to_string(),
-                class: data.text(&format!("{p}.class")).to_string(),
-                dist: data.f(&format!("{p}.laps"), 0.0) * length + data.f(&format!("{p}.lap_dist"), 0.0),
-                behind_next: data.f(&format!("{p}.behind_next"), 0.0).max(0.0),
-                best: data.f(&format!("{p}.best_lap"), 0.0),
-                pit: data.flag(&format!("{p}.in_pits")),
-                me: data.flag(&format!("{p}.is_player")),
-            })
-        })
-        .collect();
-    all.sort_by_key(|c| c.place);
+    let all = grid_cars(data);
     let me_idx = all.iter().position(|c| c.me);
     // Liste affichée : tous les pilotes ou ceux de ma classe, avec leur rang dans la liste complète pour les écarts.
     let my_class = me_idx.map(|i| all[i].class.clone());
@@ -673,7 +709,7 @@ fn standings(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
                     // Au moins un tour d'écart : « +1 T » (il est derrière) ou « −1 T » (il est devant).
                     format!("{}{} T", if behind_dist > 0.0 { "+" } else { "−" }, (behind_dist.abs() / length).floor())
                 } else {
-                    draw::signed(Some(gap_seconds(&all, me, j, speed)), 1)
+                    draw::signed(Some(gap_seconds(&all, me, j, speed, length)), 1)
                 };
                 d.text(w - 16.0, y + 3.0, &text, 13.0, MUTED, Font::Num, HAlign::Right);
             }
@@ -745,10 +781,11 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
 
 /// Un drapeau montré au pilote : une couleur, et le secteur pour le jaune. Aucun autre texte.
 struct Flag {
+    /// Le panneau clignote (jaune local, bleu, rouge), comme au bord de la piste.
+    blink: bool,
     fill: Color32,
     /// Texte du bandeau : seulement le secteur du jaune (« S2 »).
     label: String,
-    ink: Color32,
     kind: FlagKind,
 }
 
@@ -761,8 +798,8 @@ enum FlagKind {
 
 /// Le drapeau (ou les deux plus importants s'il y en a plusieurs) affiché en grand, rien quand il n'y en a aucun :
 /// lisible d'un coup d'œil en roulant. Ordre d'importance : rouge, neutralisation, noir, jaune, bleu, blanc, vert, damier.
-fn flags(d: &D, _spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
-    let (w, h) = (290.0, 44.0);
+fn flags(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
+    let (w, h) = (290.0, 104.0);
     let phase = data.f("session.phase", 5.0) as i64;
     let ystate = data.f("session.yellow", 0.0) as i64;
     let finish = data.f("player.finish_status", 0.0) as i64;
@@ -776,7 +813,7 @@ fn flags(d: &D, _spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (
 
     let dark = Color32::from_rgb(17, 17, 17);
     let mut active: Vec<Flag> = Vec::new();
-    let mut add = |fill: Color32, label: &str, ink: Color32, kind: FlagKind| active.push(Flag { fill, label: label.into(), ink, kind });
+    let mut add = |fill: Color32, label: &str, _ink: Color32, kind: FlagKind| active.push(Flag { blink: fill == BAD || fill == BLUE || !label.is_empty(), fill, label: label.into(), kind });
     if phase == 7 || ystate == 7 {
         add(BAD, "", Color32::WHITE, FlagKind::Plain);
     }
@@ -789,11 +826,15 @@ fn flags(d: &D, _spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (
     }
     let sectors: Vec<usize> = (1..=3).filter(|s| data.flag(&format!("session.sector_yellow.{s}"))).collect();
     if !sectors.is_empty() {
-        let list: Vec<String> = sectors.iter().map(|s| format!("S{s}")).collect();
-        add(Color32::from_rgb(255, 214, 51), &list.join(" "), dark, FlagKind::Plain);
+        // « S2 », « S13 » : le S une seule fois, pour tenir sur un demi-panneau.
+        let list: String = sectors.iter().map(|s| s.to_string()).collect();
+        add(Color32::from_rgb(255, 214, 51), &format!("S{list}"), dark, FlagKind::Plain);
     }
+    // Bleu : c'est le jeu qui le déclenche. On regarde ensuite qui arrive derrière : une voiture d'une classe plus
+    // rapide donne un bleu avec le sigle de sa classe, sinon c'est un bleu simple (on nous prend un tour).
     if data.flag("player.blue_flag") {
-        add(BLUE, "", Color32::WHITE, FlagKind::Plain);
+        let tag = if spec.flag("blueclass", true) { faster_class_behind(data).unwrap_or("") } else { "" };
+        add(BLUE, tag, Color32::WHITE, FlagKind::Plain);
     }
     if ystate == 5 {
         add(Color32::from_rgb(240, 244, 250), "", dark, FlagKind::Plain);
@@ -813,45 +854,141 @@ fn flags(d: &D, _spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (
             d.fill(0.0, h - 1.5, w, 1.5, edge);
             d.fill(0.0, 0.0, 1.5, h, edge);
             d.fill(w - 1.5, 0.0, 1.5, h, edge);
-            d.text(w / 2.0, 13.0, "Drapeaux (aucun en ce moment)", 14.0, MUTED, Font::Ui, HAlign::Center);
+            d.text(w / 2.0, h / 2.0 - 9.0, "Drapeaux (aucun en ce moment)", 14.0, MUTED, Font::Ui, HAlign::Center);
         }
+        st.animating = false;
         return (w, h);
     }
     let shown = &active[..active.len().min(2)];
+    // Clignotement : allumé 0,45 s, atténué 0,3 s. Le widget n'est redessiné en continu que s'il clignote.
+    let blinking = spec.flag("anim", true) && shown.iter().any(|f| f.blink);
+    st.animating = blinking;
+    let dim = blinking && (now % 0.75) > 0.45;
+    // Un ou deux panneaux lumineux côte à côte. Le dessin ne change qu'au clignotement : il est gardé en mémoire.
     let gap = 8.0;
-    let bw = (w - gap * (shown.len() as f32 - 1.0)) / shown.len() as f32;
-    for (i, f) in shown.iter().enumerate() {
-        let x = i as f32 * (bw + gap);
-        d.fill(x, 0.0, bw, h, f.fill);
-        match f.kind {
-            FlagKind::Black => {
-                // Noir : contour clair pour le distinguer d'un fond sombre.
-                let edge = Color32::from_white_alpha(200);
-                d.fill(x, 0.0, bw, 1.5, edge);
-                d.fill(x, h - 1.5, bw, 1.5, edge);
-                d.fill(x, 0.0, 1.5, h, edge);
-                d.fill(x + bw - 1.5, 0.0, 1.5, h, edge);
-            }
-            FlagKind::Checkered => {
-                // Damier : carrés noirs et blancs sur toute la largeur.
-                let cell = h / 4.0;
-                let cols = (bw / cell).ceil() as usize;
-                for cx in 0..cols {
-                    for cy in 0..4 {
-                        if (cx + cy) % 2 == 0 {
-                            d.fill(x + cx as f32 * cell, cy as f32 * cell, cell.min(bw - cx as f32 * cell), cell, Color32::from_rgb(12, 12, 12));
-                        }
+    let pw = (w - gap * (shown.len() as f32 - 1.0)) / shown.len() as f32;
+    let tag = {
+        use std::hash::{Hash, Hasher};
+        let mut hs = std::collections::hash_map::DefaultHasher::new();
+        for f in shown {
+            (f.fill.to_array(), &f.label, f.kind as u8, f.blink && dim).hash(&mut hs);
+        }
+        ("flags", shown.len(), d.cache_tag()).hash(&mut hs);
+        hs.finish()
+    };
+    d.layer(tag, 0.0, 0.0, w, h, &mut |dl| {
+        for (i, f) in shown.iter().enumerate() {
+            led_panel(dl, i as f32 * (pw + gap), pw, h, f, f.blink && dim);
+        }
+    });
+    (w, h)
+}
+
+/// Rapidité d'une classe et son sigle sur le panneau (plus le nombre est grand, plus la classe est rapide).
+/// `None` pour une classe inconnue : on ne la compare alors à aucune autre.
+fn class_speed(class: &str) -> Option<(u8, &'static str)> {
+    let c = class.to_lowercase();
+    if c.contains("hyper") {
+        Some((5, "HYP"))
+    } else if c.contains("lmp2") || c.contains("lmp3") || c.contains("lmp") {
+        Some((if c.contains("lmp3") { 3 } else { 4 }, "LMP"))
+    } else if c.contains("gte") {
+        Some((2, "GTE"))
+    } else if c.contains("gt3") {
+        Some((1, "GT"))
+    } else {
+        None
+    }
+}
+
+/// Sigle de la classe de la voiture qui arrive juste derrière nous sur la piste, si cette classe est plus rapide que
+/// la nôtre : toujours « LMP », quelle que soit cette classe. `None` si elle est de notre classe, plus lente, inconnue, ou s'il n'y a personne
+/// à moins de 15 secondes.
+fn faster_class_behind(data: &Data) -> Option<&'static str> {
+    let cars = near_cars(data);
+    let me = cars.iter().find(|c| c.me)?;
+    let behind = cars.iter().filter(|c| !c.me && !c.pit && c.secs < 0.0 && c.secs > -15.0).max_by(|a, b| a.secs.total_cmp(&b.secs))?;
+    let ((theirs, tag), (mine, _)) = (class_speed(&behind.class)?, class_speed(&me.class)?);
+    // Le panneau affiche toujours « LMP », quelle que soit la classe plus rapide qui arrive.
+    let _ = tag;
+    (theirs > mine).then_some("LMP")
+}
+
+/// Lettres du panneau en points : 5 × 7, une ligne par rangée (bit de gauche = colonne de gauche).
+fn glyph(c: char) -> [u8; 7] {
+    match c {
+        'S' => [0b01110, 0b10001, 0b10000, 0b01110, 0b00001, 0b10001, 0b01110],
+        '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
+        '2' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111],
+        '3' => [0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110],
+        'L' => [0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
+        'M' => [0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001],
+        'P' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000],
+        'H' => [0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
+        'Y' => [0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
+        'G' => [0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01111],
+        'T' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
+        'E' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111],
+        _ => [0; 7],
+    }
+}
+
+/// Un panneau lumineux comme ceux du bord de piste : une grille de points de la couleur du drapeau sur fond noir.
+/// Le secteur du jaune s'écrit en points dans une fenêtre sombre au milieu.
+fn led_panel(d: &D, x: f32, pw: f32, h: f32, f: &Flag, dim: bool) {
+    let pitch = 8.0_f32;
+    let (cols, rows) = ((pw / pitch).floor() as i32, (h / pitch).floor() as i32);
+    let (ox, oy) = (x + (pw - cols as f32 * pitch) / 2.0 + pitch / 2.0, (h - rows as f32 * pitch) / 2.0 + pitch / 2.0);
+    // Boîtier.
+    d.fill(x, 0.0, pw, h, Color32::from_rgb(9, 10, 12));
+    let bezel = Color32::from_rgb(46, 51, 60);
+    d.fill(x, 0.0, pw, 1.5, bezel);
+    d.fill(x, h - 1.5, pw, 1.5, bezel);
+    d.fill(x, 0.0, 1.5, h, bezel);
+    d.fill(x + pw - 1.5, 0.0, 1.5, h, bezel);
+
+    // Texte : une case par point, avec une marge d'un point autour (la « fenêtre » sombre).
+    let chars: Vec<char> = f.label.chars().collect();
+    let text_cols = if chars.is_empty() { 0 } else { chars.len() as i32 * 6 - 1 };
+    let (tx, ty) = ((cols - text_cols) / 2, (rows - 7) / 2);
+    let in_window = |c: i32, r: i32| text_cols > 0 && c >= tx - 2 && c < tx + text_cols + 2 && r >= ty - 1 && r < ty + 8;
+    let in_glyph = |c: i32, r: i32| {
+        let (gc, gr) = (c - tx, r - ty);
+        if text_cols == 0 || gc < 0 || gc >= text_cols || !(0..7).contains(&gr) || gc % 6 == 5 {
+            return false;
+        }
+        glyph(chars[(gc / 6) as usize])[gr as usize] >> (4 - gc % 6) & 1 == 1
+    };
+
+    let off = Color32::from_rgb(26, 28, 33);
+    let level = if dim { 0.22 } else { 1.0 };
+    let tone = |c: Color32, k: f32| Color32::from_rgb((c.r() as f32 * k) as u8, (c.g() as f32 * k) as u8, (c.b() as f32 * k) as u8);
+    for r in 0..rows {
+        for c in 0..cols {
+            let lit = match f.kind {
+                // Damier : pavés de 2 × 2 points.
+                FlagKind::Checkered => (c / 2 + r / 2) % 2 == 0,
+                // Noir : seul le tour du panneau est allumé.
+                FlagKind::Black => c == 0 || r == 0 || c == cols - 1 || r == rows - 1,
+                FlagKind::Plain => {
+                    if in_window(c, r) {
+                        in_glyph(c, r)
+                    } else {
+                        true
                     }
                 }
+            };
+            let (px, py) = (ox + c as f32 * pitch, oy + r as f32 * pitch);
+            if lit {
+                let color = if f.kind == FlagKind::Black { Color32::from_rgb(236, 240, 246) } else { f.fill };
+                // Halo léger, puis le point.
+                d.circle(px, py, 3.9, tone(color, level).gamma_multiply(0.22), None);
+                d.circle(px, py, 2.7, tone(color, level), None);
+            } else {
+                d.circle(px, py, 2.2, off, None);
             }
-            FlagKind::Plain => {}
-        }
-        if !f.label.is_empty() {
-            let size = if shown.len() == 1 { 26.0 } else { 22.0 };
-            d.text(x + bw / 2.0, h / 2.0 - size * 0.62 + 3.0, &f.label, size, f.ink, Font::Num, HAlign::Center);
         }
     }
-    (w, h)
 }
 
 /* ---------- Carte du circuit ---------- */
@@ -1169,6 +1306,25 @@ mod gap_tests {
     }
 
     #[test]
+    fn blue_flag_names_a_faster_class_behind() {
+        use super::faster_class_behind;
+        // Moi à 1000 m, 180 km/h ; une voiture 60 m derrière (1,2 s).
+        let scene = |class: &str, my_class: &str| {
+            let mut d = data(&[(1000.0, true, false), (940.0, false, false)], 180.0);
+            let mut f = std::mem::take(&mut d.fields);
+            for (i, c) in [(0, my_class), (1, class)] {
+                f.push(Field { key: format!("grid.{i:03}.class"), unit: "", label: "", value: json!(c) });
+            }
+            Data::new(f)
+        };
+        assert_eq!(faster_class_behind(&scene("LMP2", "LMGT3")), Some("LMP"));
+        assert_eq!(faster_class_behind(&scene("Hypercar", "LMP2")), Some("LMP")); // toujours « LMP »
+        assert_eq!(faster_class_behind(&scene("LMGT3", "LMGT3")), None); // même classe : bleu simple
+        assert_eq!(faster_class_behind(&scene("LMGT3", "Hypercar")), None); // classe plus lente
+        assert_eq!(faster_class_behind(&scene("Mystère", "LMGT3")), None); // classe inconnue
+    }
+
+    #[test]
     fn gaps_follow_the_cars_on_track() {
         // Joueur à 1000 m à 180 km/h (50 m/s) : une voiture 200 m devant, une 4900 m « devant » (donc 100 m derrière),
         // une aux stands juste devant (ignorée).
@@ -1176,6 +1332,16 @@ mod gap_tests {
         let (ahead, behind) = neighbour_gaps(&d);
         assert!((ahead.unwrap() - 4.0).abs() < 1e-6);
         assert!((behind.unwrap() - 2.0).abs() < 1e-6);
+        // Avec les temps dans le tour du jeu (méthode de TinyPedal) : 3 s devant, et une voiture qui vient de passer
+        // la ligne (2 s dans son tour) alors qu'on est à 98 s d'un tour de 100 s : 4 s devant, pas 96 derrière.
+        let mut d = data(&[(4900.0, true, false), (100.0, false, false), (4990.0, false, false)], 180.0);
+        let mut f = std::mem::take(&mut d.fields);
+        for (i, t) in [(0, 98.0), (1, 2.0), (2, 99.5)] {
+            f.push(Field { key: format!("grid.{i:03}.time_into"), unit: "", label: "", value: json!(t) });
+            f.push(Field { key: format!("grid.{i:03}.est_lap"), unit: "", label: "", value: json!(100.0) });
+        }
+        let (ahead, behind) = neighbour_gaps(&Data::new(f));
+        assert!((ahead.unwrap() - 1.5).abs() < 1e-6 && behind.is_none());
         // Seul en piste : rien à afficher.
         assert_eq!(neighbour_gaps(&data(&[(1000.0, true, false)], 180.0)), (None, None));
     }
@@ -1199,8 +1365,8 @@ struct Near {
     class: String,
     place: i64,
     rank: i64,
-    /// Distance le long de la piste : positive devant le joueur, négative derrière (mètres).
-    ahead: f64,
+    /// Écart en secondes : positif devant le joueur, négatif derrière.
+    secs: f64,
     /// Tours d'avance sur le joueur au classement : +1 = il nous a pris un tour, −1 = on lui en a pris un.
     laps: i64,
     pit: bool,
@@ -1217,20 +1383,36 @@ fn near_cars(data: &Data) -> Vec<Near> {
     }
     let total = |i: usize| data.f(&format!("grid.{i:03}.laps"), 0.0) * length + data.f(&format!("grid.{i:03}.lap_dist"), 0.0);
     let (my_dist, my_total) = (data.f(&format!("grid.{me:03}.lap_dist"), 0.0), total(me));
+    // Écart en temps, comme TinyPedal : différence des temps écoulés dans le tour (estimés par le jeu), ramenée à
+    // plus ou moins un demi-tour du joueur. Sans ces temps : distance / vitesse la plus élevée des deux voitures.
+    let (my_time, my_lap) = (data.f(&format!("grid.{me:03}.time_into"), 0.0), data.f(&format!("grid.{me:03}.est_lap"), 0.0));
+    let my_speed = data.f("player.speed", 0.0) / 3.6;
+    let in_garage = data.flag(&format!("grid.{me:03}.garage"));
     let mut cars: Vec<Near> = (0..n)
         .filter_map(|i| {
             let p = format!("grid.{i:03}");
             let dist = data.num(&format!("{p}.lap_dist"))?;
+            // Une voiture rangée au garage n'est pas sur la piste (sauf si on y est aussi).
+            if i != me && data.flag(&format!("{p}.garage")) && !in_garage {
+                return None;
+            }
             let mut ahead = (dist - my_dist).rem_euclid(length);
             if ahead > length / 2.0 {
                 ahead -= length;
             }
+            let secs = match data.num(&format!("{p}.time_into")) {
+                Some(t) if my_lap > 1.0 => {
+                    let d = (t - my_time).rem_euclid(my_lap);
+                    if d > my_lap / 2.0 { d - my_lap } else { d }
+                }
+                _ => ahead / my_speed.max(data.f(&format!("{p}.speed"), 0.0)).max(15.0),
+            };
             Some(Near {
                 name: data.text(&format!("{p}.driver")).to_string(),
                 class: data.text(&format!("{p}.class")).to_string(),
                 place: data.f(&format!("{p}.place"), 0.0) as i64,
                 rank: 0,
-                ahead: if i == me { 0.0 } else { ahead },
+                secs: if i == me { 0.0 } else { secs },
                 laps: ((total(i) - my_total - ahead) / length).round() as i64,
                 pit: data.flag(&format!("{p}.in_pits")),
                 me: i == me,
@@ -1253,7 +1435,7 @@ fn relative(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let w = 300.0;
     let (n_ahead, n_behind) = (spec.num("ahead", 3.0) as usize, spec.num("behind", 3.0) as usize);
     let rows = n_ahead + n_behind + 1;
-    let class_place = spec.choice("place", "overall") == "class";
+    let class_place = spec.choice("place", "class") == "class";
     let top = if d.titles() { 30.0 } else { 8.0 };
     let h = top + rows as f32 * 24.0 + 10.0;
     d.card(w, h);
@@ -1263,16 +1445,14 @@ fn relative(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     }
     let cars = near_cars(data);
     let Some(me) = cars.iter().find(|c| c.me) else { return (w, h) };
-    // Au moins 15 m/s : à l'arrêt, un écart en secondes n'aurait pas de sens.
-    let speed = (data.f("player.speed", 0.0) / 3.6).max(15.0);
     // Les voitures aux stands ne comptent pas, sauf si on y est aussi.
     let on_track = |c: &&Near| !c.me && (!c.pit || me.pit);
-    let mut front: Vec<&Near> = cars.iter().filter(on_track).filter(|c| c.ahead > 0.0).collect();
-    front.sort_by(|a, b| a.ahead.total_cmp(&b.ahead));
+    let mut front: Vec<&Near> = cars.iter().filter(on_track).filter(|c| c.secs > 0.0).collect();
+    front.sort_by(|a, b| a.secs.total_cmp(&b.secs));
     front.truncate(n_ahead);
     front.reverse();
-    let mut back: Vec<&Near> = cars.iter().filter(on_track).filter(|c| c.ahead <= 0.0).collect();
-    back.sort_by(|a, b| b.ahead.total_cmp(&a.ahead));
+    let mut back: Vec<&Near> = cars.iter().filter(on_track).filter(|c| c.secs <= 0.0).collect();
+    back.sort_by(|a, b| b.secs.total_cmp(&a.secs));
     back.truncate(n_behind);
 
     // Le joueur reste à sa ligne, même s'il manque des voitures devant.
@@ -1298,7 +1478,7 @@ fn relative(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         d.text(50.0, y + 3.0, &short_name(&c.name), 14.0, color, Font::Ui, HAlign::Left);
         if !c.me {
             // Même convention que le classement : « + » derrière nous, « − » devant.
-            d.text(w - 16.0, y + 3.0, &draw::signed(Some(-c.ahead / speed), 1), 13.0, MUTED, Font::Num, HAlign::Right);
+            d.text(w - 16.0, y + 3.0, &draw::signed(Some(-c.secs), 1), 13.0, MUTED, Font::Num, HAlign::Right);
         }
     }
     (w, h)
@@ -1319,23 +1499,22 @@ fn pit(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let y0 = hdr + 10.0;
     let is_race = (10..=13).contains(&(data.f("session.type", -1.0) as i64));
 
-    // Retard de chaque voiture sur le leader, dans l'ordre du classement : celui du jeu, sinon la somme des écarts.
-    let n = (data.f("session.vehicles", 0.0) as usize).min(104);
-    let mut cars: Vec<(i64, String, String, f64, bool)> = (0..n)
-        .filter_map(|i| {
-            let p = format!("grid.{i:03}");
-            let place = data.num(&format!("{p}.place"))? as i64;
-            Some((place, data.text(&format!("{p}.driver")).to_string(), data.text(&format!("{p}.class")).to_string(), data.f(&format!("{p}.behind_next"), 0.0).max(0.0), data.flag(&format!("{p}.is_player"))))
-        })
-        .collect();
-    cars.sort_by_key(|c| c.0);
+    // Retard de chaque voiture sur le leader : somme des écarts entre voitures qui se suivent au classement
+    // (d'après les temps dans le tour, tours de retard compris ; sinon l'écart donné par le jeu).
+    let length = data.f("session.track_length", 0.0).max(1.0);
+    let cars = grid_cars(data);
     let mut behind = Vec::with_capacity(cars.len());
     let mut sum = 0.0;
-    for (i, c) in cars.iter().enumerate() {
-        sum += if i == 0 { 0.0 } else { c.3 };
+    for i in 0..cars.len() {
+        if i > 0 {
+            sum += match interval(&cars[i - 1], &cars[i], length) {
+                Some(g) => g + ((cars[i - 1].dist - cars[i].dist) / length).floor().max(0.0) * cars[i].est_lap,
+                None => cars[i].behind_next,
+            };
+        }
         behind.push(sum);
     }
-    let me = cars.iter().position(|c| c.4);
+    let me = cars.iter().position(|c| c.me);
     let (Some(me), true) = (me, is_race) else {
         d.text(16.0, y0 + 6.0, "Estimation en course uniquement", 13.0, MUTED, Font::Ui, HAlign::Left);
         return (w, h);
@@ -1344,11 +1523,11 @@ fn pit(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let mine = behind[me] + loss;
     let others = || (0..cars.len()).filter(|&i| i != me);
     let place = 1 + others().filter(|&i| behind[i] < mine).count();
-    let class_place = 1 + others().filter(|&i| behind[i] < mine && cars[i].2 == cars[me].2).count();
+    let class_place = 1 + others().filter(|&i| behind[i] < mine && cars[i].class == cars[me].class).count();
     let front = others().filter(|&i| behind[i] < mine).max_by(|a, b| behind[*a].total_cmp(&behind[*b]));
     let back = others().filter(|&i| behind[i] >= mine).min_by(|a, b| behind[*a].total_cmp(&behind[*b]));
 
-    let lost = place as i64 - cars[me].0;
+    let lost = place as i64 - cars[me].place;
     d.text(16.0, y0, &format!("P{place}"), 30.0, TEXT, Font::Num, HAlign::Left);
     d.text(w - 16.0, y0 + 2.0, &format!("P{class_place} en classe"), 13.0, MUTED, Font::Num, HAlign::Right);
     d.text(w - 16.0, y0 + 20.0, &if lost > 0 { format!("{lost} place(s) perdue(s)") } else { "aucune place perdue".into() }, 12.0, if lost > 0 { WARN } else { OK }, Font::Ui, HAlign::Right);
@@ -1357,7 +1536,7 @@ fn pit(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         d.label(16.0, y + 4.0, label, MUTED);
         match who {
             Some(i) => {
-                d.text(86.0, y + 1.0, &short_name(&cars[i].1), 14.0, TEXT, Font::Ui, HAlign::Left);
+                d.text(86.0, y + 1.0, &short_name(&cars[i].name), 14.0, TEXT, Font::Ui, HAlign::Left);
                 // Moins de 3 s d'écart à la sortie : on ressort dans le trafic.
                 let gap = (behind[i] - mine).abs();
                 d.text(w - 16.0, y + 1.0, &format!("{gap:.1} s"), 14.0, if gap < 3.0 { WARN } else { TEXT }, Font::Num, HAlign::Right);
@@ -1375,94 +1554,164 @@ fn pit(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
 /* ---------- Radar de proximité ---------- */
 
 fn radar(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
-    let (w, h) = (130.0_f32, 190.0_f32);
+    let size = 200.0_f32;
     if d.measuring() {
-        return (w, h);
+        return (size, size);
     }
-    let range = spec.num("range", 12.0).clamp(6.0, 30.0) as f32;
-    let scale = (h / 2.0 - 8.0) / range; // pixels du widget par mètre
-    let side = (w / 2.0 - 6.0) / scale; // portée sur les côtés, en mètres
+    let range = spec.num("range", 20.0).clamp(8.0, 40.0) as f32;
+    // Le radar apparaît avant qu'une voiture n'entre dans le cercle : on la voit arriver.
+    let show = (spec.num("show", 35.0) as f32).max(range);
+    let (cx, cy) = (size / 2.0, size / 2.0);
+    let radius = size / 2.0 - 6.0;
+    let scale = radius / range; // unités du widget par mètre
 
-    // Positions dans le repère de la carte (x, −z), lissées entre deux mesures du jeu.
+    // Comme TinyPedal : position et cap de chaque voiture lus dans sa télémétrie (repère x, −z).
+    // Fluidité : le jeu ne publie ces positions qu'une vingtaine de fois par seconde, et pas au même instant pour
+    // toutes les voitures. On garde pour chacune sa dernière mesure et sa vitesse, puis à chaque image on avance
+    // toutes les voitures (la nôtre comprise) jusqu'à l'instant présent : le radar glisse au lieu de sauter.
     let n = (data.f("session.vehicles", 0.0) as usize).min(104);
-    let mut me: Option<(f32, f32)> = None;
-    let mut others: Vec<(f32, f32, String)> = Vec::new();
+    let mut me: Option<(usize, Option<f64>)> = None;
+    let mut seen: Vec<(usize, Option<f64>)> = Vec::new();
     for i in 0..n {
         let p = format!("grid.{i:03}");
         let (Some(x), Some(z)) = (data.num(&format!("{p}.x")), data.num(&format!("{p}.z"))) else { continue };
-        let raw = (x as f32, -z as f32);
-        let e = st.car_pos.entry(i).or_insert((raw.0, raw.1, now, 0.0, 0.0));
-        if raw != (e.0, e.1) {
-            let dt = (now - e.2) as f32;
-            let (dx, dy) = (raw.0 - e.0, raw.1 - e.1);
-            let ok = dt > 0.005 && dt < 1.0 && dx.abs() + dy.abs() < 150.0 && (dx.abs() + dy.abs()) / dt < 120.0;
-            *e = (raw.0, raw.1, now, if ok { dx / dt } else { 0.0 }, if ok { dy / dt } else { 0.0 });
-        }
-        let lead = ((now - e.2) as f32).clamp(0.0, 0.25);
-        let pos = (e.0 + e.3 * lead, e.1 + e.4 * lead);
-        if data.flag(&format!("{p}.is_player")) {
-            me = Some(pos);
-        } else if !data.flag(&format!("{p}.in_pits")) {
-            others.push((pos.0, pos.1, data.text(&format!("{p}.class")).to_string()));
-        }
-    }
-    // Direction de marche : celle du dernier déplacement (gardée à l'arrêt).
-    if let Some(m) = me {
-        if let Some(last) = st.radar_last {
-            let (dx, dy) = (m.0 - last.0, m.1 - last.1);
-            let len = (dx * dx + dy * dy).sqrt();
-            if len > 0.3 && len < 60.0 {
-                let (nx, ny) = (dx / len, dy / len);
-                st.radar_dir = Some(match st.radar_dir {
-                    Some((ox, oy)) => {
-                        let (bx, by) = (ox * 0.6 + nx * 0.4, oy * 0.6 + ny * 0.4);
-                        let l = (bx * bx + by * by).sqrt().max(1e-3);
-                        (bx / l, by / l)
-                    }
-                    None => (nx, ny),
-                });
-                st.radar_last = Some(m);
-            } else if len >= 60.0 {
-                st.radar_last = Some(m);
+        let (x, y) = (x as f32, -z as f32);
+        // Instant de la mesure : celui du jeu s'il est connu, sinon l'horloge du widget.
+        let t = data.num(&format!("{p}.t")).unwrap_or(now);
+        let yaw = data.num(&format!("{p}.yaw"));
+        let player = data.flag(&format!("{p}.is_player"));
+        let e = st.car_pos.entry(i).or_insert((x, y, t, 0.0, 0.0));
+        if (x, y) != (e.0, e.1) {
+            let dt = (t - e.2) as f32;
+            let (dx, dy) = (x - e.0, y - e.1);
+            let ok = dt > 0.005 && dt < 1.0 && (dx.abs() + dy.abs()) / dt < 120.0;
+            *e = (x, y, t, if ok { dx / dt } else { 0.0 }, if ok { dy / dt } else { 0.0 });
+            if player {
+                // Repère entre le temps du jeu et notre horloge, pris à chaque nouvelle mesure de notre voiture.
+                st.radar_clock = Some((t, now));
             }
-        } else {
-            st.radar_last = Some(m);
+        }
+        if player {
+            me = Some((i, yaw));
+        } else if !data.flag(&format!("{p}.in_pits")) {
+            seen.push((i, yaw));
         }
     }
-    // Voitures voisines dans le repère du joueur : (à droite, devant), en mètres.
-    let mut near: Vec<(f32, f32, String)> = Vec::new();
-    if let (Some(m), Some((fx, fy))) = (me, st.radar_dir) {
-        for (x, y, class) in others {
-            let (rx, ry) = (x - m.0, y - m.1);
-            let (fwd, right) = (rx * fx + ry * fy, rx * -fy + ry * fx);
-            if fwd.abs() <= range && right.abs() <= side {
-                near.push((right, fwd, class));
+    // Instant présent, en temps du jeu (au plus 0,35 s après notre dernière mesure : au-delà, on n'invente plus rien).
+    let game_now = st.radar_clock.map_or(now, |(t, wall)| t + (now - wall).clamp(0.0, 0.35));
+    let at = |st: &WState, i: usize| -> (f32, f32) {
+        let e = st.car_pos[&i];
+        let lead = ((game_now - e.2) as f32).clamp(0.0, 0.35);
+        (e.0 + e.3 * lead, e.1 + e.4 * lead)
+    };
+    let others: Vec<(f32, f32, Option<f64>)> = seen.iter().map(|(i, yaw)| { let p = at(st, *i); (p.0, p.1, *yaw) }).collect();
+    let me = me.map(|(i, yaw)| { let p = at(st, i); (p.0, p.1, yaw) });
+    // Voitures voisines dans le repère du joueur : (à droite, devant) en mètres, et leur angle par rapport à nous.
+    let mut near: Vec<(f32, f32, f32)> = Vec::new();
+    if let Some((mx, my, yaw)) = me {
+        // Sans cap donné par le jeu (replay, démonstration) : la direction du dernier déplacement, gardée à l'arrêt.
+        if yaw.is_none() {
+            if let Some(last) = st.radar_last {
+                let (dx, dy) = (mx - last.0, my - last.1);
+                let len = (dx * dx + dy * dy).sqrt();
+                if len > 0.3 && len < 60.0 {
+                    let (nx, ny) = (dx / len, dy / len);
+                    st.radar_dir = Some(match st.radar_dir {
+                        Some((ox, oy)) => {
+                            let (bx, by) = (ox * 0.6 + nx * 0.4, oy * 0.6 + ny * 0.4);
+                            let l = (bx * bx + by * by).sqrt().max(1e-3);
+                            (bx / l, by / l)
+                        }
+                        None => (nx, ny),
+                    });
+                    st.radar_last = Some((mx, my));
+                } else if len >= 60.0 {
+                    st.radar_last = Some((mx, my));
+                }
+            } else {
+                st.radar_last = Some((mx, my));
+            }
+        }
+        for (x, y, their_yaw) in others {
+            let (rx, ry) = (x - mx, y - my);
+            let rel = match (yaw, st.radar_dir) {
+                // Rotation de TinyPedal : angle = cap du joueur − π ; l'axe vertical pointe vers l'arrière.
+                (Some(yaw), _) => {
+                    let (s, c) = ((yaw - std::f64::consts::PI) as f32).sin_cos();
+                    Some((c * rx - s * ry, -(c * ry + s * rx)))
+                }
+                (None, Some((fx, fy))) => Some((rx * -fy + ry * fx, rx * fx + ry * fy)),
+                _ => None,
+            };
+            if let Some((right, fwd)) = rel {
+                if (right * right + fwd * fwd).sqrt() <= show {
+                    let turn = match (yaw, their_yaw) {
+                        (Some(a), Some(b)) => (b - a) as f32,
+                        _ => 0.0,
+                    };
+                    near.push((right, fwd, turn));
+                }
             }
         }
     }
     if d.is_preview() && near.is_empty() {
-        // Aperçu de l'éditeur : deux voitures d'exemple.
-        near = vec![(-2.4, 1.5, "LMP2".into()), (2.6, -7.0, "LMGT3".into())];
+        // Aperçu de l'éditeur : trois voitures d'exemple.
+        near = vec![(-2.6, 1.2, 0.05), (2.8, -8.5, -0.08), (0.4, 15.0, 0.0)];
     }
     if near.is_empty() && spec.flag("autohide", true) {
-        return (w, h);
+        return (size, size);
     }
 
-    d.card(w, h);
-    let (cx, cy) = (w / 2.0, h / 2.0);
+    // Fond : un disque sombre, des cercles tous les 10 m et un axe, pour juger les distances d'un coup d'œil.
+    let fill = ((bg(spec) * 1.5).min(0.9) * 255.0) as u8;
+    let faint = Color32::from_white_alpha(26);
+    // Ce fond ne change jamais : il est dessiné une fois, puis recopié à chaque image (le radar tourne à 60 images/s).
+    let tag = {
+        use std::hash::{Hash, Hasher};
+        let mut hs = std::collections::hash_map::DefaultHasher::new();
+        ("radar", range.to_bits(), fill, d.cache_tag()).hash(&mut hs);
+        hs.finish()
+    };
+    d.layer(tag, 0.0, 0.0, size, size, &mut |dl| {
+        dl.circle(cx, cy, radius, Color32::from_rgba_unmultiplied(8, 11, 16, fill), Some((1.2, Color32::from_white_alpha(46))));
+        let mut ring = 10.0;
+        while ring < range - 0.5 {
+            dl.circle(cx, cy, ring * scale, Color32::TRANSPARENT, Some((1.0, faint)));
+            ring += 10.0;
+        }
+        dl.line(&[(cx, cy - radius), (cx, cy + radius)], 1.0, faint);
+        dl.line(&[(cx - radius, cy), (cx + radius, cy)], 1.0, faint);
+    });
+
+    // Une voiture : une gélule orientée (extrémités arrondies).
     let (car_w, car_l) = (2.0 * scale, 4.7 * scale);
-    // Alerte de côté : rouge si une voiture est à notre hauteur, orange si elle arrive.
+    let half = (car_l - car_w).max(0.0) / 2.0;
+    let car = |x: f32, y: f32, turn: f32, color: Color32| {
+        // Vers le haut quand la voiture roule dans notre sens ; tournée de son angle par rapport à nous.
+        let (dx, dy) = (-turn.sin(), -turn.cos());
+        let ends = [(x - dx * half, y - dy * half), (x + dx * half, y + dy * half)];
+        d.line(&ends, car_w + 2.4, Color32::from_rgba_unmultiplied(4, 6, 9, 220));
+        d.line(&ends, car_w, color);
+    };
+    // Danger d'une voiture : à notre hauteur (rouge), toute proche (orange), sinon neutre.
+    let beside = |c: &(f32, f32, f32)| c.0.abs() > 0.8 && c.0.abs() < 4.6 && c.1.abs() < 4.9;
+    let close = |c: &(f32, f32, f32)| c.0.abs() < 4.6 && c.1.abs() < 10.0;
+    for c in &near {
+        if (c.0 * c.0 + c.1 * c.1).sqrt() > range - 1.0 {
+            continue; // hors du cercle : elle a seulement fait apparaître le radar
+        }
+        let color = if beside(c) { BAD } else if close(c) { WARN } else { Color32::from_rgb(196, 204, 216) };
+        car(cx + c.0 * scale, cy - c.1 * scale, c.2, color);
+    }
+    // Alerte de côté : un trait le long de notre voiture, rouge si quelqu'un est à notre hauteur, orange s'il arrive.
     for dir in [-1.0f32, 1.0] {
-        let worst = near.iter().filter(|c| c.0 * dir > 0.6 && c.0.abs() < 4.6).map(|c| c.1.abs()).fold(f32::MAX, f32::min);
-        let color = if worst < 4.9 { Some(BAD) } else if worst < 9.0 { Some(WARN) } else { None };
-        if let Some(c) = color {
-            let x = if dir < 0.0 { 4.0 } else { w - 10.0 };
-            d.fill(x, 8.0, 6.0, h - 16.0, c);
+        let side: Vec<&(f32, f32, f32)> = near.iter().filter(|c| c.0 * dir > 0.8 && c.0.abs() < 4.6).collect();
+        let color = if side.iter().any(|c| beside(c)) { Some(BAD) } else if side.iter().any(|c| close(c)) { Some(WARN) } else { None };
+        if let Some(color) = color {
+            let x = cx + dir * (car_w / 2.0 + 0.9 * scale);
+            d.line(&[(x, cy - car_l * 0.75), (x, cy + car_l * 0.75)], (0.45 * scale).max(2.5), color);
         }
     }
-    for (right, fwd, class) in &near {
-        d.fill(cx + right * scale - car_w / 2.0, cy - fwd * scale - car_l / 2.0, car_w, car_l, class_color(class));
-    }
-    d.fill(cx - car_w / 2.0, cy - car_l / 2.0, car_w, car_l, d.accent());
-    (w, h)
+    car(cx, cy, 0.0, d.accent());
+    (size, size)
 }

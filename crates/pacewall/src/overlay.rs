@@ -317,7 +317,7 @@ pub fn run() {
             }
         }
 
-        let with_grid = layout.widgets.iter().any(|w| matches!(w.kind.as_str(), "standings" | "trackmap" | "relative" | "pit" | "radar") || (w.kind == "timing" && w.opts.get("gaps").and_then(|v| v.as_bool()).unwrap_or(true)));
+        let with_grid = layout.widgets.iter().any(|w| matches!(w.kind.as_str(), "standings" | "trackmap" | "relative" | "pit" | "radar" | "flags") || w.kind == "timing");
         // On ne lit le jeu en entier que si un widget doit être redessiné (le jeu publie plus vite que les widgets n'en ont besoin).
         let alert_due = voice.enabled && !muted && now >= next_alert;
         let want = alert_due
@@ -411,7 +411,7 @@ pub fn run() {
                 let period = Duration::from_secs_f32(1.0 / widgets::hz(&spec.kind, spec).max(0.2));
                 let due = now.duration_since(panel.last) >= period;
                 // Le graphe des inputs avance avec le temps ; les autres widgets n'ont rien à refaire sans nouvelle donnée.
-                let time_driven = spec.kind == "inputs" && spec.flag("graph", true);
+                let time_driven = (spec.kind == "inputs" && spec.flag("graph", true)) || spec.kind == "radar" || panel.state.animating();
                 let fresh = rendered.get(&i).copied() != Some(data_version);
                 if !due || !(fresh || time_driven) {
                     sleep = sleep.min(period.saturating_sub(now.duration_since(panel.last)).max(Duration::from_millis(5)));

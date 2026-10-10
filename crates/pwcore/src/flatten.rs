@@ -49,9 +49,11 @@ pub fn read_all(r: &Reader, with_grid: bool) -> Vec<Field> {
     }
 
     let n = if with_grid { (info.mNumVehicles.max(0) as usize).min(MAX_MAPPED_VEHICLES) } else { 0 };
+    let poses = if n > 0 { r.poses() } else { Vec::new() };
     for i in 0..n {
         if let Some(s) = r.vehicle_scoring(i) {
-            grid(&mut o, i, &s);
+            let id = s.mID;
+            grid(&mut o, i, &s, poses.iter().find(|p| p.id == id));
         }
     }
     o.0
@@ -187,7 +189,7 @@ fn player(o: &mut Out, s: &VehicleScoring, t: &VehicleTelemetry) {
     o.int("pit.penalties", "Pénalités", s.mNumPenalties as i64);
 }
 
-fn grid(o: &mut Out, i: usize, s: &VehicleScoring) {
+fn grid(o: &mut Out, i: usize, s: &VehicleScoring, pose: Option<&lmu::reader::Pose>) {
     let p = format!("grid.{i:03}");
     o.text(format!("{p}.driver"), "Pilote", c_str(&s.mDriverName));
     o.text(format!("{p}.class"), "Classe", c_str(&s.mVehicleClass));
@@ -200,8 +202,21 @@ fn grid(o: &mut Out, i: usize, s: &VehicleScoring) {
     o.flag(format!("{p}.in_pits"), "Aux stands", s.mInPits != 0);
     o.flag(format!("{p}.is_player"), "Joueur", s.mIsPlayer != 0);
     // Position dans le monde (mètres) pour la carte du circuit.
+    // La télémétrie de la voiture, quand elle existe, est plus fraîche que le classement : on la préfère, avec son
+    // instant, son cap et sa vitesse (pour le radar et pour prolonger le mouvement).
     let pos = s.mPos;
-    o.num(format!("{p}.x"), "m", "Position X", pos.x);
-    o.num(format!("{p}.z"), "m", "Position Z", pos.z);
+    let (x, z) = pose.filter(|p| p.x != 0.0 || p.z != 0.0).map_or((pos.x, pos.z), |p| (p.x, p.z));
+    o.num(format!("{p}.x"), "m", "Position X", x);
+    o.num(format!("{p}.z"), "m", "Position Z", z);
+    if let Some(ps) = pose {
+        // Pas d'arrondi au millième ici : l'instant sert à calculer des vitesses entre deux mesures.
+        o.0.push(Field { key: format!("{p}.t"), unit: "s", label: "Instant de la position", value: json!(ps.elapsed) });
+        o.num(format!("{p}.yaw"), "rad", "Cap", ps.yaw);
+        o.num(format!("{p}.speed"), "m/s", "Vitesse", ps.speed);
+    }
     o.num(format!("{p}.lap_dist"), "m", "Distance dans le tour", s.mLapDist);
+    // Temps écoulé dans le tour et temps au tour estimés par le jeu : la base des écarts (comme TinyPedal).
+    o.num(format!("{p}.time_into"), "s", "Temps dans le tour (estimé)", s.mTimeIntoLap);
+    o.num(format!("{p}.est_lap"), "s", "Temps au tour estimé", s.mEstimatedLapTime);
+    o.flag(format!("{p}.garage"), "Au garage", s.mInGarageStall != 0);
 }

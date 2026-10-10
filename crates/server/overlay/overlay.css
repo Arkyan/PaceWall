@@ -117,12 +117,16 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 .pw-w.notitles .pw-title { display: none; }
 
 /* Drapeaux : un ou deux drapeaux en grand, rien s'il n'y en a pas */
-.pw-flags { width: 290px; height: 44px; display: flex; gap: 8px; }
-.pw-flags .pw-fl { flex: 1; display: flex; align-items: center; justify-content: center; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; text-align: center; line-height: 1; }
-.pw-flags.one .pw-fl { font-size: 26px; }
-.pw-flags.two .pw-fl { font-size: 22px; }
-.pw-flags .pw-fl.checker { background-image: conic-gradient(#0c0c0c 25%, transparent 0 50%, #0c0c0c 0 75%, transparent 0); background-size: 22px 22px; }
-.pw-flags .pw-fl.black { box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.8); }
+.pw-flags { width: 290px; height: 104px; display: flex; gap: 8px; }
+/* Un panneau lumineux comme au bord de la piste : des points de la couleur du drapeau sur fond noir. */
+.pw-flags .pw-fl { position: relative; flex: 1; background: #090a0c; border: 1.5px solid #2e333c; box-sizing: border-box; overflow: hidden; }
+.pw-flags .pw-fl span { position: absolute; inset: 0; background-image: radial-gradient(circle, var(--fl) 0 2.7px, color-mix(in srgb, var(--fl) 22%, transparent) 2.9px 3.9px, transparent 4px); background-size: 8px 8px; background-position: center; }
+.pw-flags .pw-fl b { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 2px 14px; background: #090a0c; color: var(--fl); font-family: var(--pw-num); font-weight: 700; font-size: 44px; line-height: 1.1; letter-spacing: .08em; }
+.pw-flags.two .pw-fl b { font-size: 38px; padding: 2px 8px; }
+.pw-flags .pw-fl.blink span, .pw-flags .pw-fl.blink b { animation: pw-blink .75s steps(1) infinite; }
+@keyframes pw-blink { 0%, 59% { opacity: 1; } 60%, 100% { opacity: .22; } }
+.pw-flags .pw-fl.checker span { -webkit-mask-image: conic-gradient(#000 25%, transparent 0 50%, #000 0 75%, transparent 0); mask-image: conic-gradient(#000 25%, transparent 0 50%, #000 0 75%, transparent 0); -webkit-mask-size: 32px 32px; mask-size: 32px 32px; }
+.pw-flags .pw-fl.black span { -webkit-mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0); -webkit-mask-clip: border-box, content-box; -webkit-mask-composite: xor; mask-composite: exclude; padding: 8px; }
 
 /* Objectif de consommation, relatif, arrêt au stand, radar */
 .pw-goal { margin-top: 6px; font-family: var(--pw-num); font-size: 12px; color: var(--pw-muted); }
@@ -133,9 +137,13 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 .pw-board tr.down td.n { color: #4f9dff; }
 .pw-kv i { font-style: normal; flex: 1; padding: 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pw-kv b.pw-warn { color: var(--pw-warn); }
-.pw-radar { position: relative; padding: 0; box-sizing: border-box; }
-.pw-radar > i { position: absolute; top: 8px; bottom: 8px; width: 6px; }
-.pw-radar > i.l { left: 4px; }
-.pw-radar > i.r { right: 4px; }
-.pw-radar s, .pw-radar > b { position: absolute; display: block; text-decoration: none; }
-.pw-radar > b { background: var(--pw-accent); }
+.pw-radar { position: relative; }
+.pw-radar .disc { position: absolute; left: 6px; top: 6px; border-radius: 50%; box-sizing: border-box;
+  background: rgba(8, 11, 16, calc(min(.9, var(--bg, .55) * 1.5))); border: 1.2px solid rgba(255,255,255,.18); }
+.pw-radar .disc u { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; border: 1px solid rgba(255,255,255,.1); box-sizing: border-box; }
+.pw-radar .disc i { position: absolute; background: rgba(255,255,255,.1); }
+.pw-radar .disc i.h { left: 0; right: 0; top: 50%; height: 1px; }
+.pw-radar .disc i.v { top: 0; bottom: 0; left: 50%; width: 1px; }
+.pw-radar s { position: absolute; left: 0; top: 0; display: block; text-decoration: none; box-shadow: 0 0 0 1.2px rgba(4,6,9,.86); transform-origin: 50% 50%; will-change: transform; }
+.pw-radar s.self { background: var(--pw-accent); }
+.pw-radar > b { position: absolute; width: 4px; border-radius: 2px; }

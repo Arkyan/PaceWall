@@ -153,6 +153,7 @@ PW.widgets.timing = {
   hz: 5, size: [280, 170],
   options: [
     { id: 'gaps', label: 'Écarts devant / derrière', type: 'bool', def: true },
+    { id: 'place', label: 'Place affichée', type: 'select', choices: [['class', 'En classe'], ['overall', 'Au général']], def: 'class' },
   ],
   mount(root, o) {
     const card = PW.tpl(`<div class="pw-card"><div class="pw-timing">
@@ -166,7 +167,9 @@ PW.widgets.timing = {
     const b = PW.bind(card);
     return {
       update(g) {
-        b.text('pos', 'P' + g('position.place', '—'));
+        // Place en classe par défaut ; au général si demandé ou si le classement manque.
+        const mine = o.place === 'overall' ? null : nearCars(g).find(c => c.me);
+        b.text('pos', 'P' + (mine ? mine.rank : g('position.place', '—')));
         const d = g('lap.delta_best');
         b.text('delta', F.signed(d, 2));
         b.cls('delta', d == null ? '' : d <= 0 ? 'pw-ok' : 'pw-bad');
@@ -174,23 +177,14 @@ PW.widgets.timing = {
         b.text('last', F.lap(g('position.last_lap')));
         b.text('best', F.lap(g('position.best_lap')));
         if (b.el.ahead) {
-          // Voitures qui roulent juste devant et juste derrière sur la piste : distance sur le tour / notre vitesse.
-          const n = g('session.vehicles', 0), L = g('session.track_length', 0);
+          // Voitures qui roulent juste devant et juste derrière sur la piste (voir nearCars).
           let a = g('gap.car_ahead') > 0 ? g('gap.car_ahead') : g('position.behind_next', 0), r = g('gap.car_behind', 0);
-          let me = -1;
-          for (let i = 0; i < n; i++) if (g('grid.' + String(i).padStart(3, '0') + '.is_player')) { me = i; break; }
-          if (me >= 0 && L > 100) {
-            const mp = 'grid.' + String(me).padStart(3, '0');
-            const md = g(mp + '.lap_dist', 0), myPit = g(mp + '.in_pits', false), v = Math.max(15, g('player.speed', 0) / 3.6);
-            let da = Infinity, db = Infinity;
-            for (let i = 0; i < n; i++) {
-              if (i === me) continue;
-              const p = 'grid.' + String(i).padStart(3, '0'), dist = g(p + '.lap_dist');
-              if (dist == null || (g(p + '.in_pits', false) && !myPit)) continue;
-              const d = (((dist - md) % L) + L) % L;
-              da = Math.min(da, d); db = Math.min(db, L - d);
-            }
-            if (da < Infinity) { a = Math.max(0.1, da / v); r = Math.max(0.1, db / v); }
+          const cars = nearCars(g), me = cars.find(c => c.me);
+          if (me) {
+            const on = cars.filter(c => !c.me && (!c.pit || me.pit));
+            const da = Math.min(Infinity, ...on.filter(c => c.secs > 0).map(c => c.secs));
+            const db = Math.min(Infinity, ...on.filter(c => c.secs <= 0).map(c => -c.secs));
+            if (da < Infinity || db < Infinity) { a = da < Infinity ? Math.max(0.1, da) : 0; r = db < Infinity ? Math.max(0.1, db) : 0; }
           }
           b.text('ahead', a > 0 ? F.n(a, 1) + ' s' : '—');
           b.text('behind', r > 0 ? F.n(r, 1) + ' s' : '—');
@@ -304,7 +298,8 @@ PW.widgets.standings = {
           const p = `grid.${pad(i)}`, place = g(p + '.place');
           if (place == null) continue;
           all.push({ place, name: g(p + '.driver', ''), cls: g(p + '.class', ''), dist: g(p + '.laps', 0) * length + g(p + '.lap_dist', 0),
-            next: Math.max(0, g(p + '.behind_next', 0)), best: g(p + '.best_lap', 0), pit: g(p + '.in_pits', false), me: g(p + '.is_player', false) });
+            next: Math.max(0, g(p + '.behind_next', 0)), best: g(p + '.best_lap', 0), pit: g(p + '.in_pits', false), me: g(p + '.is_player', false),
+            into: g(p + '.time_into', 0), est: g(p + '.est_lap', 0) });
         }
         all.sort((a, b) => a.place - b.place);
         const mi = all.findIndex(c => c.me), me = all[mi];
@@ -318,6 +313,9 @@ PW.widgets.standings = {
         // Écart en secondes (positif : derrière moi) : somme des retards « sur la voiture devant » donnés par le jeu,
         // sinon distance / vitesse.
         const gapOf = j => {
+          // D'abord les temps dans le tour (méthode de TinyPedal).
+          const timed = j < mi ? PW.interval(all[j], me, length) : PW.interval(me, all[j], length);
+          if (timed != null) return j < mi ? -timed : timed;
           let chain = 0;
           if (j < mi) for (let k = j + 1; k <= mi; k++) chain -= all[k].next; else for (let k = mi + 1; k <= j; k++) chain += all[k].next;
           const dist = me.dist - all[j].dist;
@@ -542,9 +540,12 @@ PW.widgets.trackmap = {
 // Ordre : rouge, neutralisation, noir, jaune, bleu, blanc, vert (8 s après une relance), damier.
 PW.widgets.flags = {
   name: 'Drapeaux',
-  keys: ['session.phase', 'session.yellow', 'session.sector_yellow.', 'player.blue_flag', 'player.finish_status'],
-  hz: 4, size: [290, 44],
-  options: [],
+  keys: ['session.phase', 'session.yellow', 'session.sector_yellow.', 'player.blue_flag', 'player.finish_status', 'grid.', 'session.vehicles', 'session.track_length', 'player.speed'],
+  hz: 4, size: [290, 104],
+  options: [
+    { id: 'anim', label: 'Clignotement (jaune, bleu, rouge)', type: 'bool', def: true },
+    { id: 'blueclass', label: 'Bleu « LMP » quand une classe plus rapide arrive', type: 'bool', def: true },
+  ],
   mount(root, o) {
     const box = PW.tpl('<div class="pw-flags"></div>').firstChild;
     root.appendChild(box);
@@ -558,9 +559,10 @@ PW.widgets.flags = {
         if (phase === 7 || ystate === 7) add('#ff4d5e', '', '#fff');
         if (phase === 6) add('#ffb020', '', '#111'); // neutralisation : orange, distincte du jaune d'un secteur
         if (finish === 3) add('#0c0c0c', '', '#fff', 'black');
-        const ys = [1, 2, 3].filter(s => g('session.sector_yellow.' + s, false)).map(s => 'S' + s);
-        if (ys.length) add('#ffd633', ys.join(' '), '#111');
-        if (g('player.blue_flag', false)) add('#4f9dff', '', '#fff');
+        const ys = [1, 2, 3].filter(s => g('session.sector_yellow.' + s, false));
+        if (ys.length) add('#ffd633', 'S' + ys.join(''), '#111');
+        // Bleu : c'est le jeu qui le déclenche ; le sigle indique une voiture d'une classe plus rapide derrière nous.
+        if (g('player.blue_flag', false)) add('#4f9dff', o.blueclass !== false ? PW.fasterClassBehind(g) : '', '#fff');
         if (ystate === 5) add('#f0f4fa', '', '#111');
         if (now < greenUntil) add('#38e07b', '', '#111');
         if (phase === 8 || finish === 1) add('#fff', '', '#111', 'checker');
@@ -570,8 +572,11 @@ PW.widgets.flags = {
         box.className = 'pw-flags ' + (shown.length === 1 ? 'one' : 'two');
         box.replaceChildren(...shown.map(f => {
           const el = document.createElement('div');
-          el.className = 'pw-fl ' + f.cls; el.style.background = f.bg; el.style.color = f.fg;
-          el.textContent = f.label;
+          // Clignotent : le rouge, le bleu et le jaune de secteur, comme au bord de la piste.
+          const blink = o.anim && (f.bg === '#ff4d5e' || f.bg === '#4f9dff' || f.label);
+          el.className = 'pw-fl ' + f.cls + (blink ? ' blink' : ''); el.style.setProperty('--fl', f.cls === 'black' ? '#eceff6' : f.bg);
+          el.innerHTML = '<span></span>' + (f.label ? '<b></b>' : '');
+          if (f.label) el.lastChild.textContent = f.label;
           return el;
         }));
       },
@@ -584,7 +589,29 @@ PW.widgets.flags = {
 const gridPad = i => 'grid.' + String(i).padStart(3, '0');
 const shortName = n => { const p = String(n).trim().split(/\s+/); return p.length > 1 ? p[0][0] + '. ' + p.slice(1).join(' ') : n; };
 
-// Les voitures du classement, situées par rapport au joueur sur la piste (ahead > 0 : devant lui, en mètres).
+// Retard, en secondes, de `behind` sur `ahead` (classé devant lui), calculé comme TinyPedal : la différence de leurs
+// temps écoulés dans le tour, estimés par le jeu ; si celui de devant vient de passer la ligne, on ajoute un tour de
+// celui de derrière. null si le jeu ne donne pas ces temps.
+PW.interval = (ahead, behind, length) => {
+  if (!(ahead.est > 1) || !(behind.est > 1)) return null;
+  if ((ahead.dist - behind.dist) / Math.max(1, length) < 0) return 0;
+  const gap = ahead.into - behind.into;
+  return gap >= 0 ? gap : gap + behind.est;
+};
+
+// Rapidité d'une classe et son sigle (plus le nombre est grand, plus elle est rapide) ; null si inconnue.
+PW.classSpeed = c => { c = String(c).toLowerCase(); return c.includes('hyper') ? [5, 'HYP'] : c.includes('lmp3') ? [3, 'LMP'] : c.includes('lmp') ? [4, 'LMP'] : c.includes('gte') ? [2, 'GTE'] : c.includes('gt3') ? [1, 'GT'] : null; };
+// Sigle de la classe de la voiture qui arrive juste derrière nous (à moins de 15 s) si elle est plus rapide que la
+// nôtre, '' sinon.
+PW.fasterClassBehind = g => {
+  const cars = nearCars(g), me = cars.find(c => c.me);
+  if (!me) return '';
+  const behind = cars.filter(c => !c.me && !c.pit && c.secs < 0 && c.secs > -15).sort((a, b) => b.secs - a.secs)[0];
+  const theirs = behind && PW.classSpeed(behind.cls), mine = PW.classSpeed(me.cls);
+  return theirs && mine && theirs[0] > mine[0] ? 'LMP' : ''; // toujours « LMP », quelle que soit la classe
+};
+
+// Les voitures du classement, situées par rapport au joueur sur la piste (secs > 0 : devant lui, en secondes).
 function nearCars(g) {
   const n = g('session.vehicles', 0), L = g('session.track_length', 0);
   let me = -1;
@@ -592,12 +619,21 @@ function nearCars(g) {
   if (me < 0 || L < 100) return [];
   const total = i => g(gridPad(i) + '.laps', 0) * L + g(gridPad(i) + '.lap_dist', 0);
   const myDist = g(gridPad(me) + '.lap_dist', 0), myTotal = total(me), cars = [];
+  // Écart en temps : différence des temps dans le tour, ramenée à plus ou moins un demi-tour du joueur ;
+  // sans ces temps, distance / vitesse la plus élevée des deux voitures.
+  const myTime = g(gridPad(me) + '.time_into', 0), myLap = g(gridPad(me) + '.est_lap', 0), mySpeed = g('player.speed', 0) / 3.6;
+  const inGarage = g(gridPad(me) + '.garage', false);
   for (let i = 0; i < n; i++) {
     const p = gridPad(i), dist = g(p + '.lap_dist');
     if (dist == null) continue;
+    if (i !== me && g(p + '.garage', false) && !inGarage) continue;
     let ahead = (((dist - myDist) % L) + L) % L;
     if (ahead > L / 2) ahead -= L;
-    cars.push({ name: g(p + '.driver', ''), cls: g(p + '.class', ''), place: g(p + '.place', 0), rank: 0, ahead: i === me ? 0 : ahead,
+    const t = g(p + '.time_into');
+    let secs;
+    if (t != null && myLap > 1) { secs = (((t - myTime) % myLap) + myLap) % myLap; if (secs > myLap / 2) secs -= myLap; }
+    else secs = ahead / Math.max(15, mySpeed, g(p + '.speed', 0));
+    cars.push({ name: g(p + '.driver', ''), cls: g(p + '.class', ''), place: g(p + '.place', 0), rank: 0, secs: i === me ? 0 : secs,
       laps: Math.round((total(i) - myTotal - ahead) / L), pit: g(p + '.in_pits', false), me: i === me });
   }
   const seen = {};
@@ -612,7 +648,7 @@ PW.widgets.relative = {
   options: [
     { id: 'ahead', label: 'Voitures devant', type: 'number', min: 0, max: 6, step: 1, def: 3 },
     { id: 'behind', label: 'Voitures derrière', type: 'number', min: 0, max: 6, step: 1, def: 3 },
-    { id: 'place', label: 'Place affichée', type: 'select', choices: [['overall', 'Au général'], ['class', 'En classe']], def: 'overall' },
+    { id: 'place', label: 'Place affichée', type: 'select', choices: [['class', 'En classe'], ['overall', 'Au général']], def: 'class' },
   ],
   mount(root, o) {
     const rows = o.ahead + o.behind + 1;
@@ -627,19 +663,18 @@ PW.widgets.relative = {
     return {
       update(g) {
         const cars = nearCars(g), me = cars.find(c => c.me);
-        const speed = Math.max(15, g('player.speed', 0) / 3.6);
         const list = new Array(rows).fill(null);
         if (me) {
           // Les voitures aux stands ne comptent pas, sauf si on y est aussi.
           const onTrack = c => !c.me && (!c.pit || me.pit);
-          const front = cars.filter(c => onTrack(c) && c.ahead > 0).sort((a, b) => a.ahead - b.ahead).slice(0, o.ahead).reverse();
-          const back = cars.filter(c => onTrack(c) && c.ahead <= 0).sort((a, b) => b.ahead - a.ahead).slice(0, o.behind);
+          const front = cars.filter(c => onTrack(c) && c.secs > 0).sort((a, b) => a.secs - b.secs).slice(0, o.ahead).reverse();
+          const back = cars.filter(c => onTrack(c) && c.secs <= 0).sort((a, b) => b.secs - a.secs).slice(0, o.behind);
           // Le joueur reste à sa ligne, même s'il manque des voitures devant.
           [...front, me, ...back].forEach((c, i) => { list[o.ahead - front.length + i] = c; });
         }
         trs.forEach((r, i) => {
           const c = list[i];
-          const gap = c && !c.me ? F.signed(-c.ahead / speed, 1) : '';
+          const gap = c && !c.me ? F.signed(-c.secs, 1) : '';
           const key = c ? [c.place, c.rank, c.name, c.cls, c.me, c.pit, c.laps, gap].join('|') : '';
           if (r.key === key) return;
           r.key = key;
@@ -648,7 +683,7 @@ PW.widgets.relative = {
           // Rouge : il nous a pris un tour. Bleu : on lui a pris un tour. Gris : aux stands.
           r.tr.className = (c.me ? 'me ' : '') + (c.pit ? 'pit' : c.laps > 0 ? 'up' : c.laps < 0 ? 'down' : '');
           r.c.style.background = classColor(c.cls);
-          r.p.textContent = o.place === 'class' ? c.rank : c.place;
+          r.p.textContent = o.place === 'overall' ? c.place : c.rank;
           r.n.textContent = shortName(c.name);
           r.g.textContent = gap;
         });
@@ -659,7 +694,7 @@ PW.widgets.relative = {
 
 PW.widgets.pit = {
   name: 'Arrêt au stand',
-  keys: ['grid.', 'session.vehicles', 'session.type'],
+  keys: ['grid.', 'session.vehicles', 'session.type', 'session.track_length'],
   hz: 1, size: [300, 120],
   options: [{ id: 'loss', label: 'Temps perdu par un arrêt (s)', type: 'number', min: 20, max: 150, step: 1, def: 60 }],
   mount(root, o) {
@@ -672,15 +707,23 @@ PW.widgets.pit = {
     const b = PW.bind(card);
     return {
       update(g) {
-        const n = g('session.vehicles', 0), type = g('session.type', -1), cars = [];
+        const n = g('session.vehicles', 0), type = g('session.type', -1), cars = [], length = Math.max(1, g('session.track_length', 1));
         for (let i = 0; i < n; i++) {
           const p = gridPad(i), place = g(p + '.place');
-          if (place != null) cars.push({ place, name: g(p + '.driver', ''), cls: g(p + '.class', ''), next: Math.max(0, g(p + '.behind_next', 0)), me: g(p + '.is_player', false) });
+          if (place != null) cars.push({ place, name: g(p + '.driver', ''), cls: g(p + '.class', ''), next: Math.max(0, g(p + '.behind_next', 0)), me: g(p + '.is_player', false),
+            dist: g(p + '.laps', 0) * length + g(p + '.lap_dist', 0), into: g(p + '.time_into', 0), est: g(p + '.est_lap', 0) });
         }
         cars.sort((a, c) => a.place - c.place);
-        // Retard de chaque voiture sur le leader : la somme des écarts « sur la voiture devant ».
+        // Retard de chaque voiture sur le leader : somme des écarts entre voitures qui se suivent (temps dans le
+        // tour, tours de retard compris ; sinon l'écart donné par le jeu).
         let sum = 0;
-        cars.forEach((c, i) => { sum += i ? c.next : 0; c.behind = sum; });
+        cars.forEach((c, i) => {
+          if (i) {
+            const t = PW.interval(cars[i - 1], c, length);
+            sum += t == null ? c.next : t + Math.max(0, Math.floor((cars[i - 1].dist - c.dist) / length)) * c.est;
+          }
+          c.behind = sum;
+        });
         const me = cars.find(c => c.me);
         if (!me || !(type >= 10 && type <= 13)) {
           b.text('place', '—'); b.text('cls', ''); b.text('lost', 'Estimation en course uniquement'); b.cls('lost', '');
@@ -714,34 +757,57 @@ PW.widgets.pit = {
 PW.widgets.radar = {
   name: 'Radar de proximité',
   keys: ['grid.', 'session.vehicles'],
-  hz: o => +o.fps || 20, size: [130, 190],
+  hz: o => +o.fps || 60, size: [200, 200],
   options: [
-    { id: 'range', label: 'Portée devant et derrière (m)', type: 'number', min: 6, max: 30, step: 1, def: 12 },
+    { id: 'range', label: 'Rayon affiché (m)', type: 'number', min: 8, max: 40, step: 1, def: 20 },
     { id: 'autohide', label: 'Masquer quand personne n’est proche', type: 'bool', def: true },
-    { id: 'fps', label: 'Fluidité (images/s)', type: 'select', choices: [['10', '10'], ['20', '20'], ['30', '30']], def: '20' },
+    { id: 'show', label: 'Apparaît quand une voiture est à moins de (m)', type: 'number', min: 10, max: 80, step: 5, def: 35 },
+    { id: 'fps', label: 'Fluidité (images/s)', type: 'select', choices: [['15', '15'], ['30', '30'], ['60', '60 (le plus fluide)']], def: '60' },
   ],
   mount(root, o) {
-    const W = 130, H = 190, range = Math.max(6, Math.min(30, +o.range || 12));
-    const scale = (H / 2 - 8) / range, side = (W / 2 - 6) / scale;
-    const card = PW.tpl(`<div class="pw-card pw-radar" style="width:${W}px;height:${H}px"><i class="l"></i><i class="r"></i><div class="cars"></div><b></b></div>`).firstChild;
+    const S = 200, R = S / 2 - 6, range = Math.max(8, Math.min(40, +o.range || 20)), show = Math.max(range, +o.show || 35);
+    const scale = R / range, carW = 2 * scale, carL = 4.7 * scale;
+    // Un disque sombre, des cercles tous les 10 m et un axe, pour juger les distances d'un coup d'œil.
+    let rings = '';
+    for (let m = 10; m < range - 0.5; m += 10) rings += `<u style="width:${2 * m * scale}px;height:${2 * m * scale}px"></u>`;
+    const card = PW.tpl(`<div class="pw-radar" style="width:${S}px;height:${S}px"><div class="disc" style="width:${2 * R}px;height:${2 * R}px">${rings}<i class="h"></i><i class="v"></i></div><b class="l"></b><b class="r"></b><div class="cars"></div><s class="self"></s></div>`).firstChild;
     root.appendChild(card);
-    const [left, right, box, self] = card.children;
-    const carW = 2 * scale, carL = 4.7 * scale;
-    self.style.cssText = `left:${W / 2 - carW / 2}px;top:${H / 2 - carL / 2}px;width:${carW}px;height:${carL}px`;
+    const left = card.querySelector('b.l'), right = card.querySelector('b.r'), box = card.querySelector('.cars'), self = card.querySelector('.self');
+    const place = (el, rgt, fwd, turn) => { el.style.transform = `translate(${S / 2 + rgt * scale - carW / 2}px, ${S / 2 - fwd * scale - carL / 2}px) rotate(${(-turn * 180 / Math.PI).toFixed(1)}deg)`; };
+    for (const el of [self]) { el.style.width = carW + 'px'; el.style.height = carL + 'px'; el.style.borderRadius = carW / 2 + 'px'; }
+    place(self, 0, 0, 0);
+    for (const [el, sign] of [[left, -1], [right, 1]]) {
+      el.style.cssText = `left:${S / 2 + sign * (carW / 2 + 0.9 * scale) - 2}px;top:${S / 2 - carL * 0.75}px;height:${carL * 1.5}px`;
+    }
     let last = null, dir = null;
+    const seen = new Map(); // dernière mesure de chaque voiture, pour prolonger son mouvement
     return {
       update(g) {
-        const n = g('session.vehicles', 0), others = [];
-        let me = null;
+        // Comme TinyPedal : position et cap lus dans la télémétrie de chaque voiture (repère x, −z) ; chaque voiture
+        // est avancée jusqu'à l'instant de celle du joueur, à sa vitesse entre ses deux dernières mesures.
+        const n = g('session.vehicles', 0), others = [], clock = performance.now() / 1000;
+        let me = null, yaw = null, myTime = null;
         for (let i = 0; i < n; i++) {
           const p = gridPad(i), x = g(p + '.x'), z = g(p + '.z');
           if (x == null || z == null) continue;
-          // Repère de la carte : (x, −z).
-          if (g(p + '.is_player')) me = [x, -z];
-          else if (!g(p + '.in_pits', false)) others.push([x, -z, g(p + '.class', '')]);
+          const t = g(p + '.t');
+          if (g(p + '.is_player')) { me = [x, -z]; yaw = g(p + '.yaw', null); myTime = t; }
+          else if (!g(p + '.in_pits', false)) others.push([i, x, -z, t == null ? clock : t, g(p + '.yaw', null)]);
         }
-        // Direction de marche : celle du dernier déplacement (gardée à l'arrêt).
-        if (me) {
+        const now = myTime == null ? clock : myTime;
+        const moved = others.map(([i, x, y, t, theirYaw]) => {
+          let s = seen.get(i);
+          if (!s) seen.set(i, s = { x, y, t, vx: 0, vy: 0 });
+          if (x !== s.x || y !== s.y) {
+            const dt = t - s.t, dx = x - s.x, dy = y - s.y;
+            const ok = dt > 0.005 && dt < 1 && (Math.abs(dx) + Math.abs(dy)) / dt < 120;
+            s.vx = ok ? dx / dt : 0; s.vy = ok ? dy / dt : 0; s.x = x; s.y = y; s.t = t;
+          }
+          const lead = Math.max(0, Math.min(0.3, now - s.t));
+          return [s.x + s.vx * lead, s.y + s.vy * lead, theirYaw];
+        });
+        // Sans cap donné par le jeu (démonstration) : la direction du dernier déplacement, gardée à l'arrêt.
+        if (me && yaw == null) {
           if (last) {
             const dx = me[0] - last[0], dy = me[1] - last[1], len = Math.hypot(dx, dy);
             if (len > 0.3 && len < 60) {
@@ -751,23 +817,39 @@ PW.widgets.radar = {
             } else if (len >= 60) last = me;
           } else last = me;
         }
-        // Voitures voisines dans le repère du joueur : (à droite, devant), en mètres.
+        // Voitures voisines dans le repère du joueur : (à droite, devant) en mètres, et leur angle par rapport à nous.
         const near = [];
-        if (me && dir) for (const [x, y, cls] of others) {
-          const rx = x - me[0], ry = y - me[1], fwd = rx * dir[0] + ry * dir[1], rgt = rx * -dir[1] + ry * dir[0];
-          if (Math.abs(fwd) <= range && Math.abs(rgt) <= side) near.push([rgt, fwd, cls]);
+        if (me && (yaw != null || dir)) for (const [x, y, theirYaw] of moved) {
+          const rx = x - me[0], ry = y - me[1];
+          let rgt, fwd;
+          if (yaw != null) {
+            // Rotation de TinyPedal : angle = cap du joueur − π ; l'axe vertical pointe vers l'arrière.
+            const a = yaw - Math.PI, s = Math.sin(a), c = Math.cos(a);
+            rgt = c * rx - s * ry; fwd = -(c * ry + s * rx);
+          } else { fwd = rx * dir[0] + ry * dir[1]; rgt = rx * -dir[1] + ry * dir[0]; }
+          if (Math.hypot(rgt, fwd) <= show) near.push([rgt, fwd, yaw != null && theirYaw != null ? theirYaw - yaw : 0]);
         }
         card.style.visibility = !near.length && o.autohide ? 'hidden' : '';
-        // Alerte de côté : rouge si une voiture est à notre hauteur, orange si elle arrive.
+        // Danger : à notre hauteur (rouge), toute proche (orange), sinon neutre.
+        const beside = c => Math.abs(c[0]) > 0.8 && Math.abs(c[0]) < 4.6 && Math.abs(c[1]) < 4.9;
+        const close = c => Math.abs(c[0]) < 4.6 && Math.abs(c[1]) < 10;
         for (const [el, sign] of [[left, -1], [right, 1]]) {
-          const worst = Math.min(Infinity, ...near.filter(c => c[0] * sign > 0.6 && Math.abs(c[0]) < 4.6).map(c => Math.abs(c[1])));
-          el.style.background = worst < 4.9 ? 'var(--pw-bad)' : worst < 9 ? 'var(--pw-warn)' : 'transparent';
+          const side = near.filter(c => c[0] * sign > 0.8 && Math.abs(c[0]) < 4.6);
+          el.style.background = side.some(beside) ? 'var(--pw-bad)' : side.some(close) ? 'var(--pw-warn)' : 'transparent';
         }
-        while (box.children.length < near.length) box.appendChild(document.createElement('s'));
+        // Les voitures hors du cercle ont seulement fait apparaître le radar.
+        const drawn = near.filter(c => Math.hypot(c[0], c[1]) <= range - 1);
+        while (box.children.length < drawn.length) {
+          const el = document.createElement('s');
+          el.style.width = carW + 'px'; el.style.height = carL + 'px'; el.style.borderRadius = carW / 2 + 'px';
+          box.appendChild(el);
+        }
         [...box.children].forEach((el, i) => {
-          const c = near[i];
+          const c = drawn[i];
           el.hidden = !c;
-          if (c) el.style.cssText = `left:${W / 2 + c[0] * scale - carW / 2}px;top:${H / 2 - c[1] * scale - carL / 2}px;width:${carW}px;height:${carL}px;background:${classColor(c[2])}`;
+          if (!c) return;
+          place(el, c[0], c[1], c[2]);
+          el.style.background = beside(c) ? 'var(--pw-bad)' : close(c) ? 'var(--pw-warn)' : '#c4ccd8';
         });
       },
     };

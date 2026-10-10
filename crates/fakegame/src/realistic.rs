@@ -124,7 +124,29 @@ unsafe fn publish(base: *mut ObjectOut, sim: &Sim) {
         w.mOptimalTemp = 88.0;
         w.mCompoundType = if sim.weather_rain > 0.08 { 3 } else { 1 };
     }
+    // Position et cap du joueur, puis une télémétrie minimale pour chaque autre voiture (le vrai jeu en donne une
+    // par voiture) : identifiant, instant, position, cap, vitesse. Les voitures sont décalées de part et d'autre de
+    // la trajectoire pour que le radar ait quelque chose à montrer.
+    let pose = |c: &crate::sim::Car, v: &mut VehicleTelemetry| {
+        let (a, b) = (track.pos(c.s), track.pos(c.s + 1.0));
+        let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
+        let n = (dx * dx + dz * dz).sqrt().max(1e-6);
+        let (dx, dz) = (dx / n, dz / n);
+        let side = if c.id == 0 { 0.0 } else if c.id % 2 == 0 { 1.7 } else { -1.7 };
+        v.mPos = Vect3 { x: a[0] - dz * side, y: 0.0, z: a[1] + dx * side };
+        // Cap tel que TinyPedal le relit : atan2(mOri[2].x, mOri[2].z) dans le repère (x, −z).
+        v.mOri[2] = Vect3 { x: dx, y: 0.0, z: -dz };
+        v.mLocalVel = Vect3 { x: 0.0, y: 0.0, z: -c.v };
+        v.mElapsedTime = sim.t;
+    };
+    pose(p, &mut v);
     addr_of_mut!((*base).telemetry.telemInfo).cast::<VehicleTelemetry>().write_unaligned(v);
+    for (k, c) in sim.cars.iter().enumerate().skip(1).take(103) {
+        let mut o: VehicleTelemetry = zeroed();
+        o.mID = c.id as i32;
+        pose(c, &mut o);
+        addr_of_mut!((*base).telemetry.telemInfo).cast::<VehicleTelemetry>().add(k).write_unaligned(o);
+    }
     addr_of_mut!((*base).telemetry.activeVehicles).write_unaligned(sim.cars.len().min(104) as u8);
     addr_of_mut!((*base).telemetry.playerVehicleIdx).write_unaligned(0);
     addr_of_mut!((*base).telemetry.playerHasVehicle).write_unaligned(1);
@@ -170,6 +192,8 @@ unsafe fn publish(base: *mut ObjectOut, sim: &Sim) {
         s.mPos = Vect3 { x: pos[0], y: 0.0, z: pos[1] };
         s.mBestLapTime = c.best_lap;
         s.mLastLapTime = c.last_lap;
+        s.mTimeIntoLap = if c.started { sim.t - c.lap_start } else { 0.0 };
+        s.mEstimatedLapTime = if c.best_lap > 0.0 { c.best_lap } else { track.reference_lap() };
         s.mCurSector1 = c.cur_sectors[0];
         s.mCurSector2 = c.cur_sectors[1];
         s.mLastSector1 = c.last_sectors[0];

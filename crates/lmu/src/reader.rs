@@ -116,6 +116,32 @@ impl Reader {
         }
     }
 
+    /// Position, cap et vitesse de toutes les voitures, lus dans leur télémétrie (plus fraîche et plus précise que le
+    /// classement). Ne lit que ces champs, pas les ~1,9 Ko de chaque voiture.
+    pub fn poses(&self) -> Vec<Pose> {
+        let count = (self.active_vehicles() as usize).min(MAX_MAPPED_VEHICLES);
+        unsafe {
+            let first = addr_of!((*self.base()).telemetry.telemInfo) as *const VehicleTelemetry;
+            (0..count)
+                .map(|i| {
+                    let t = first.add(i);
+                    let pos = addr_of!((*t).mPos).read_unaligned();
+                    let vel = addr_of!((*t).mLocalVel).read_unaligned();
+                    let ori = addr_of!((*t).mOri).read_unaligned();
+                    Pose {
+                        id: addr_of!((*t).mID).read_unaligned(),
+                        elapsed: addr_of!((*t).mElapsedTime).read_unaligned(),
+                        x: pos.x,
+                        z: pos.z,
+                        // Même formule que TinyPedal : angle de la troisième ligne de la matrice d'orientation.
+                        yaw: ori[2].x.atan2(ori[2].z),
+                        speed: (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).sqrt(),
+                    }
+                })
+                .collect()
+        }
+    }
+
     pub fn player_telemetry(&self) -> Option<VehicleTelemetry> {
         self.telemetry(self.player_indexes()?.1)
     }
@@ -128,4 +154,15 @@ impl Drop for Reader {
             let _ = CloseHandle(self.handle);
         }
     }
+}
+
+/// Position (monde, mètres), cap (radians) et vitesse (m/s) d'une voiture à l'instant `elapsed` de sa télémétrie.
+#[derive(Clone, Copy, Debug)]
+pub struct Pose {
+    pub id: i32,
+    pub elapsed: f64,
+    pub x: f64,
+    pub z: f64,
+    pub yaw: f64,
+    pub speed: f64,
 }
