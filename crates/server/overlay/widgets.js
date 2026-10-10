@@ -34,7 +34,7 @@ const F = {
 };
 PW.fmt = F;
 
-const lapsClass = v => v == null ? '' : v < 3 ? 'pw-bad' : v < 6 ? 'pw-warn' : '';
+const lapsClass = v => v == null ? '' : v < PW.prefs.thr_fuel_crit ? 'pw-bad' : v < PW.prefs.thr_fuel_warn ? 'pw-warn' : '';
 const barColor = f => f < 0.15 ? 'var(--pw-bad)' : f < 0.3 ? 'var(--pw-warn)' : 'var(--pw-ok)';
 
 /* ---------- Carburant et énergie ---------- */
@@ -46,7 +46,7 @@ function resourceBlock(id, title, unit, decimals) {
       <div><small>Tours</small><b data-k="${id}laps" data-base="">—</b></div>
       <div><small>Conso</small><b data-k="${id}per">—</b></div>
       <div><small>À ajouter</small><b data-k="${id}add">—</b></div>
-    </div>`;
+    </div><div class="pw-goal" data-k="${id}goal"></div>`;
 }
 
 PW.widgets.fuel = {
@@ -56,9 +56,12 @@ PW.widgets.fuel = {
   options: [
     { id: 'energy', label: 'Afficher l’énergie virtuelle', type: 'bool', def: true },
     { id: 'margin', label: 'Marge de sécurité (tours)', type: 'number', min: 0, max: 3, step: 0.5, def: 1 },
+    { id: 'target', label: 'Objectif de consommation (+1 tour)', type: 'bool', def: true },
   ],
   mount(root, o) {
-    const card = PW.tpl(`<div class="pw-card">${resourceBlock('f', 'Carburant', 'L')}${o.energy ? '<div class="pw-sep"></div>' + resourceBlock('e', 'Énergie virtuelle', '%') : ''}</div>`).firstChild;
+    const U = PW.unit, fuelName = U.fuelName();
+    const vol = v => v == null ? v : U.fuel(v);
+    const card = PW.tpl(`<div class="pw-card">${resourceBlock('f', 'Carburant', fuelName)}${o.energy ? '<div class="pw-sep"></div>' + resourceBlock('e', 'Énergie virtuelle', '%') : ''}</div>`).firstChild;
     root.appendChild(card);
     const b = PW.bind(card);
     const fill = (id, level, pct, per, laps, add, limiting, decimals) => {
@@ -72,11 +75,21 @@ PW.widgets.fuel = {
       b.text(id + 'per', per == null ? '—' : F.n(per, decimals === 1 ? 2 : 1));
       b.text(id + 'add', add == null ? '—' : '+' + F.n(add + o.margin * (per ?? 0), decimals));
       b.text(id + 'lim', limiting ? 'limitant' : '');
+      // Objectif : la consommation à tenir pour boucler un tour de plus avec ce qu'il reste.
+      let goal = '';
+      if (o.target) {
+        goal = '+1 tour : —';
+        if (level > 0 && per > 0 && laps != null) {
+          const need = level / (Math.floor(laps) + 1);
+          goal = '+1 tour : ' + need.toFixed(2) + ' ' + (id === 'f' ? fuelName : '%') + '/tour (' + Math.round(Math.max(0, 1 - need / per) * 100) + ' % de moins)';
+        }
+      }
+      b.text(id + 'goal', goal);
     };
     return {
       update(g) {
         const lim = g('strategy.limiting');
-        fill('f', g('fuel.level'), g('fuel.percent'), g('strategy.fuel_per_lap'), g('strategy.fuel_laps_left'), g('strategy.fuel_to_add'), lim === 'fuel', 1);
+        fill('f', vol(g('fuel.level')), g('fuel.percent'), vol(g('strategy.fuel_per_lap')), g('strategy.fuel_laps_left'), vol(g('strategy.fuel_to_add')), lim === 'fuel', 1);
         fill('e', g('energy.virtual'), g('energy.virtual'), g('strategy.energy_per_lap'), g('strategy.energy_laps_left'), g('strategy.energy_to_add'), lim === 'energy', 1);
       },
     };
@@ -89,12 +102,12 @@ PW.widgets.tyres = {
   keys: ['tyre.', 'brake.'],
   hz: 3, size: [260, 190],
   options: [
-    { id: 'pressure', label: 'Pression', type: 'select', choices: [['kpa', 'kPa'], ['bar', 'bar'], ['psi', 'psi'], ['off', 'Masquer']], def: 'kpa' },
+    { id: 'pressure', label: 'Pression', type: 'select', choices: [['auto', 'Unité des réglages'], ['kpa', 'kPa'], ['bar', 'bar'], ['psi', 'psi'], ['off', 'Masquer']], def: 'auto' },
     { id: 'brakes', label: 'Températures des freins', type: 'bool', def: false },
     { id: 'tempsrc', label: 'Température affichée', type: 'select', choices: [['carcass', 'Carcasse'], ['inner', 'Couche interne'], ['surface', 'Surface (moyenne)']], def: 'carcass' },
     { id: 'tempoffset', label: 'Décalage de température (°C)', type: 'number', min: -10, max: 10, step: 0.5, def: 0 },
     { id: 'wearmode', label: "Affichage de l'usure", type: 'select', choices: [['state', 'État du pneu (100 → 0 %)'], ['used', 'Usure (0 → 100 %)']], def: 'state' },
-    { id: 'unit', label: 'Unité de température', type: 'select', choices: [['c', '°C'], ['f', '°F']], def: 'c' },
+    { id: 'unit', label: 'Unité de température', type: 'select', choices: [['auto', 'Unité des réglages'], ['c', '°C'], ['f', '°F']], def: 'auto' },
   ],
   mount(root, o) {
     const names = ['fl', 'fr', 'rl', 'rr'];
@@ -104,10 +117,13 @@ PW.widgets.tyres = {
       ${o.brakes ? '<div class="pw-brakes">' + names.map(n => `<div>${n.toUpperCase()}<b data-k="${n}b">—</b></div>`).join('') + '</div>' : ''}</div>`).firstChild;
     root.appendChild(card);
     const b = PW.bind(card);
-    const temp = c => o.unit === 'f' ? c * 9 / 5 + 32 : c;
-    const press = kpa => o.pressure === 'bar' ? (kpa / 100).toFixed(2) + ' bar' : o.pressure === 'psi' ? (kpa * 0.145038).toFixed(1) + ' psi' : kpa.toFixed(0) + ' kPa';
+    // « auto » : l'unité des réglages ; une unité imposée sur ce widget garde la priorité.
+    const P = PW.prefs;
+    const temp = c => o.unit === 'f' ? c * 9 / 5 + 32 : o.unit === 'c' ? c : PW.unit.temp(c);
+    const press = kpa => o.pressure === 'bar' ? (kpa / 100).toFixed(2) + ' bar' : o.pressure === 'psi' ? (kpa * 0.145038).toFixed(1) + ' psi' : o.pressure === 'kpa' ? kpa.toFixed(0) + ' kPa' : PW.unit.pressure(kpa);
     // Bleu = froid, vert = dans la fenêtre idéale, rouge = trop chaud (écart à la température optimale).
-    const hue = d => d < 0 ? 130 + Math.min(1, -d / 25) * 80 : 130 - Math.min(1, d / 25) * 130;
+    const win = Math.max(1, P.thr_temp_window);
+    const hue = d => d < 0 ? 130 + Math.min(1, -d / win) * 80 : 130 - Math.min(1, d / win) * 130;
     return {
       update(g) {
         const c = (g('tyre.front.compound', '') || g('tyre.rear.compound', ''));
@@ -120,7 +136,7 @@ PW.widgets.tyres = {
           b.css(n, '--c', isFinite(t) ? `hsl(${hue(t - opt)} 70% 52%)` : '#666');
           const shown = o.wearmode === 'used' ? 100 - wear : wear;
           b.scaleX(n + 'w', shown / 100);
-          b.css(n + 'w', 'background', wear < 30 ? 'var(--pw-bad)' : wear < 55 ? 'var(--pw-warn)' : 'var(--pw-ok)');
+          b.css(n + 'w', 'background', wear < P.thr_wear_crit ? 'var(--pw-bad)' : wear < P.thr_wear_warn ? 'var(--pw-warn)' : 'var(--pw-ok)');
           const p = g(`tyre.${n}.pressure`);
           b.text(n + 'i', (o.pressure === 'off' ? '' : (p ? press(p) + ' · ' : '')) + F.n(shown, 0) + ' %');
           if (b.el[n + 'b']) b.text(n + 'b', Math.round(temp(g(`brake.${n}.temp`, 0))) + '°');
@@ -195,14 +211,14 @@ PW.widgets.inputs = {
     { id: 'window', label: 'Durée du graphe', type: 'select', choices: [['5', '5 s'], ['10', '10 s'], ['20', '20 s']], def: '10' },
     { id: 'steering', label: 'Volant dans le graphe', type: 'bool', def: true },
     { id: 'clutch', label: 'Embrayage', type: 'bool', def: false },
-    { id: 'mph', label: 'Vitesse en mph', type: 'bool', def: false },
+    { id: 'mph', label: 'Toujours en mph (sinon : unité des réglages)', type: 'bool', def: false },
   ],
   mount(root, o) {
     const card = PW.tpl(`<div class="pw-card"><div class="pw-rpm"><i data-k="rpm"></i></div>
       <div class="pw-inputs">
         <div class="pw-pedals"><div class="pw-pedal b"><i data-k="brake"></i></div><div class="pw-pedal t"><i data-k="thr"></i></div>${o.clutch ? '<div class="pw-pedal c"><i data-k="clu"></i></div>' : ''}</div>
         <div class="pw-gear" data-k="gear">N</div>
-        <div><div class="pw-speed"><span data-k="speed">0</span><small>${o.mph ? 'mph' : 'km/h'}</small></div></div>
+        <div><div class="pw-speed"><span data-k="speed">0</span><small>${o.mph ? 'mph' : PW.unit.speed(0)[1]}</small></div></div>
       </div>${o.graph ? '<canvas class="pw-graph" width="460" height="112"></canvas>' : ''}</div>`).firstChild;
     root.appendChild(card);
     const b = PW.bind(card);
@@ -246,7 +262,7 @@ PW.widgets.inputs = {
         const gear = g('player.gear', 0);
         b.text('gear', gear < 0 ? 'R' : gear === 0 ? 'N' : String(gear));
         const kmh = g('player.speed', 0);
-        b.text('speed', String(Math.round(o.mph ? kmh * 0.621371 : kmh)));
+        b.text('speed', String(Math.round(o.mph ? kmh * 0.621371 : PW.unit.speed(kmh)[0])));
       },
       destroy() { clearInterval(timer); },
     };
@@ -358,8 +374,8 @@ PW.widgets.session = {
         const max = g('session.max_laps', 0), left = g('strategy.race_laps_left');
         b.text('laps', max > 0 && max < 10000 ? 'Tour ' + Math.min(g('lap.number', 0), max) + ' / ' + max : left != null ? '≈ ' + Math.round(left) + ' tours' : '');
         if (b.el.air) {
-          b.text('air', F.n(g('weather.ambient'), 0) + '°');
-          b.text('trk', F.n(g('weather.track'), 0) + '°');
+          b.text('air', F.n(PW.unit.temp(g('weather.ambient')), 0) + '°');
+          b.text('trk', F.n(PW.unit.temp(g('weather.track')), 0) + '°');
           const rain = g('weather.rain', 0);
           b.text('rain', rain > 1 ? Math.round(rain) + ' %' : '—');
         }
@@ -558,6 +574,201 @@ PW.widgets.flags = {
           el.textContent = f.label;
           return el;
         }));
+      },
+    };
+  },
+};
+
+
+/* ---------- Relatif, arrêt au stand, radar ---------- */
+const gridPad = i => 'grid.' + String(i).padStart(3, '0');
+const shortName = n => { const p = String(n).trim().split(/\s+/); return p.length > 1 ? p[0][0] + '. ' + p.slice(1).join(' ') : n; };
+
+// Les voitures du classement, situées par rapport au joueur sur la piste (ahead > 0 : devant lui, en mètres).
+function nearCars(g) {
+  const n = g('session.vehicles', 0), L = g('session.track_length', 0);
+  let me = -1;
+  for (let i = 0; i < n; i++) if (g(gridPad(i) + '.is_player')) { me = i; break; }
+  if (me < 0 || L < 100) return [];
+  const total = i => g(gridPad(i) + '.laps', 0) * L + g(gridPad(i) + '.lap_dist', 0);
+  const myDist = g(gridPad(me) + '.lap_dist', 0), myTotal = total(me), cars = [];
+  for (let i = 0; i < n; i++) {
+    const p = gridPad(i), dist = g(p + '.lap_dist');
+    if (dist == null) continue;
+    let ahead = (((dist - myDist) % L) + L) % L;
+    if (ahead > L / 2) ahead -= L;
+    cars.push({ name: g(p + '.driver', ''), cls: g(p + '.class', ''), place: g(p + '.place', 0), rank: 0, ahead: i === me ? 0 : ahead,
+      laps: Math.round((total(i) - myTotal - ahead) / L), pit: g(p + '.in_pits', false), me: i === me });
+  }
+  const seen = {};
+  for (const c of [...cars].sort((a, b) => a.place - b.place)) c.rank = seen[c.cls] = (seen[c.cls] || 0) + 1;
+  return cars;
+}
+
+PW.widgets.relative = {
+  name: 'Relatif',
+  keys: ['grid.', 'session.vehicles', 'session.track_length', 'player.speed'],
+  hz: 4, size: [300, 200],
+  options: [
+    { id: 'ahead', label: 'Voitures devant', type: 'number', min: 0, max: 6, step: 1, def: 3 },
+    { id: 'behind', label: 'Voitures derrière', type: 'number', min: 0, max: 6, step: 1, def: 3 },
+    { id: 'place', label: 'Place affichée', type: 'select', choices: [['overall', 'Au général'], ['class', 'En classe']], def: 'overall' },
+  ],
+  mount(root, o) {
+    const rows = o.ahead + o.behind + 1;
+    const card = PW.tpl(`<div class="pw-card"><div class="pw-title"><span>Relatif</span><em>sur la piste</em></div><table class="pw-board"><tbody></tbody></table></div>`).firstChild;
+    root.appendChild(card);
+    const body = card.querySelector('tbody'), trs = [];
+    for (let i = 0; i < rows; i++) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td class="c"></td><td class="p"></td><td class="n"></td><td class="g"></td>';
+      body.appendChild(tr); trs.push({ tr, c: tr.children[0], p: tr.children[1], n: tr.children[2], g: tr.children[3], key: '' });
+    }
+    return {
+      update(g) {
+        const cars = nearCars(g), me = cars.find(c => c.me);
+        const speed = Math.max(15, g('player.speed', 0) / 3.6);
+        const list = new Array(rows).fill(null);
+        if (me) {
+          // Les voitures aux stands ne comptent pas, sauf si on y est aussi.
+          const onTrack = c => !c.me && (!c.pit || me.pit);
+          const front = cars.filter(c => onTrack(c) && c.ahead > 0).sort((a, b) => a.ahead - b.ahead).slice(0, o.ahead).reverse();
+          const back = cars.filter(c => onTrack(c) && c.ahead <= 0).sort((a, b) => b.ahead - a.ahead).slice(0, o.behind);
+          // Le joueur reste à sa ligne, même s'il manque des voitures devant.
+          [...front, me, ...back].forEach((c, i) => { list[o.ahead - front.length + i] = c; });
+        }
+        trs.forEach((r, i) => {
+          const c = list[i];
+          const gap = c && !c.me ? F.signed(-c.ahead / speed, 1) : '';
+          const key = c ? [c.place, c.rank, c.name, c.cls, c.me, c.pit, c.laps, gap].join('|') : '';
+          if (r.key === key) return;
+          r.key = key;
+          r.tr.style.visibility = c ? '' : 'hidden';
+          if (!c) return;
+          // Rouge : il nous a pris un tour. Bleu : on lui a pris un tour. Gris : aux stands.
+          r.tr.className = (c.me ? 'me ' : '') + (c.pit ? 'pit' : c.laps > 0 ? 'up' : c.laps < 0 ? 'down' : '');
+          r.c.style.background = classColor(c.cls);
+          r.p.textContent = o.place === 'class' ? c.rank : c.place;
+          r.n.textContent = shortName(c.name);
+          r.g.textContent = gap;
+        });
+      },
+    };
+  },
+};
+
+PW.widgets.pit = {
+  name: 'Arrêt au stand',
+  keys: ['grid.', 'session.vehicles', 'session.type'],
+  hz: 1, size: [300, 120],
+  options: [{ id: 'loss', label: 'Temps perdu par un arrêt (s)', type: 'number', min: 20, max: 150, step: 1, def: 60 }],
+  mount(root, o) {
+    const card = PW.tpl(`<div class="pw-card"><div class="pw-title"><span>Arrêt au stand</span><em>${Math.round(o.loss)} s perdues</em></div>
+      <div class="pw-row"><span class="pw-big" data-k="place">—</span><span class="pw-sub" data-k="cls"></span></div>
+      <div class="pw-goal" data-k="lost" data-base="pw-goal"></div>
+      <div class="pw-kv"><span>Devant</span><i data-k="fn"></i><b data-k="fg" data-base="">—</b></div>
+      <div class="pw-kv"><span>Derrière</span><i data-k="bn"></i><b data-k="bg" data-base="">—</b></div></div>`).firstChild;
+    root.appendChild(card);
+    const b = PW.bind(card);
+    return {
+      update(g) {
+        const n = g('session.vehicles', 0), type = g('session.type', -1), cars = [];
+        for (let i = 0; i < n; i++) {
+          const p = gridPad(i), place = g(p + '.place');
+          if (place != null) cars.push({ place, name: g(p + '.driver', ''), cls: g(p + '.class', ''), next: Math.max(0, g(p + '.behind_next', 0)), me: g(p + '.is_player', false) });
+        }
+        cars.sort((a, c) => a.place - c.place);
+        // Retard de chaque voiture sur le leader : la somme des écarts « sur la voiture devant ».
+        let sum = 0;
+        cars.forEach((c, i) => { sum += i ? c.next : 0; c.behind = sum; });
+        const me = cars.find(c => c.me);
+        if (!me || !(type >= 10 && type <= 13)) {
+          b.text('place', '—'); b.text('cls', ''); b.text('lost', 'Estimation en course uniquement'); b.cls('lost', '');
+          for (const k of ['fn', 'bn']) b.text(k, '');
+          for (const k of ['fg', 'bg']) b.text(k, '—');
+          return;
+        }
+        // Après l'arrêt : notre retard augmente du temps perdu ; on se replace parmi les autres.
+        const mine = me.behind + o.loss, others = cars.filter(c => !c.me);
+        const place = 1 + others.filter(c => c.behind < mine).length;
+        const front = others.filter(c => c.behind < mine).sort((a, c) => c.behind - a.behind)[0];
+        const back = others.filter(c => c.behind >= mine).sort((a, c) => a.behind - c.behind)[0];
+        const lost = place - me.place;
+        b.text('place', 'P' + place);
+        b.text('cls', 'P' + (1 + others.filter(c => c.behind < mine && c.cls === me.cls).length) + ' en classe');
+        b.text('lost', lost > 0 ? lost + ' place(s) perdue(s)' : 'aucune place perdue');
+        b.cls('lost', lost > 0 ? 'pw-warn' : 'pw-ok');
+        const line = (nk, gk, c) => {
+          b.text(nk, c ? shortName(c.name) : '');
+          const gap = c ? Math.abs(c.behind - mine) : null;
+          b.text(gk, c ? gap.toFixed(1) + ' s' : 'personne');
+          // Moins de 3 s d'écart à la sortie : on ressort dans le trafic.
+          b.cls(gk, c && gap < 3 ? 'pw-warn' : '');
+        };
+        line('fn', 'fg', front); line('bn', 'bg', back);
+      },
+    };
+  },
+};
+
+PW.widgets.radar = {
+  name: 'Radar de proximité',
+  keys: ['grid.', 'session.vehicles'],
+  hz: o => +o.fps || 20, size: [130, 190],
+  options: [
+    { id: 'range', label: 'Portée devant et derrière (m)', type: 'number', min: 6, max: 30, step: 1, def: 12 },
+    { id: 'autohide', label: 'Masquer quand personne n’est proche', type: 'bool', def: true },
+    { id: 'fps', label: 'Fluidité (images/s)', type: 'select', choices: [['10', '10'], ['20', '20'], ['30', '30']], def: '20' },
+  ],
+  mount(root, o) {
+    const W = 130, H = 190, range = Math.max(6, Math.min(30, +o.range || 12));
+    const scale = (H / 2 - 8) / range, side = (W / 2 - 6) / scale;
+    const card = PW.tpl(`<div class="pw-card pw-radar" style="width:${W}px;height:${H}px"><i class="l"></i><i class="r"></i><div class="cars"></div><b></b></div>`).firstChild;
+    root.appendChild(card);
+    const [left, right, box, self] = card.children;
+    const carW = 2 * scale, carL = 4.7 * scale;
+    self.style.cssText = `left:${W / 2 - carW / 2}px;top:${H / 2 - carL / 2}px;width:${carW}px;height:${carL}px`;
+    let last = null, dir = null;
+    return {
+      update(g) {
+        const n = g('session.vehicles', 0), others = [];
+        let me = null;
+        for (let i = 0; i < n; i++) {
+          const p = gridPad(i), x = g(p + '.x'), z = g(p + '.z');
+          if (x == null || z == null) continue;
+          // Repère de la carte : (x, −z).
+          if (g(p + '.is_player')) me = [x, -z];
+          else if (!g(p + '.in_pits', false)) others.push([x, -z, g(p + '.class', '')]);
+        }
+        // Direction de marche : celle du dernier déplacement (gardée à l'arrêt).
+        if (me) {
+          if (last) {
+            const dx = me[0] - last[0], dy = me[1] - last[1], len = Math.hypot(dx, dy);
+            if (len > 0.3 && len < 60) {
+              const nx = dx / len, ny = dy / len;
+              if (dir) { const bx = dir[0] * 0.6 + nx * 0.4, by = dir[1] * 0.6 + ny * 0.4, l = Math.hypot(bx, by) || 1; dir = [bx / l, by / l]; } else dir = [nx, ny];
+              last = me;
+            } else if (len >= 60) last = me;
+          } else last = me;
+        }
+        // Voitures voisines dans le repère du joueur : (à droite, devant), en mètres.
+        const near = [];
+        if (me && dir) for (const [x, y, cls] of others) {
+          const rx = x - me[0], ry = y - me[1], fwd = rx * dir[0] + ry * dir[1], rgt = rx * -dir[1] + ry * dir[0];
+          if (Math.abs(fwd) <= range && Math.abs(rgt) <= side) near.push([rgt, fwd, cls]);
+        }
+        card.style.visibility = !near.length && o.autohide ? 'hidden' : '';
+        // Alerte de côté : rouge si une voiture est à notre hauteur, orange si elle arrive.
+        for (const [el, sign] of [[left, -1], [right, 1]]) {
+          const worst = Math.min(Infinity, ...near.filter(c => c[0] * sign > 0.6 && Math.abs(c[0]) < 4.6).map(c => Math.abs(c[1])));
+          el.style.background = worst < 4.9 ? 'var(--pw-bad)' : worst < 9 ? 'var(--pw-warn)' : 'transparent';
+        }
+        while (box.children.length < near.length) box.appendChild(document.createElement('s'));
+        [...box.children].forEach((el, i) => {
+          const c = near[i];
+          el.hidden = !c;
+          if (c) el.style.cssText = `left:${W / 2 + c[0] * scale - carW / 2}px;top:${H / 2 - c[1] * scale - carL / 2}px;width:${carW}px;height:${carL}px;background:${classColor(c[2])}`;
+        });
       },
     };
   },

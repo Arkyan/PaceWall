@@ -82,6 +82,7 @@ async fn serve(port: u16, stop: Arc<AtomicBool>) {
         .route("/assets/overlay.css", get(|| async { asset("text/css", include_str!("../overlay/overlay.css")) }))
         .route("/api/layouts", get(api_layouts_get))
         .route("/api/track/:name", get(api_track))
+        .route("/api/prefs", get(api_prefs))
         .route("/ws", get(upgrade))
         .with_state(shared);
 
@@ -152,6 +153,14 @@ async fn api_track(Path(name): Path<String>) -> Result<([(header::HeaderName, &'
     let map = pwcore::trackmap::load(&name).ok_or(StatusCode::NOT_FOUND)?;
     let json = serde_json::to_string(&map).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(([(header::CONTENT_TYPE, "application/json")], json))
+}
+
+/// Unités et seuils de couleur choisis dans les réglages (les mêmes que l'overlay du joueur).
+async fn api_prefs() -> ([(header::HeaderName, &'static str); 1], String) {
+    let all = settings::all();
+    let keys = ["unit_speed", "unit_temp", "unit_pressure", "unit_fuel", "thr_fuel_warn", "thr_fuel_crit", "thr_wear_warn", "thr_wear_crit", "thr_temp_window"];
+    let prefs: Map<String, Value> = keys.iter().filter_map(|k| all.get(*k).map(|v| (k.to_string(), v.clone()))).collect();
+    ([(header::CONTENT_TYPE, "application/json")], Value::Object(prefs).to_string())
 }
 
 /// Mises en page des overlays (joueur et OBS), telles que l'éditeur les a enregistrées.

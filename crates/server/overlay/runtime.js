@@ -89,6 +89,26 @@
   };
   PW.saveLayouts = async layouts => (await fetch('/api/layouts', { method: 'PUT', body: JSON.stringify(layouts) })).ok;
 
+  // Unités et seuils de couleur des réglages : relus toutes les 5 s, les vues se reconstruisent s'ils changent.
+  PW.prefs = { unit_speed: 'kmh', unit_temp: 'c', unit_pressure: 'kpa', unit_fuel: 'l', thr_fuel_warn: 6, thr_fuel_crit: 3, thr_wear_warn: 55, thr_wear_crit: 30, thr_temp_window: 25 };
+  const prefsListeners = new Set();
+  const loadPrefs = async () => {
+    try {
+      const j = await (await fetch('/api/prefs')).json();
+      const next = { ...PW.prefs, ...j };
+      if (JSON.stringify(next) !== JSON.stringify(PW.prefs)) { PW.prefs = next; for (const cb of prefsListeners) cb(); }
+    } catch { /* serveur absent (démo hors ligne) : valeurs par défaut */ }
+  };
+  loadPrefs();
+  setInterval(loadPrefs, 5000);
+  PW.unit = {
+    speed: kmh => PW.prefs.unit_speed === 'mph' ? [kmh * 0.621371, 'mph'] : [kmh, 'km/h'],
+    temp: c => PW.prefs.unit_temp === 'f' ? c * 9 / 5 + 32 : c,
+    fuel: l => PW.prefs.unit_fuel === 'gal' ? l * 0.264172 : l,
+    fuelName: () => PW.prefs.unit_fuel === 'gal' ? 'gal' : 'L',
+    pressure: kpa => PW.prefs.unit_pressure === 'bar' ? (kpa / 100).toFixed(2) + ' bar' : PW.prefs.unit_pressure === 'psi' ? (kpa * 0.145038).toFixed(1) + ' psi' : kpa.toFixed(0) + ' kPa',
+  };
+
   PW.optionDefs = def => [...(def.options || []), ...PW.commonOptions];
   PW.ACCENTS = { cyan: '#19d3f3', white: '#e8edf4', orange: '#ff9628', green: '#38e07b', red: '#ff4d5e', violet: '#a870ff', pink: '#ff6abe', yellow: '#ffd633' };
   PW.accentHex = id => PW.ACCENTS[id] || PW.ACCENTS.cyan;
@@ -180,6 +200,8 @@
       for (const k of changed) dirty.add(k);
       if (!raf) raf = requestAnimationFrame(flush);
     });
+    const onPrefs = () => mount();
+    prefsListeners.add(onPrefs);
     const ro = new ResizeObserver(() => items.forEach(place));
     ro.observe(root);
 
@@ -215,7 +237,7 @@
       refresh(id) { const it = items.find(i => i.spec.id === id); if (it) { it.opts = PW.resolveOpts(it.def, it.spec.opts); place(it); } },
       // Options : le widget doit être reconstruit.
       remount() { mount(); },
-      destroy() { off(); ro.disconnect(); items.forEach(it => it.inst.destroy && it.inst.destroy()); root.remove(); },
+      destroy() { off(); prefsListeners.delete(onPrefs); ro.disconnect(); items.forEach(it => it.inst.destroy && it.inst.destroy()); root.remove(); },
     };
     mount();
     return api;
