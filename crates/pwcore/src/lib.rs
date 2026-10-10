@@ -10,6 +10,7 @@ pub mod data;
 pub mod db;
 pub mod demo;
 pub mod flatten;
+pub mod forecast;
 pub mod layout;
 #[cfg(windows)]
 pub mod live;

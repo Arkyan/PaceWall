@@ -317,7 +317,14 @@ pub fn run() {
             }
         }
 
-        let with_grid = layout.widgets.iter().any(|w| matches!(w.kind.as_str(), "standings" | "trackmap" | "relative" | "pit" | "radar" | "flags") || w.kind == "timing");
+        // Le radar parlé et le bleu « LMP » ont besoin des autres voitures, même sans widget qui les affiche.
+        let voice_on = |id: &str| voice.enabled && !muted && per_alert.get(id).is_none_or(|c| c.on);
+        let (radar_voice, grid_voice) = (voice_on("radar"), voice_on("radar") || voice_on("blue_lmp"));
+        // L'alerte « pluie prévue » a besoin des prévisions du jeu, même sans le widget à l'écran.
+        if voice.weather && voice_on("rain_soon") {
+            pwcore::forecast::touch();
+        }
+        let with_grid = grid_voice || layout.widgets.iter().any(|w| matches!(w.kind.as_str(), "standings" | "trackmap" | "relative" | "pit" | "radar" | "flags") || w.kind == "timing");
         // On ne lit le jeu en entier que si un widget doit être redessiné (le jeu publie plus vite que les widgets n'en ont besoin).
         let alert_due = voice.enabled && !muted && now >= next_alert;
         let want = alert_due
@@ -338,7 +345,8 @@ pub fn run() {
                 game = true;
                 data_version += 1;
                 if voice.enabled && !muted {
-                    next_alert = now + Duration::from_millis(250);
+                    // Le radar parlé doit réagir vite : dix vérifications par seconde au lieu de quatre.
+                    next_alert = now + Duration::from_millis(if radar_voice { 100 } else { 250 });
                     for phrase in alerts.update(&data, &voice, now) {
                         let acfg = pwcore::voice_cfg::id_of_key(phrase.key).and_then(|id| per_alert.get(id)).cloned().unwrap_or_default();
                         if !acfg.on {

@@ -142,6 +142,20 @@ impl Reader {
         }
     }
 
+    /// Gomme montée à l'avant de chaque voiture : (identifiant, nom de la gomme).
+    pub fn tyre_compounds(&self) -> Vec<(i32, String)> {
+        let count = (self.active_vehicles() as usize).min(MAX_MAPPED_VEHICLES);
+        unsafe {
+            let first = addr_of!((*self.base()).telemetry.telemInfo) as *const VehicleTelemetry;
+            (0..count)
+                .map(|i| {
+                    let t = first.add(i);
+                    (addr_of!((*t).mID).read_unaligned(), c_str(&addr_of!((*t).mFrontTireCompoundName).read_unaligned()))
+                })
+                .collect()
+        }
+    }
+
     pub fn player_telemetry(&self) -> Option<VehicleTelemetry> {
         self.telemetry(self.player_indexes()?.1)
     }

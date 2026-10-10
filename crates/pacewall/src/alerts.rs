@@ -70,6 +70,12 @@ pub struct Alerts {
     rear_before: Option<f64>,
     limiter_since: Option<Instant>,
     raining_before: bool,
+    /// Étape des prévisions déjà annoncée (« pluie dans dix minutes »).
+    rain_soon_said: Option<usize>,
+    /// Radar parlé : côtés occupés à la lecture précédente, côté déjà annoncé, et début de la période dégagée.
+    side_before: (bool, bool),
+    side_announced: bool,
+    side_clear: Option<Instant>,
     last_said: HashMap<&'static str, Instant>,
 }
 
@@ -103,6 +109,54 @@ impl Alerts {
         // Une alerte n'a de sens qu'en piste : pas au garage, pas dans les menus.
         let on_track = data.flag("session.realtime");
         let speed = data.f("player.speed", 0.0);
+
+        // Prévisions : la prochaine étape annonce de la pluie (au moins une chance sur deux) dans moins de dix minutes,
+        // alors qu'il ne pleut pas et que l'étape en cours est sèche. Une annonce par étape.
+        if cfg.weather && on_track {
+            let count = data.f("forecast.count", 0.0) as usize;
+            let current = (0..count).find(|i| data.flag(&format!("forecast.{i}.current")));
+            let dry_now = data.f("weather.rain", 0.0) < 5.0 && current.is_none_or(|i| data.f(&format!("forecast.{i}.rain"), 0.0) < 50.0);
+            let next = (0..count).find(|i| data.num(&format!("forecast.{i}.minutes")).is_some_and(|m| m > 0.0));
+            if let Some(i) = next {
+                let minutes = data.f(&format!("forecast.{i}.minutes"), f64::MAX);
+                if dry_now && minutes <= 10.0 && data.f(&format!("forecast.{i}.rain"), 0.0) >= 50.0 && self.rain_soon_said != Some(i) {
+                    self.rain_soon_said = Some(i);
+                    say.push(self::say("rain_soon", "De la pluie est prévue dans une dizaine de minutes"));
+                }
+            }
+        }
+
+        // Radar parlé : une voiture arrive à notre hauteur d'un côté, puis la voie se libère.
+        let beside = if on_track && speed > 40.0 { crate::widgets::cars_beside(data) } else { None };
+        match beside {
+            Some((left, right)) => {
+                if left && !self.side_before.0 && self.ready("car_left", now, 2) {
+                    say.push(self::say("car_left", "Voiture à gauche"));
+                    self.side_announced = true;
+                }
+                if right && !self.side_before.1 && self.ready("car_right", now, 2) {
+                    say.push(self::say("car_right", "Voiture à droite"));
+                    self.side_announced = true;
+                }
+                if left || right {
+                    self.side_clear = None;
+                } else if self.side_announced {
+                    // « Dégagé » seulement si la voie reste libre 0,7 s (pas à chaque petit écart).
+                    let since = *self.side_clear.get_or_insert(now);
+                    if now.duration_since(since) >= Duration::from_millis(700) {
+                        say.push(self::say("car_clear", "C'est dégagé"));
+                        self.side_announced = false;
+                        self.side_clear = None;
+                    }
+                }
+                self.side_before = (left, right);
+            }
+            None => {
+                self.side_before = (false, false);
+                self.side_announced = false;
+                self.side_clear = None;
+            }
+        }
 
         if cfg.flags {
             let phase = data.f("session.phase", -1.0) as i64;
@@ -146,7 +200,12 @@ impl Alerts {
             // Drapeau bleu : une voiture plus rapide arrive, on prévient quand il apparaît (pas en boucle).
             let blue = data.flag("player.blue_flag");
             if blue && !self.blue_before && self.ready("blue", now, 12) {
-                say.push(self::say("blue", "Drapeau bleu"));
+                // Une classe plus rapide arrive derrière : une autre phrase que pour le bleu « on te prend un tour ».
+                if crate::widgets::faster_class_behind(data).is_some() {
+                    say.push(self::say("blue_lmp", "Drapeau bleu, voiture plus rapide derrière"));
+                } else {
+                    say.push(self::say("blue", "Drapeau bleu"));
+                }
             }
             self.blue_before = blue;
         }
@@ -321,6 +380,60 @@ mod tests {
         assert_eq!(texts(a.update(&d(5, true, true, false), &cfg(), t + Duration::from_secs(10))), vec!["Drapeau jaune"]);
         assert_eq!(texts(a.update(&d(6, false, false, false), &cfg(), t + Duration::from_secs(20))), vec!["Full course yellow"]);
         assert_eq!(texts(a.update(&d(5, false, false, false), &cfg(), t + Duration::from_secs(50))), vec!["Course relancée, drapeau vert"]);
+    }
+
+    #[test]
+    fn rain_forecast_announced_once_per_step() {
+        let mut a = Alerts::default();
+        let t0 = Instant::now();
+        let d = |minutes: f64, chance: f64| {
+            data(&[
+                ("session.realtime", json!(true)),
+                ("weather.rain", json!(0.0)),
+                ("forecast.count", json!(2)),
+                ("forecast.0.current", json!(true)),
+                ("forecast.0.rain", json!(10.0)),
+                ("forecast.0.minutes", json!(-20.0)),
+                ("forecast.1.rain", json!(chance)),
+                ("forecast.1.minutes", json!(minutes)),
+            ])
+        };
+        assert!(a.update(&d(25.0, 80.0), &cfg(), t0).is_empty()); // encore loin
+        assert!(a.update(&d(8.0, 30.0), &cfg(), t0).is_empty()); // peu de risque
+        assert_eq!(a.update(&d(8.0, 80.0), &cfg(), t0).len(), 1);
+        assert!(a.update(&d(6.0, 80.0), &cfg(), t0 + Duration::from_secs(60)).is_empty()); // déjà dit
+    }
+
+    #[test]
+    fn radar_calls_the_side_then_clear() {
+        let mut a = Alerts::default();
+        let t0 = Instant::now();
+        // Moi à l'origine, cap 0 ; une autre voiture à `x` mètres sur le côté et `z` mètres le long de la piste.
+        let d = |x: f64, z: f64| {
+            data(&[
+                ("session.realtime", json!(true)),
+                ("player.speed", json!(200.0)),
+                ("session.vehicles", json!(2)),
+                ("grid.000.is_player", json!(true)),
+                ("grid.000.x", json!(0.0)),
+                ("grid.000.z", json!(0.0)),
+                ("grid.000.yaw", json!(0.0)),
+                ("grid.001.x", json!(x)),
+                ("grid.001.z", json!(z)),
+            ])
+        };
+        assert!(a.update(&d(2.5, 60.0), &cfg(), t0).is_empty()); // loin : rien
+        let first = texts(a.update(&d(2.5, 1.0), &cfg(), t0 + Duration::from_millis(100)));
+        assert_eq!(first.len(), 1);
+        assert!(first[0].starts_with("Voiture à"));
+        // De l'autre côté, l'annonce est l'autre.
+        let mut b = Alerts::default();
+        let other = texts(b.update(&d(-2.5, 1.0), &cfg(), t0));
+        assert!(other.len() == 1 && other[0] != first[0]);
+        // Toujours à côté : pas de répétition. Voie libre : « Dégagé » après 0,7 s.
+        assert!(a.update(&d(2.5, 0.5), &cfg(), t0 + Duration::from_millis(300)).is_empty());
+        assert!(a.update(&d(2.5, 30.0), &cfg(), t0 + Duration::from_millis(400)).is_empty());
+        assert_eq!(texts(a.update(&d(2.5, 40.0), &cfg(), t0 + Duration::from_millis(1200))), vec!["C'est dégagé"]);
     }
 
     #[test]

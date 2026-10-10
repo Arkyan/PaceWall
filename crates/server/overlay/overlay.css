@@ -147,3 +147,22 @@ html, body.pw-page { margin: 0; background: transparent; overflow: hidden; heigh
 .pw-radar s { position: absolute; left: 0; top: 0; display: block; text-decoration: none; box-shadow: 0 0 0 1.2px rgba(4,6,9,.86); transform-origin: 50% 50%; will-change: transform; }
 .pw-radar s.self { background: var(--pw-accent); }
 .pw-radar > b { position: absolute; width: 4px; border-radius: 2px; }
+
+/* Prévisions météo */
+.pw-forecast { width: 310px; box-sizing: border-box; }
+.pw-forecast .cells { display: grid; grid-template-columns: repeat(5, 1fr); text-align: center; }
+.pw-forecast .cells > div { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px 0 4px; border-top: 1.5px solid transparent; }
+.pw-forecast small { font-family: var(--pw-num); font-size: 10.5px; color: var(--pw-text); }
+.pw-forecast i { font-style: normal; font-size: 22px; line-height: 28px; }
+.pw-forecast b { font-family: var(--pw-num); font-size: 13px; font-weight: 600; color: var(--pw-muted); }
+.pw-forecast b.mid { color: #96bef0; } .pw-forecast b.high { color: #4f9dff; }
+.pw-forecast em { font-style: normal; font-family: var(--pw-num); font-size: 11px; color: var(--pw-muted); }
+.pw-forecast .cur { border-top-color: var(--pw-accent); } .pw-forecast .cur small { color: var(--pw-accent); }
+.pw-forecast .past { opacity: .4; }
+.pw-forecast p { margin: 24px 0; text-align: center; color: var(--pw-muted); font-size: 13px; }
+
+/* Pilotage : graphe seul (sans trait de séparation), ou pédales seules (carte étroite) */
+.pw-graph.solo { margin-top: 0; border-top: 0; padding-top: 0; }
+.pw-card.pw-narrow { width: auto; display: inline-block; }
+.pw-card.pw-side { display: flex; gap: 14px; align-items: stretch; }
+.pw-card.pw-side .pw-graph { flex: 1; min-width: 0; width: auto; height: 84px; margin: 0; border: 0; padding: 0; }

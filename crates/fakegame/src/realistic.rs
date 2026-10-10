@@ -145,6 +145,8 @@ unsafe fn publish(base: *mut ObjectOut, sim: &Sim) {
         let mut o: VehicleTelemetry = zeroed();
         o.mID = c.id as i32;
         pose(c, &mut o);
+        // Gomme des autres voitures (les GT roulent en « Hard » pour varier).
+        put(&mut o.mFrontTireCompoundName, if sim.weather_rain > 0.08 { "Wet" } else if c.class == 2 { "Hard" } else { "Medium" });
         addr_of_mut!((*base).telemetry.telemInfo).cast::<VehicleTelemetry>().add(k).write_unaligned(o);
     }
     addr_of_mut!((*base).telemetry.activeVehicles).write_unaligned(sim.cars.len().min(104) as u8);

@@ -28,6 +28,7 @@ fn defaults() -> Map<String, Value> {
         "autostart": false,            // lancer avec Windows
         "obs_server": false,           // serveur web pour OBS (source navigateur)
         "obs_port": 8470,
+        "lmu_api_port": 6397,          // port du service web local de Le Mans Ultimate (prévisions météo)
         // Unités (communes à tous les widgets)
         "unit_speed": "kmh",           // "kmh" ou "mph"
         "unit_temp": "c",              // "c" ou "f"
@@ -44,7 +45,7 @@ fn defaults() -> Map<String, Value> {
         "hk_overlay": "Ctrl+Alt+O",    // afficher / fermer l'overlay
         "hk_voice": "",                // couper / remettre la voix
         "hk_fuel": "", "hk_tyres": "", "hk_timing": "", "hk_inputs": "", "hk_standings": "", "hk_session": "",
-        "hk_trackmap": "", "hk_flags": "", "hk_relative": "", "hk_pit": "", "hk_radar": "",
+        "hk_trackmap": "", "hk_flags": "", "hk_relative": "", "hk_pit": "", "hk_radar": "", "hk_forecast": "",
     }) else { unreachable!() };
     m
 }

@@ -32,6 +32,8 @@ SR = 16000  # la radio est limitée à ~3,4 kHz : 16 kHz suffit largement et gar
 
 # Voix calme / voix pressée (longueur plus courte, plus de variation) : l'ingénieur s'adapte à l'urgence.
 CALM = [dict(length_scale=1.0, noise_scale=0.62, noise_w_scale=0.75), dict(length_scale=0.96, noise_scale=0.72, noise_w_scale=0.85)]
+# Phrases très courtes (radar) : débit posé et peu de variation, sinon la voix avale les premières et dernières syllabes.
+CLEAR = [dict(length_scale=1.08, noise_scale=0.45, noise_w_scale=0.55), dict(length_scale=1.04, noise_scale=0.5, noise_w_scale=0.6)]
 URGENT = [dict(length_scale=0.88, noise_scale=0.78, noise_w_scale=0.9), dict(length_scale=0.84, noise_scale=0.85, noise_w_scale=0.95)]
 
 PHRASES = {
@@ -51,6 +53,10 @@ PHRASES = {
     "yellow_s2": (URGENT, ["Drapeau jaune, secteur deux.", "Jaune dans le secteur deux, lève le pied."]),
     "yellow_s3": (URGENT, ["Drapeau jaune, secteur trois.", "Jaune dans le secteur trois, lève le pied."]),
     "blue": (URGENT, ["Drapeau bleu, laisse passer.", "Drapeau bleu, une voiture plus rapide arrive."]),
+    "blue_lmp": (CLEAR, ["Drapeau bleu, voiture plus rapide derrière.", "Drapeau bleu, une catégorie plus rapide arrive, laisse passer."]),
+    "car_left": (CLEAR, ["Voiture à gauche.", "Attention, à gauche."]),
+    "car_right": (CLEAR, ["Voiture à droite.", "Attention, à droite."]),
+    "car_clear": (CLEAR, ["C'est dégagé.", "La voie est libre."]),
     "last_lap": (URGENT, ["Dernier tour.", "C'est le dernier tour, donne tout."]),
     "best_lap": (CALM, ["Meilleur tour personnel.", "Nouveau meilleur tour, bravo."]),
     "rear_close": (URGENT, ["Voiture derrière, elle se rapproche.", "Attention, voiture derrière à moins d'une seconde."]),
@@ -58,6 +64,7 @@ PHRASES = {
     "pit_limiter": (URGENT, ["Active le limiteur.", "Limiteur de vitesse, ralentis."]),
     "fcy": (CALM, ["Full course yellow.", "Full course yellow, respecte les écarts et reste concentré."]),
     "green": (CALM, ["Course relancée, drapeau vert.", "Feu vert, c'est reparti, bonne relance."]),
+    "rain_soon": (CLEAR, ["De la pluie est prévue dans une dizaine de minutes.", "Pluie annoncée dans dix minutes environ, prépare-toi."]),
     "rain": (CALM, ["Pluie détectée.", "Il commence à pleuvoir, prépare tes pneus pluie."]),
     "test": (CALM, ["Radio check. Ici ton ingénieur, tu m'entends bien ?", "Alertes vocales activées, je suis avec toi."]),
 }
@@ -77,7 +84,7 @@ def radio(voice_audio, sr_in, rng):
     fade = int(SR * 0.012)
     x[:fade] *= np.linspace(0.0, 1.0, fade)
     x[-fade:] *= np.linspace(1.0, 0.0, fade)
-    lead, tail = int(SR * 0.05), int(SR * 0.08)
+    lead, tail = int(SR * 0.14), int(SR * 0.14)
     out = np.concatenate([np.zeros(lead), x, np.zeros(tail)])
     return (out * 0.89 * 32767).astype(np.int16)
 

@@ -10,7 +10,7 @@ use pwcore::trackmap::{self, TrackMap};
 use pwcore::Data;
 use std::collections::VecDeque;
 
-pub const KINDS: [(&str, &str); 11] = [
+pub const KINDS: [(&str, &str); 12] = [
     ("fuel", "Carburant et énergie"),
     ("tyres", "Pneus"),
     ("timing", "Chrono et écarts"),
@@ -22,6 +22,7 @@ pub const KINDS: [(&str, &str); 11] = [
     ("relative", "Relatif"),
     ("pit", "Arrêt au stand"),
     ("radar", "Radar de proximité"),
+    ("forecast", "Prévisions météo"),
 ];
 
 pub fn name(kind: &str) -> &'static str {
@@ -70,6 +71,8 @@ pub fn options(kind: &str) -> &'static [Opt] {
         ],
         "inputs" => &[
             Opt { id: "fps", label: "Fluidité (images/s)", kind: Choice(&[("10", "10"), ("15", "15"), ("20", "20"), ("30", "30")], "20") },
+            Opt { id: "gauges", label: "Régime, rapport et vitesse", kind: Bool(true) },
+            Opt { id: "pedals", label: "Pédales (barres)", kind: Bool(true) },
             Opt { id: "graph", label: "Graphe des inputs", kind: Bool(true) },
             Opt { id: "window", label: "Durée du graphe", kind: Choice(&[("5", "5 s"), ("10", "10 s"), ("20", "20 s")], "10") },
             Opt { id: "steering", label: "Volant dans le graphe", kind: Bool(true) },
@@ -199,6 +202,7 @@ pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, 
         "relative" => relative(d, spec, data),
         "pit" => pit(d, spec, data),
         "radar" => radar(d, spec, data, st, now),
+        "forecast" => forecast(d, spec, data),
         _ => (0.0, 0.0),
     }
 }
@@ -459,27 +463,13 @@ fn timing(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
 /* ---------- Pilotage ---------- */
 
 fn inputs(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
-    let w = 262.0;
-    let graph = spec.flag("graph", true);
+    // Trois blocs au choix : régime / rapport / vitesse, pédales, graphe. Le widget se resserre autour de ceux gardés
+    // (si tout est décoché, on garde le premier pour ne pas afficher une carte vide).
+    let (pedals_on, graph) = (spec.flag("pedals", true), spec.flag("graph", true));
+    let gauges = spec.flag("gauges", true) || (!pedals_on && !graph);
     let clutch = spec.flag("clutch", false);
     let steering = spec.flag("steering", true);
     let win = spec.num("window", 10.0).max(1.0);
-    let h = if graph { 114.0 + 56.0 + 12.0 } else { 120.0 };
-    d.card(w, h);
-
-    let rpm = data.f("player.rpm", 0.0);
-    let max = {
-        let m = data.f("player.rpm_max", 8000.0);
-        if m > 0.0 {
-            m
-        } else {
-            8000.0
-        }
-    };
-    let f = (rpm / max) as f32;
-    d.bar(16.0, 12.0, w - 32.0, 6.0, f, if f > 0.95 { BAD } else if f > 0.85 { WARN } else { OK });
-
-    // Pédales : segments verticaux.
     let thr = data.f("player.throttle", 0.0) as f32 / 100.0;
     let brk = data.f("player.brake", 0.0) as f32 / 100.0;
     let clu = data.f("player.clutch", 0.0) as f32 / 100.0;
@@ -487,24 +477,71 @@ fn inputs(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (
     if clutch {
         pedals.push((clu, BLUE));
     }
-    for (i, (v, color)) in pedals.iter().enumerate() {
-        let x = 16.0 + i as f32 * 17.0;
-        let segs = 14;
-        for s in 0..segs {
-            let y = 28.0 + (segs - 1 - s) as f32 * 6.0;
-            let lit = (s as f32 + 1.0) / segs as f32 <= v.clamp(0.0, 1.0) + 0.0001;
-            d.fill(x, y, 12.0, 4.0, if lit { *color } else { Color32::from_white_alpha(26) });
+    let pedals_w = pedals.len() as f32 * 17.0 - 5.0;
+    // Largeur : étroite si seules les pédales sont affichées, entière dès qu'il y a le graphe ou les chiffres.
+    let w = if pedals_on && !gauges && !graph { 32.0 + pedals_w } else { 262.0 };
+    // Haut du widget : la barre de régime (avec les chiffres), puis pédales et chiffres côte à côte.
+    let top = pedals_on || gauges;
+    let cy = if gauges { 28.0 } else { 12.0 };
+    let block = if !top {
+        0.0
+    } else if pedals_on {
+        cy + 86.0
+    } else {
+        cy + 62.0
+    };
+    // Pédales et graphe sans les chiffres : le graphe se place à côté des pédales, sur toute leur hauteur.
+    let side = pedals_on && graph && !gauges;
+    let (gx, gy, gw, gh) = if side {
+        (16.0 + pedals_w + 14.0, 12.0, w - 32.0 - pedals_w - 14.0, 84.0)
+    } else {
+        (16.0, if top { block + 6.0 } else { 12.0 }, w - 32.0, 52.0)
+    };
+    let h = if side {
+        12.0 + 84.0 + 12.0
+    } else if graph {
+        gy + gh + 10.0
+    } else {
+        block + 6.0
+    };
+    d.card(w, h);
+
+    if gauges {
+        let rpm = data.f("player.rpm", 0.0);
+        let max = {
+            let m = data.f("player.rpm_max", 8000.0);
+            if m > 0.0 {
+                m
+            } else {
+                8000.0
+            }
+        };
+        let f = (rpm / max) as f32;
+        d.bar(16.0, 12.0, w - 32.0, 6.0, f, if f > 0.95 { BAD } else if f > 0.85 { WARN } else { OK });
+    }
+    if pedals_on {
+        // Pédales : segments verticaux.
+        for (i, (v, color)) in pedals.iter().enumerate() {
+            let x = 16.0 + i as f32 * 17.0;
+            let segs = 14;
+            for s in 0..segs {
+                let y = cy + (segs - 1 - s) as f32 * 6.0;
+                let lit = (s as f32 + 1.0) / segs as f32 <= v.clamp(0.0, 1.0) + 0.0001;
+                d.fill(x, y, 12.0, 4.0, if lit { *color } else { Color32::from_white_alpha(26) });
+            }
         }
     }
-    let px = 16.0 + pedals.len() as f32 * 17.0 + 14.0;
-    let gear = data.f("player.gear", 0.0) as i64;
-    let g = if gear < 0 { "R".to_string() } else if gear == 0 { "N".to_string() } else { gear.to_string() };
-    d.text(px + 24.0, 30.0, &g, 54.0, d.accent(), Font::Num, HAlign::Center);
-    let kmh = data.f("player.speed", 0.0);
-    let (v, unit) = if spec.flag("mph", false) { (kmh * 0.621371, "mph") } else { crate::prefs::get().speed(kmh) };
-    let sx = px + 62.0;
-    let vw = d.text(sx, 38.0, &format!("{v:.0}"), 24.0, TEXT, Font::Num, HAlign::Left);
-    d.text(sx + vw + 4.0, 48.0, unit, 11.0, MUTED, Font::Ui, HAlign::Left);
+    if gauges {
+        let px = if pedals_on { 16.0 + pedals_w + 19.0 } else { 16.0 };
+        let gear = data.f("player.gear", 0.0) as i64;
+        let g = if gear < 0 { "R".to_string() } else if gear == 0 { "N".to_string() } else { gear.to_string() };
+        d.text(px + 24.0, cy + 2.0, &g, 54.0, d.accent(), Font::Num, HAlign::Center);
+        let kmh = data.f("player.speed", 0.0);
+        let (v, unit) = if spec.flag("mph", false) { (kmh * 0.621371, "mph") } else { crate::prefs::get().speed(kmh) };
+        let sx = px + 62.0;
+        let vw = d.text(sx, cy + 10.0, &format!("{v:.0}"), 24.0, TEXT, Font::Num, HAlign::Left);
+        d.text(sx + vw + 4.0, cy + 20.0, unit, 11.0, MUTED, Font::Ui, HAlign::Left);
+    }
 
     if graph {
         // Historique glissant ; un point par image dessinée (le rythme est fixé par `fps`).
@@ -512,8 +549,9 @@ fn inputs(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (
         while st.hist.front().is_some_and(|(t, _)| now - t > win + 0.2) {
             st.hist.pop_front();
         }
-        let (gx, gy, gw, gh) = (16.0, 120.0, w - 32.0, 52.0);
-        d.sep(16.0, 114.0, w - 32.0);
+        if top && !side {
+            d.sep(16.0, block, w - 32.0);
+        }
         for k in [0.0, 0.5, 1.0] {
             d.fill(gx, gy + k * (gh - 1.0), gw, 1.0, Color32::from_white_alpha(23));
         }
@@ -904,7 +942,7 @@ fn class_speed(class: &str) -> Option<(u8, &'static str)> {
 /// Sigle de la classe de la voiture qui arrive juste derrière nous sur la piste, si cette classe est plus rapide que
 /// la nôtre : toujours « LMP », quelle que soit cette classe. `None` si elle est de notre classe, plus lente, inconnue, ou s'il n'y a personne
 /// à moins de 15 secondes.
-fn faster_class_behind(data: &Data) -> Option<&'static str> {
+pub(crate) fn faster_class_behind(data: &Data) -> Option<&'static str> {
     let cars = near_cars(data);
     let me = cars.iter().find(|c| c.me)?;
     let behind = cars.iter().filter(|c| !c.me && !c.pit && c.secs < 0.0 && c.secs > -15.0).max_by(|a, b| a.secs.total_cmp(&b.secs))?;
@@ -1553,6 +1591,38 @@ fn pit(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
 
 /* ---------- Radar de proximité ---------- */
 
+/// Y a-t-il une voiture à notre hauteur, à gauche et à droite ? D'après la position et le cap de la télémétrie
+/// (même repère et même rotation que le radar). `None` si le jeu ne donne pas le cap, ou si on est aux stands.
+pub(crate) fn cars_beside(data: &Data) -> Option<(bool, bool)> {
+    let n = (data.f("session.vehicles", 0.0) as usize).min(104);
+    let me = (0..n).find(|i| data.flag(&format!("grid.{i:03}.is_player")))?;
+    let p = format!("grid.{me:03}");
+    if data.flag(&format!("{p}.in_pits")) {
+        return None;
+    }
+    let (mx, my, yaw) = (data.num(&format!("{p}.x"))? as f32, -(data.num(&format!("{p}.z"))? as f32), data.num(&format!("{p}.yaw"))?);
+    let (s, c) = ((yaw - std::f64::consts::PI) as f32).sin_cos();
+    let (mut left, mut right) = (false, false);
+    for i in (0..n).filter(|i| *i != me) {
+        let p = format!("grid.{i:03}");
+        let (Some(x), Some(z)) = (data.num(&format!("{p}.x")), data.num(&format!("{p}.z"))) else { continue };
+        if data.flag(&format!("{p}.in_pits")) {
+            continue;
+        }
+        let (rx, ry) = (x as f32 - mx, -(z as f32) - my);
+        let (side, fwd) = (c * rx - s * ry, -(c * ry + s * rx));
+        // Mêmes limites que le trait rouge du radar : à notre hauteur, et dans la voie d'à côté.
+        if fwd.abs() < 4.9 && side.abs() > 0.8 && side.abs() < 4.6 {
+            if side < 0.0 {
+                left = true;
+            } else {
+                right = true;
+            }
+        }
+    }
+    Some((left, right))
+}
+
 fn radar(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
     let size = 200.0_f32;
     if d.measuring() {
@@ -1714,4 +1784,107 @@ fn radar(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f
     }
     car(cx, cy, 0.0, d.accent());
     (size, size)
+}
+
+/* ---------- Prévisions météo ---------- */
+
+/// Pictogramme du ciel : soleil, nuages, pluie ou orage, dessiné avec des formes simples.
+fn sky_icon(d: &D, cx: f32, cy: f32, sky: i64) {
+    let sun = Color32::from_rgb(255, 205, 64);
+    let cloud = Color32::from_rgb(186, 196, 210);
+    let drop = Color32::from_rgb(90, 165, 255);
+    let draw_sun = |x: f32, y: f32, r: f32| {
+        for i in 0..8 {
+            let a = i as f32 * std::f32::consts::FRAC_PI_4;
+            d.line(&[(x + a.cos() * (r + 2.5), y + a.sin() * (r + 2.5)), (x + a.cos() * (r + 5.5), y + a.sin() * (r + 5.5))], 1.6, sun);
+        }
+        d.circle(x, y, r, sun, None);
+    };
+    let draw_cloud = |x: f32, y: f32, color: Color32| {
+        d.circle(x - 6.5, y + 2.0, 5.0, color, None);
+        d.circle(x, y - 2.5, 7.0, color, None);
+        d.circle(x + 7.0, y + 2.0, 5.5, color, None);
+        d.fill(x - 6.5, y + 1.0, 13.5, 6.5, color);
+    };
+    let rain = |x: f32, y: f32, drops: i32, width: f32| {
+        for i in 0..drops {
+            let dx = (i as f32 - (drops - 1) as f32 / 2.0) * 6.0;
+            d.line(&[(x + dx + 1.5, y + 10.0), (x + dx - 1.5, y + 16.0)], width, drop);
+        }
+    };
+    match sky {
+        0 => draw_sun(cx, cy, 7.0),
+        1 | 2 => {
+            draw_sun(cx - 6.0, cy - 5.0, 5.0);
+            draw_cloud(cx + 3.0, cy + 3.0, cloud);
+        }
+        3 | 4 => draw_cloud(cx, cy, cloud),
+        5..=7 => {
+            draw_cloud(cx, cy - 3.0, cloud);
+            rain(cx, cy - 3.0, 2, 1.6);
+        }
+        8 | 9 => {
+            draw_cloud(cx, cy - 3.0, Color32::from_rgb(140, 150, 166));
+            rain(cx, cy - 3.0, 4, 2.0);
+        }
+        10 => {
+            draw_cloud(cx, cy - 3.0, Color32::from_rgb(118, 126, 142));
+            d.line(&[(cx + 2.0, cy + 6.0), (cx - 3.0, cy + 12.0), (cx + 1.5, cy + 12.0), (cx - 2.0, cy + 18.0)], 2.0, sun);
+        }
+        _ => {
+            d.text(cx, cy - 8.0, "—", 16.0, MUTED, Font::Num, HAlign::Center);
+        }
+    }
+}
+
+/// Prévisions de la session : cinq étapes (début, 25 %, 50 %, 75 %, fin) avec le ciel, le risque de pluie et la
+/// température. L'étape en cours est soulignée, les étapes passées sont estompées.
+fn forecast(d: &D, _spec: &WidgetSpec, data: &Data) -> (f32, f32) {
+    // Demander les prévisions les fait tenir à jour (une requête au jeu toutes les 30 secondes).
+    pwcore::forecast::touch();
+    let w = 310.0;
+    let hdr = if d.titles() { 18.0 } else { 0.0 };
+    let h = hdr + 98.0;
+    d.card(w, h);
+    if d.titles() {
+        d.label(16.0, 10.0, "Prévisions météo", MUTED);
+    }
+    let count = (data.f("forecast.count", 0.0) as usize).min(5);
+    if count == 0 {
+        d.text(w / 2.0, hdr + 38.0, "Prévisions indisponibles", 13.0, MUTED, Font::Ui, HAlign::Center);
+        return (w, h);
+    }
+    let prefs = crate::prefs::get();
+    let cell = (w - 20.0) / 5.0;
+    let steps = ["Début", "25 %", "50 %", "75 %", "Fin"];
+    for i in 0..count {
+        let p = format!("forecast.{i}");
+        let cx = 10.0 + cell * (i as f32 + 0.5);
+        let y = hdr + 8.0;
+        let current = data.flag(&format!("{p}.current"));
+        let minutes = data.num(&format!("{p}.minutes"));
+        let past = !current && minutes.is_some_and(|m| m < 0.0);
+        // Ligne du haut : « maint. », le délai avant l'étape, ou à défaut sa place dans la session.
+        let (when, color) = match minutes {
+            _ if current => ("maint.".to_string(), d.accent()),
+            Some(m) if m >= 90.0 => (format!("{:.0} h {:02.0}", (m / 60.0).floor(), m % 60.0), MUTED),
+            Some(m) if m >= 0.0 => (format!("{m:.0} min"), TEXT),
+            Some(_) => ("passé".to_string(), MUTED),
+            None => (steps[i].to_string(), MUTED),
+        };
+        d.text(cx, y, &when, 10.5, color, Font::Num, HAlign::Center);
+        if current {
+            d.fill(cx - cell / 2.0 + 6.0, y + 16.0, cell - 12.0, 1.5, d.accent());
+        }
+        sky_icon(d, cx, y + 36.0, data.f(&format!("{p}.sky"), -1.0) as i64);
+        let rain = data.f(&format!("{p}.rain"), 0.0);
+        let rain_color = if rain >= 60.0 { BLUE } else if rain >= 30.0 { Color32::from_rgb(150, 190, 240) } else { MUTED };
+        d.text(cx, y + 56.0, &format!("{rain:.0} %"), 13.0, rain_color, Font::Num, HAlign::Center);
+        d.text(cx, y + 73.0, &format!("{:.0}°", prefs.temp(data.f(&format!("{p}.temp"), 0.0))), 11.0, MUTED, Font::Num, HAlign::Center);
+        if past {
+            // Étape passée : un voile sombre l'estompe.
+            d.fill(cx - cell / 2.0 + 2.0, y - 2.0, cell - 4.0, 90.0, Color32::from_rgba_unmultiplied(8, 10, 14, 140));
+        }
+    }
+    (w, h)
 }

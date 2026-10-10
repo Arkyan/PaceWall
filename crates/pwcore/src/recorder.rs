@@ -282,15 +282,18 @@ fn capture(r: &Reader, info: &ScoringInfo) -> (Frame, replay::Roster, Schema) {
     let n = (info.mNumVehicles.max(0) as usize).min(lmu::MAX_MAPPED_VEHICLES);
     let mut cars = Vec::with_capacity(n);
     let mut roster: replay::Roster = Vec::new();
+    let compounds = r.tyre_compounds();
     for i in 0..n {
         let Some(v) = r.vehicle_scoring(i) else { continue };
         // Identité de la voiture : son identifiant de jeu (`mID`), stable toute la session. L'ordre du tableau, lui,
         // peut changer (certaines sources le rangent par place) : s'en servir mélangerait les voitures entre elles.
         let id = v.mID.clamp(0, 255) as usize;
         if roster.len() <= id {
-            roster.resize(id + 1, (String::new(), String::new()));
+            roster.resize(id + 1, (String::new(), String::new(), String::new()));
         }
-        roster[id] = (c_str(&v.mDriverName), c_str(&v.mVehicleClass));
+        let scoring_id = v.mID;
+        let compound = compounds.iter().find(|(tid, _)| *tid == scoring_id).map(|(_, c)| c.clone()).unwrap_or_default();
+        roster[id] = (c_str(&v.mDriverName), c_str(&v.mVehicleClass), compound);
         let pos = v.mPos;
         cars.push(Car {
             idx: id as u8,
@@ -304,7 +307,13 @@ fn capture(r: &Reader, info: &ScoringInfo) -> (Frame, replay::Roster, Schema) {
             last_lap: v.mLastLapTime as f32,
             best_lap: v.mBestLapTime as f32,
             behind_next: v.mTimeBehindNext as f32,
-            behind_leader: v.mTimeBehindLeader as f32, stops: 0, start_place: 0,
+            behind_leader: v.mTimeBehindLeader as f32,
+            time_into: v.mTimeIntoLap as f32,
+            est_lap: v.mEstimatedLapTime as f32,
+            sector1: v.mLastSector1 as f32,
+            sector2: v.mLastSector2 as f32,
+            stops: 0,
+            start_place: 0,
         });
     }
     let flags = info.mSectorFlag;
@@ -312,7 +321,7 @@ fn capture(r: &Reader, info: &ScoringInfo) -> (Frame, replay::Roster, Schema) {
     // Voiture du joueur : tout ce que lisent les widgets (carburant, pneus, pédales, tours, écarts…).
     let (mut keys, mut nums, mut texts) = (Vec::new(), Vec::new(), Vec::new());
     for f in crate::flatten::read_all(r, false) {
-        if ["session.", "weather.", "game.", "grid."].iter().any(|p| f.key.starts_with(p)) {
+        if ["session.", "weather.", "game.", "grid.", "forecast."].iter().any(|p| f.key.starts_with(p)) {
             continue;
         }
         match &f.value {

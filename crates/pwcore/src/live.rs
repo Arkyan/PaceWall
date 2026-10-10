@@ -154,6 +154,9 @@ impl Live {
             self.pending = false;
             let mut fields = flatten::read_all(reader, with_grid);
             self.strategy.update(&mut fields);
+            // Prévisions météo : ajoutées seulement si un widget ou une alerte les a demandées.
+            let forecast = crate::forecast::fields(&fields);
+            fields.extend(forecast);
             return Update::Data(Data::new(fields));
         }
         // Plus rien ne bouge : jeu en pause (on garde la zone et les dernières données) ou jeu fermé (on la lâche).

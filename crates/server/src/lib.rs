@@ -121,6 +121,10 @@ fn produce(shared: Arc<Shared>, stop: Arc<AtomicBool>) {
             // Un client sans abonnement ne justifie aucune lecture du jeu.
             let hz = d.values().filter(|d| !d.prefixes.is_empty()).map(|d| d.hz).max().unwrap_or(0);
             let grid = d.values().any(|d| d.prefixes.iter().any(|p| "grid.".starts_with(p.as_str()) || p.starts_with("grid.")));
+            // Une source OBS affiche les prévisions météo : on les tient à jour.
+            if d.values().any(|d| d.prefixes.iter().any(|p| p.starts_with("forecast"))) {
+                pwcore::forecast::touch();
+            }
             (hz.min(MAX_HZ), grid)
         };
         if hz == 0 {

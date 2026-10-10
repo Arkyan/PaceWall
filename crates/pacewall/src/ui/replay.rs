@@ -70,6 +70,24 @@ fn gap_text(secs: f64, laps_down: u16) -> String {
     }
 }
 
+/// Retard de `behind` sur `ahead` (classé devant lui), à la façon de TinyPedal : différence des temps écoulés dans le
+/// tour, plus un tour de `behind` si `ahead` vient de passer la ligne ; au-delà d'un tour d'écart, on compte en tours.
+/// Renvoie (secondes, tours de retard). `None` si le replay ne contient pas ces temps (ancien format).
+fn timed_gap(ahead: &Row, behind: &Row) -> Option<(f64, u16)> {
+    if ahead.est_lap <= 1.0 || behind.est_lap <= 1.0 {
+        return None;
+    }
+    let laps = ahead.progress - behind.progress;
+    if laps < 0.0 {
+        return Some((0.0, 0));
+    }
+    if laps >= 1.0 {
+        return Some((0.0, laps.floor() as u16));
+    }
+    let gap = ahead.time_into - behind.time_into;
+    Some((if gap >= 0.0 { gap } else { gap + behind.est_lap }, 0))
+}
+
 fn lap_text(v: f64) -> String {
     draw::lap((v > 0.0).then_some(v))
 }
@@ -334,12 +352,12 @@ impl View {
                 });
             });
             // Les statistiques : une colonne par voiture.
-            let stat = |r: &Row| -> [String; 8] {
+            let stat = |r: &Row| -> [String; 10] {
                 // Tours invalidés déjà bouclés à cet instant du replay.
                 let invalid = self.replay.laps_of(r.idx).iter().filter(|l| !l.valid && l.t <= self.t).count();
-                [format!("P{}", r.place), r.class.clone(), format!("{}", r.laps), format!("{invalid}"), lap_text(r.best), lap_text(r.last), format!("{}", r.stops), places_text(r).0]
+                [format!("P{}", r.place), r.class.clone(), format!("{}", r.laps), format!("{invalid}"), lap_text(r.best), lap_text(r.last), r.sectors.iter().map(|s| s.map_or("—".to_string(), |v| format!("{v:.1}"))).collect::<Vec<_>>().join(" "), if r.compound.is_empty() { "—".to_string() } else { r.compound.clone() }, format!("{}", r.stops), places_text(r).0]
             };
-            let labels = ["Position", "Classe", "Tours", "Tours non valides", "Meilleur tour", "Dernier tour", "Arrêts aux stands", "Places gagnées"];
+            let labels = ["Position", "Classe", "Tours", "Tours non valides", "Meilleur tour", "Dernier tour", "Secteurs (dernier tour)", "Gomme", "Arrêts aux stands", "Places gagnées"];
             let (sa, sb) = (stat(a), b.map(stat));
             ui.add_space(4.0);
             egui::Grid::new("replay_card").num_columns(3).spacing([18.0, 3.0]).show(ui, |ui| {
@@ -358,8 +376,10 @@ impl View {
                     let (front, n) = if a.laps > b.laps { (&a.name, a.laps - b.laps) } else { (&b.name, b.laps - a.laps) };
                     format!("{front} a {n} tour(s) d'avance")
                 } else {
-                    let gap = b.gap_leader - a.gap_leader;
-                    format!("{} devant de {:.1} s", if gap >= 0.0 { &a.name } else { &b.name }, gap.abs())
+                    // Celui qui est devant sur la piste (dans le même tour) : écart d'après les temps dans le tour.
+                    let (front, back) = if a.progress >= b.progress { (a, b) } else { (b, a) };
+                    let gap = timed_gap(front, back).map_or((b.gap_leader - a.gap_leader).abs(), |g| g.0);
+                    format!("{} devant de {gap:.1} s", front.name)
                 };
                 ui.add_space(2.0);
                 ui.label(RichText::new(text).color(TEXT));
@@ -435,9 +455,9 @@ impl View {
         let race = self.replay.header.session_type >= 10;
         // (titre, poids de largeur, aligné à droite)
         let cols: Vec<(&str, f32, bool)> = if race {
-            vec![("POS", 0.55, false), ("PILOTE", 2.6, false), ("CLASSE", 1.2, false), ("TOURS", 0.8, true), ("ÉCART LEADER", 1.4, true), ("DEVANT", 1.1, true), ("DERNIER", 1.3, true), ("MEILLEUR", 1.3, true), ("ARRÊTS", 0.8, true), ("+/−", 0.7, true)]
+            vec![("POS", 0.55, false), ("PILOTE", 2.6, false), ("CLASSE", 1.2, false), ("TOURS", 0.8, true), ("ÉCART LEADER", 1.4, true), ("DEVANT", 1.1, true), ("DERNIER", 1.3, true), ("MEILLEUR", 1.3, true), ("S1", 0.9, true), ("S2", 0.9, true), ("S3", 0.9, true), ("GOMME", 1.0, true), ("ARRÊTS", 0.8, true), ("+/−", 0.7, true)]
         } else {
-            vec![("POS", 0.55, false), ("PILOTE", 2.8, false), ("CLASSE", 1.3, false), ("TOURS", 0.8, true), ("MEILLEUR", 1.4, true), ("ÉCART", 1.2, true), ("DERNIER", 1.4, true), ("ARRÊTS", 0.8, true)]
+            vec![("POS", 0.55, false), ("PILOTE", 2.8, false), ("CLASSE", 1.3, false), ("TOURS", 0.8, true), ("MEILLEUR", 1.4, true), ("ÉCART", 1.2, true), ("DERNIER", 1.4, true), ("S1", 0.9, true), ("S2", 0.9, true), ("S3", 0.9, true), ("GOMME", 1.0, true), ("ARRÊTS", 0.8, true)]
         };
 
         // Lignes affichées : le général, ou une classe (les écarts sont alors recalculés entre voitures de la classe).
@@ -465,13 +485,27 @@ impl View {
                 let best_color = if r.best > 0.0 && (r.best - overall_best).abs() < 1e-3 { PURPLE } else { TEXT };
                 let (gain, gain_color) = places_text(r);
                 // Écart avec la voiture de devant : celui du jeu au général, calculé entre voitures de la classe sinon.
-                let interval_secs = if !by_class { r.gap_next } else { prev.filter(|p| p.laps == r.laps).map_or(0.0, |p| r.gap_leader - p.gap_leader) };
-                let interval = match prev {
-                    Some(p) if by_class && p.laps != r.laps => gap_text(0.0, p.laps.saturating_sub(r.laps)),
-                    _ => gap_text(interval_secs, 0),
+                // D'abord d'après les temps dans le tour (comme les widgets en direct) ; dans un ancien replay, les
+                // écarts donnés par le jeu.
+                let old_interval = if !by_class { r.gap_next } else { prev.filter(|p| p.laps == r.laps).map_or(0.0, |p| r.gap_leader - p.gap_leader) };
+                let (interval_secs, interval) = match (prev.and_then(|p| timed_gap(p, r)), prev) {
+                    (Some((secs, laps)), _) => (secs, gap_text(secs, laps)),
+                    (None, Some(p)) if by_class && p.laps != r.laps => (0.0, gap_text(0.0, p.laps.saturating_sub(r.laps))),
+                    _ => (old_interval, gap_text(old_interval, 0)),
                 };
                 let leader_secs = if by_class { (r.gap_leader - leader_gap).max(0.0) } else { r.gap_leader };
-                let leader_text = if n == 0 { "Leader".to_string() } else { gap_text(leader_secs, down) };
+                let leader_text = if n == 0 {
+                    "Leader".to_string()
+                } else {
+                    match timed_gap(shown[0], r) {
+                        Some((secs, laps)) => gap_text(secs, laps),
+                        None => gap_text(leader_secs, down),
+                    }
+                };
+                // Secteurs du dernier tour et gomme.
+                let sector = |i: usize| (r.sectors[i].map_or("—".to_string(), |v| format!("{v:.3}")), if r.sectors[i].is_some() { TEXT } else { MUTED });
+                let compound = (if r.compound.is_empty() { "—".to_string() } else { r.compound.clone() }, MUTED);
+                let sector_key = |i: usize| r.sectors[i].unwrap_or(f64::MAX);
                 let best_gap = if r.best > 0.0 && overall_best.is_finite() { format!("+{:.3}", r.best - overall_best) } else { "—".into() };
                 let place = if by_class { n + 1 } else { r.place as usize };
                 let pit = (if r.in_pits { "STAND".to_string() } else { format!("{}", r.stops) }, if r.in_pits { WARN } else { MUTED });
@@ -479,13 +513,13 @@ impl View {
                 let gain_key = r.place as f64 - r.start_place as f64;
                 let (cells, keys) = if race {
                     (
-                        vec![(format!("{place}"), TEXT), (r.name.clone(), TEXT), (r.class.clone(), MUTED), (format!("{}", r.laps), TEXT), (leader_text, if n == 0 { OK } else { TEXT }), (interval, TEXT), last, (lap_text(r.best), best_color), pit, (gain, gain_color)],
-                        vec![n as f64, 0.0, 0.0, -(r.laps as f64), n as f64, far(interval_secs), far(r.last), far(r.best), r.stops as f64, gain_key],
+                        vec![(format!("{place}"), TEXT), (r.name.clone(), TEXT), (r.class.clone(), MUTED), (format!("{}", r.laps), TEXT), (leader_text, if n == 0 { OK } else { TEXT }), (interval, TEXT), last, (lap_text(r.best), best_color), sector(0), sector(1), sector(2), compound, pit, (gain, gain_color)],
+                        vec![n as f64, 0.0, 0.0, -(r.laps as f64), n as f64, far(interval_secs), far(r.last), far(r.best), sector_key(0), sector_key(1), sector_key(2), 0.0, r.stops as f64, gain_key],
                     )
                 } else {
                     (
-                        vec![(format!("{place}"), TEXT), (r.name.clone(), TEXT), (r.class.clone(), MUTED), (format!("{}", r.laps), TEXT), (lap_text(r.best), best_color), (if n == 0 { "Référence".into() } else { best_gap }, MUTED), last, pit],
-                        vec![n as f64, 0.0, 0.0, -(r.laps as f64), far(r.best), far(r.best), far(r.last), r.stops as f64],
+                        vec![(format!("{place}"), TEXT), (r.name.clone(), TEXT), (r.class.clone(), MUTED), (format!("{}", r.laps), TEXT), (lap_text(r.best), best_color), (if n == 0 { "Référence".into() } else { best_gap }, MUTED), last, sector(0), sector(1), sector(2), compound, pit],
+                        vec![n as f64, 0.0, 0.0, -(r.laps as f64), far(r.best), far(r.best), far(r.last), sector_key(0), sector_key(1), sector_key(2), 0.0, r.stops as f64],
                     )
                 };
                 LineOut { row: r, rank: n, cells, keys }
@@ -494,7 +528,8 @@ impl View {
         if let Some((col, desc)) = self.sort.filter(|(c, _)| *c < cols.len()) {
             // Pilote et classe se trient par ordre alphabétique, le reste par valeur ; à égalité, l'ordre du classement.
             lines.sort_by(|a, b| {
-                let o = if col == 1 || col == 2 { a.cells[col].0.to_lowercase().cmp(&b.cells[col].0.to_lowercase()) } else { a.keys[col].total_cmp(&b.keys[col]) };
+                let text = col == 1 || col == 2 || cols[col].0 == "GOMME";
+                let o = if text { a.cells[col].0.to_lowercase().cmp(&b.cells[col].0.to_lowercase()) } else { a.keys[col].total_cmp(&b.keys[col]) };
                 (if desc { o.reverse() } else { o }).then(a.rank.cmp(&b.rank))
             });
         }

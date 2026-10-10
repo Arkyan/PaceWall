@@ -28,6 +28,15 @@ pub fn data(t: f64) -> Data {
     put("session.max_laps", json!(0));
     put("session.track_length", json!(4000.0));
     put("demo.map", json!(true));
+    // Prévisions de démonstration : la pluie arrive à mi-course.
+    put("forecast.count", json!(5));
+    for (i, (sky, temp, rain, minutes)) in [(1, 21.0, 5.0, -40.0), (3, 20.0, 25.0, 32.0), (6, 18.0, 65.0, 104.0), (8, 17.0, 90.0, 176.0), (2, 19.0, 15.0, 248.0)].iter().enumerate() {
+        put(&format!("forecast.{i}.sky"), json!(sky));
+        put(&format!("forecast.{i}.temp"), json!(temp));
+        put(&format!("forecast.{i}.rain"), json!(rain));
+        put(&format!("forecast.{i}.minutes"), json!(minutes));
+        put(&format!("forecast.{i}.current"), json!(i == 0));
+    }
     put("session.vehicles", json!(12));
     put("weather.ambient", json!(21.0));
     put("weather.track", json!(32.0));

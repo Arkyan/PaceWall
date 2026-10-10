@@ -13,7 +13,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const MAGIC: &[u8; 4] = b"PWR2";
+const MAGIC: &[u8; 4] = b"PWR3";
+/// Format précédent, encore lisible : sans temps dans le tour, secteurs ni gomme des autres voitures.
+const MAGIC_V2: &[u8; 4] = b"PWR2";
 const FRAMES_PER_CHUNK: u32 = 120;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -42,6 +44,12 @@ pub struct Car {
     pub best_lap: f32,
     pub behind_next: f32,
     pub behind_leader: f32,
+    /// Temps écoulé dans le tour et temps au tour estimés par le jeu (base des écarts, comme TinyPedal).
+    pub time_into: f32,
+    pub est_lap: f32,
+    /// Dernier tour : temps à la fin du secteur 1, puis à la fin du secteur 2 (cumulé). 0 ou négatif = pas de temps.
+    pub sector1: f32,
+    pub sector2: f32,
     /// Dérivés à la lecture (non enregistrés) : arrêts aux stands déjà faits, place au départ du replay.
     pub stops: u8,
     pub start_place: u8,
@@ -83,8 +91,8 @@ impl Schema {
     }
 }
 
-/// Nom et classe de chaque voiture, dans l'ordre des index.
-pub type Roster = Vec<(String, String)>;
+/// Nom, classe et gomme de chaque voiture, rangés par identifiant.
+pub type Roster = Vec<(String, String, String)>;
 
 /* ---------- écriture ---------- */
 
@@ -128,7 +136,8 @@ impl Writer {
         if *roster != self.roster {
             self.chunk.push(0);
             self.chunk.push(roster.len().min(255) as u8);
-            for (name, class) in roster.iter().take(255) {
+            for (name, class, compound) in roster.iter().take(255) {
+                put_str(&mut self.chunk, compound);
                 put_str(&mut self.chunk, name);
                 put_str(&mut self.chunk, class);
             }
@@ -159,7 +168,7 @@ impl Writer {
             b.push(c.place);
             b.extend_from_slice(&c.laps.to_le_bytes());
             b.push(c.in_pits as u8 | (c.is_player as u8) << 1);
-            for v in [c.x, c.z, c.lap_dist, c.last_lap, c.best_lap, c.behind_next, c.behind_leader] {
+            for v in [c.x, c.z, c.lap_dist, c.last_lap, c.best_lap, c.behind_next, c.behind_leader, c.time_into, c.est_lap, c.sector1, c.sector2] {
                 b.extend_from_slice(&v.to_le_bytes());
             }
         }
@@ -285,6 +294,14 @@ pub struct Row {
     pub is_player: bool,
     pub stops: u8,
     pub start_place: u8,
+    /// Tours parcourus, fraction du tour en cours comprise (pour compter les tours d'écart).
+    pub progress: f64,
+    /// Temps dans le tour et temps au tour estimés par le jeu (0 dans un ancien replay).
+    pub time_into: f64,
+    pub est_lap: f64,
+    /// Secteurs du dernier tour (`None` si le jeu n'a pas donné le temps).
+    pub sectors: [Option<f64>; 3],
+    pub compound: String,
 }
 
 /// Un tour bouclé par une voiture.
@@ -373,7 +390,9 @@ impl Replay {
         std::fs::File::open(path)?.read_to_end(&mut raw)?;
         let bad = || std::io::Error::new(std::io::ErrorKind::InvalidData, "replay illisible");
         let mut c = Cursor { b: &raw, at: 0 };
-        if c.take(4) != Some(&MAGIC[..]) {
+        let magic = c.take(4);
+        let v3 = magic == Some(&MAGIC[..]);
+        if !v3 && magic != Some(&MAGIC_V2[..]) {
             return Err(bad());
         }
         let header = (|| {
@@ -407,8 +426,10 @@ impl Replay {
                     let Some(n) = d.u8() else { break };
                     let mut r = Vec::new();
                     for _ in 0..n {
-                        let (Some(name), Some(class)) = (d.string(), d.string()) else { break };
-                        r.push((name, class));
+                        // La gomme est écrite en premier dans le nouveau format.
+                        let compound = if v3 { d.string() } else { Some(String::new()) };
+                        let (Some(compound), Some(name), Some(class)) = (compound, d.string(), d.string()) else { break };
+                        r.push((name, class, compound));
                     }
                     rosters.push(Arc::new(r));
                     current = (rosters.len() - 1) as u16;
@@ -451,6 +472,10 @@ impl Replay {
                                 best_lap: d.f32()?,
                                 behind_next: d.f32()?,
                                 behind_leader: d.f32()?,
+                                time_into: if v3 { d.f32()? } else { 0.0 },
+                                est_lap: if v3 { d.f32()? } else { 0.0 },
+                                sector1: if v3 { d.f32()? } else { 0.0 },
+                                sector2: if v3 { d.f32()? } else { 0.0 },
                                 stops: 0,
                                 start_place: 0,
                             });
@@ -536,12 +561,19 @@ impl Replay {
     pub fn rows_at(&self, t: f64) -> Vec<Row> {
         let Some(f) = self.frame_at(t) else { return Vec::new() };
         let roster = &self.rosters[self.roster_of[self.index_at(t)] as usize];
+        let length = (self.header.track_length as f64).max(1.0);
         let mut rows: Vec<Row> = f
             .cars
             .iter()
             .map(|c| {
-                let (name, class) = roster.get(c.idx as usize).cloned().unwrap_or_default();
+                let (name, class, compound) = roster.get(c.idx as usize).cloned().unwrap_or_default();
+                let (s1, s2, last) = (c.sector1 as f64, c.sector2 as f64, c.last_lap as f64);
                 Row {
+                    progress: c.laps as f64 + (c.lap_dist as f64 / length).clamp(0.0, 0.999),
+                    time_into: c.time_into as f64,
+                    est_lap: c.est_lap as f64,
+                    sectors: [(s1 > 0.0).then_some(s1), (s1 > 0.0 && s2 > s1).then(|| s2 - s1), (s2 > 0.0 && last > s2).then(|| last - s2)],
+                    compound,
                     idx: c.idx,
                     place: c.place,
                     name,
@@ -703,7 +735,7 @@ impl Replay {
                 }
                 _ => (lerp(ca.x, cb.x), lerp(ca.z, cb.z)),
             };
-            let (name, class) = roster.get(ca.idx as usize).cloned().unwrap_or_default();
+            let (name, class, _) = roster.get(ca.idx as usize).cloned().unwrap_or_default();
             let p = format!("grid.{slot:03}");
             put(format!("{p}.driver"), json!(name));
             put(format!("{p}.class"), json!(class));
@@ -718,6 +750,10 @@ impl Replay {
             put(format!("{p}.x"), json!(x));
             put(format!("{p}.z"), json!(z));
             put(format!("{p}.lap_dist"), json!(lerp(ca.lap_dist, cb.lap_dist)));
+            if ca.est_lap > 1.0 {
+                put(format!("{p}.time_into"), json!(ca.time_into));
+                put(format!("{p}.est_lap"), json!(ca.est_lap));
+            }
             if ca.is_player && !player_recorded {
                 put("position.place".into(), json!(ca.place));
                 put("position.laps".into(), json!(ca.laps));
@@ -752,7 +788,7 @@ mod tests {
         let path = std::env::temp_dir().join("pw-replay-test.pwr");
         let h = Header { track: "Le Mans".into(), player: "Moi".into(), ..Default::default() };
         let schema = Schema(vec![("player.speed".into(), Kind::Num), ("fuel.low".into(), Kind::Bool), ("lap.number".into(), Kind::Int), ("tyre.front.compound".into(), Kind::Text)]);
-        let roster: Roster = vec![("Moi".into(), "Hypercar".into()), ("Lui".into(), "LMGT3".into())];
+        let roster: Roster = vec![("Moi".into(), "Hypercar".into(), "Medium".into()), ("Lui".into(), "LMGT3".into(), "Hard".into())];
         {
             let mut w = Writer::create(&path, &h).unwrap();
             for n in 0..300 {
@@ -769,6 +805,7 @@ mod tests {
         assert!((d.f("grid.000.x", -1.0) - 5.0).abs() < 1e-3);
         assert_eq!(d.text("grid.001.driver"), "Lui");
         assert_eq!(d.text("grid.001.class"), "LMGT3");
+        assert_eq!(r.rows_at(0.25)[1].compound, "Hard");
         assert!(d.flag("session.sector_yellow.2") && !d.flag("session.sector_yellow.1"));
         assert_eq!(d.f("lap.number", 0.0), 7.0);
         assert!((d.f("player.speed", -1.0) - 5.0).abs() < 1e-3 && d.flag("fuel.low") && d.text("tyre.front.compound") == "Soft");
@@ -780,7 +817,7 @@ mod tests {
     #[test]
     fn invalid_laps_are_kept_without_a_time() {
         let path = std::env::temp_dir().join("pw-replay-laps.pwr");
-        let roster: Roster = vec![("Moi".into(), "Hypercar".into())];
+        let roster: Roster = vec![("Moi".into(), "Hypercar".into(), String::new())];
         {
             let mut w = Writer::create(&path, &Header::default()).unwrap();
             for n in 0..60u16 {

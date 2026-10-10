@@ -54,6 +54,10 @@ et `crates/server/overlay/widgets.js`.
 
 Overlay du joueur uniquement pour l'instant (pas encore dans la version OBS) : **relatif** (voitures autour de soi sur la piste, écart en secondes, rouge = il nous a pris un tour, bleu = on lui en a pris un), **arrêt au stand** (place et trafic à la sortie, d'après un temps perdu réglable), **radar de proximité** (voitures à côté, alerte de côté rouge ou orange) et **objectif de consommation** dans le widget carburant (consommation à tenir pour boucler un tour de plus).
 
+## Prévisions météo
+
+Le widget **Prévisions météo** affiche les cinq étapes de la session (début, 25 %, 50 %, 75 %, fin) : ciel, risque de pluie, température et délai avant chaque étape. Ces prévisions ne sont pas dans la mémoire partagée : elles viennent du service web local du jeu (`http://127.0.0.1:6397/rest/sessions/weather`, le même que lit TinyPedal ; port réglable par `lmu_api_port`). PaceWall ne l'interroge que si le widget ou l'alerte « pluie prévue » sert, une fois toutes les 30 secondes. Pour essayer sans le jeu : `PACEWALL_FORECAST_FILE=<fichier json>`.
+
 ## Réglages communs
 
 Onglet Réglages : **unités** (km/h ou mph, °C ou °F, kPa / bar / psi, litres ou gallons), **seuils de couleur** (carburant, état et température des pneus), **couleur d'accent** de la fenêtre, et **raccourcis** : une touche (« Ctrl+Alt+O ») ou un bouton de volant (« Joy1:B7 ») pour afficher l'overlay, couper la voix, ou masquer et réafficher un type de widget en roulant. Les touches sont des raccourcis globaux de Windows ; les boutons sont lus vingt fois par seconde, seulement s'ils servent.

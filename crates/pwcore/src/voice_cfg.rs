@@ -34,13 +34,16 @@ pub const CATALOG: &[AlertDef] = &[
     AlertDef { id: "flat", group: "Pneus", label: "Crevaison", clips: &["flat"], phrases: &["Crevaison ! Rentre au stand !", "Tu as une crevaison, rentre doucement !"] },
     AlertDef { id: "yellow", group: "Drapeaux", label: "Drapeau jaune (avec le secteur)", clips: &["yellow_s2", "yellow", "yellow_s1", "yellow_s3"], phrases: &["Drapeau jaune, secteur N.", "Jaune dans le secteur N, lève le pied."] },
     AlertDef { id: "blue", group: "Drapeaux", label: "Drapeau bleu", clips: &["blue"], phrases: &["Drapeau bleu, laisse passer.", "Drapeau bleu, une voiture plus rapide arrive."] },
+    AlertDef { id: "blue_lmp", group: "Drapeaux", label: "Drapeau bleu, classe plus rapide derrière (LMP)", clips: &["blue_lmp"], phrases: &["Drapeau bleu, voiture plus rapide derrière.", "Drapeau bleu, une catégorie plus rapide arrive, laisse passer."] },
     AlertDef { id: "fcy", group: "Drapeaux", label: "Full course yellow", clips: &["fcy"], phrases: &["Full course yellow.", "Full course yellow, respecte les écarts et reste concentré."] },
     AlertDef { id: "green", group: "Drapeaux", label: "Relance, drapeau vert", clips: &["green"], phrases: &["Course relancée, drapeau vert.", "Feu vert, c'est reparti, bonne relance."] },
     AlertDef { id: "yellow_end", group: "Drapeaux", label: "Fin du jaune", clips: &["yellow_end"], phrases: &["Fin du jaune.", "Piste libre, tu peux attaquer."] },
     AlertDef { id: "last_lap", group: "Course", label: "Dernier tour", clips: &["last_lap"], phrases: &["Dernier tour.", "C'est le dernier tour, donne tout."] },
     AlertDef { id: "best_lap", group: "Course", label: "Meilleur tour personnel", clips: &["best_lap"], phrases: &["Meilleur tour personnel.", "Nouveau meilleur tour, bravo."] },
     AlertDef { id: "rear_close", group: "Course", label: "Voiture qui se rapproche derrière (course)", clips: &["rear_close"], phrases: &["Voiture derrière, elle se rapproche.", "Attention, voiture derrière à moins d'une seconde."] },
+    AlertDef { id: "radar", group: "Course", label: "Radar : voiture à gauche, à droite, dégagé", clips: &["car_left", "car_right", "car_clear"], phrases: &["Voiture à gauche. / Voiture à droite. / C'est dégagé.", "Attention, à gauche. / Attention, à droite. / La voie est libre."] },
     AlertDef { id: "pit_limiter", group: "Course", label: "Limiteur de vitesse aux stands", clips: &["pit_limiter"], phrases: &["Active le limiteur.", "Limiteur de vitesse, ralentis."] },
+    AlertDef { id: "rain_soon", group: "Météo", label: "Pluie prévue dans une dizaine de minutes", clips: &["rain_soon"], phrases: &["De la pluie est prévue dans une dizaine de minutes.", "Pluie annoncée dans dix minutes environ, prépare-toi."] },
     AlertDef { id: "rain", group: "Météo", label: "Pluie détectée", clips: &["rain"], phrases: &["Pluie détectée.", "Il commence à pleuvoir, prépare tes pneus pluie."] },
 ];
 

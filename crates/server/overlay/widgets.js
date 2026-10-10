@@ -201,6 +201,8 @@ PW.widgets.inputs = {
   hz: o => +o.fps, size: [260, 180],
   options: [
     { id: 'fps', label: 'Fluidité (images/s)', type: 'select', choices: [['10', '10'], ['15', '15'], ['20', '20'], ['30', '30']], def: '20' },
+    { id: 'gauges', label: 'Régime, rapport et vitesse', type: 'bool', def: true },
+    { id: 'pedals', label: 'Pédales (barres)', type: 'bool', def: true },
     { id: 'graph', label: 'Graphe des inputs', type: 'bool', def: true },
     { id: 'window', label: 'Durée du graphe', type: 'select', choices: [['5', '5 s'], ['10', '10 s'], ['20', '20 s']], def: '10' },
     { id: 'steering', label: 'Volant dans le graphe', type: 'bool', def: true },
@@ -208,12 +210,17 @@ PW.widgets.inputs = {
     { id: 'mph', label: 'Toujours en mph (sinon : unité des réglages)', type: 'bool', def: false },
   ],
   mount(root, o) {
-    const card = PW.tpl(`<div class="pw-card"><div class="pw-rpm"><i data-k="rpm"></i></div>
-      <div class="pw-inputs">
-        <div class="pw-pedals"><div class="pw-pedal b"><i data-k="brake"></i></div><div class="pw-pedal t"><i data-k="thr"></i></div>${o.clutch ? '<div class="pw-pedal c"><i data-k="clu"></i></div>' : ''}</div>
-        <div class="pw-gear" data-k="gear">N</div>
-        <div><div class="pw-speed"><span data-k="speed">0</span><small>${o.mph ? 'mph' : PW.unit.speed(0)[1]}</small></div></div>
-      </div>${o.graph ? '<canvas class="pw-graph" width="460" height="112"></canvas>' : ''}</div>`).firstChild;
+    // Trois blocs au choix : régime / rapport / vitesse, pédales, graphe (le premier est gardé si tout est décoché).
+    const pedals = o.pedals !== false, gauges = o.gauges !== false || (!pedals && !o.graph), top = pedals || gauges;
+    const narrow = pedals && !gauges && !o.graph;
+    // Pédales et graphe sans les chiffres : côte à côte.
+    const side = pedals && o.graph && !gauges;
+    const card = PW.tpl(`<div class="pw-card${narrow ? ' pw-narrow' : ''}${side ? ' pw-side' : ''}">${gauges ? '<div class="pw-rpm"><i data-k="rpm"></i></div>' : ''}
+      ${top ? `<div class="pw-inputs">
+        ${pedals ? `<div class="pw-pedals"><div class="pw-pedal b"><i data-k="brake"></i></div><div class="pw-pedal t"><i data-k="thr"></i></div>${o.clutch ? '<div class="pw-pedal c"><i data-k="clu"></i></div>' : ''}</div>` : ''}
+        ${gauges ? `<div class="pw-gear" data-k="gear">N</div>
+        <div><div class="pw-speed"><span data-k="speed">0</span><small>${o.mph ? 'mph' : PW.unit.speed(0)[1]}</small></div></div>` : ''}
+      </div>` : ''}${o.graph ? `<canvas class="pw-graph${top ? '' : ' solo'}" width="460" height="112"></canvas>` : ''}</div>`).firstChild;
     root.appendChild(card);
     const b = PW.bind(card);
     let get = null, timer = 0;
@@ -247,16 +254,22 @@ PW.widgets.inputs = {
     return {
       update(g) {
         get = g;
-        const rpm = g('player.rpm', 0), max = g('player.rpm_max', 8000) || 8000, f = rpm / max;
-        b.scaleX('rpm', f);
-        b.css('rpm', 'background', f > 0.95 ? 'var(--pw-bad)' : f > 0.85 ? 'var(--pw-warn)' : 'var(--pw-ok)');
-        b.scaleY('brake', g('player.brake', 0) / 100);
-        b.scaleY('thr', g('player.throttle', 0) / 100);
+        if (b.el.rpm) {
+          const rpm = g('player.rpm', 0), max = g('player.rpm_max', 8000) || 8000, f = rpm / max;
+          b.scaleX('rpm', f);
+          b.css('rpm', 'background', f > 0.95 ? 'var(--pw-bad)' : f > 0.85 ? 'var(--pw-warn)' : 'var(--pw-ok)');
+        }
+        if (b.el.brake) {
+          b.scaleY('brake', g('player.brake', 0) / 100);
+          b.scaleY('thr', g('player.throttle', 0) / 100);
+        }
         if (b.el.clu) b.scaleY('clu', g('player.clutch', 0) / 100);
-        const gear = g('player.gear', 0);
-        b.text('gear', gear < 0 ? 'R' : gear === 0 ? 'N' : String(gear));
-        const kmh = g('player.speed', 0);
-        b.text('speed', String(Math.round(o.mph ? kmh * 0.621371 : PW.unit.speed(kmh)[0])));
+        if (b.el.gear) {
+          const gear = g('player.gear', 0);
+          b.text('gear', gear < 0 ? 'R' : gear === 0 ? 'N' : String(gear));
+          const kmh = g('player.speed', 0);
+          b.text('speed', String(Math.round(o.mph ? kmh * 0.621371 : PW.unit.speed(kmh)[0])));
+        }
       },
       destroy() { clearInterval(timer); },
     };
@@ -856,8 +869,45 @@ PW.widgets.radar = {
   },
 };
 
+
+/* ---------- Prévisions météo ---------- */
+PW.widgets.forecast = {
+  name: 'Prévisions météo',
+  keys: ['forecast.'],
+  hz: 1, size: [310, 98],
+  options: [],
+  mount(root, o) {
+    const steps = ['Début', '25 %', '50 %', '75 %', 'Fin'];
+    const card = PW.tpl(`<div class="pw-card pw-forecast"><div class="pw-title"><span>Prévisions météo</span></div><div class="cells">${steps.map((_, i) => `<div data-k="c${i}" data-base=""><small data-k="w${i}"></small><i data-k="i${i}"></i><b data-k="r${i}" data-base=""></b><em data-k="t${i}"></em></div>`).join('')}</div><p data-k="none">Prévisions indisponibles</p></div>`).firstChild;
+    root.appendChild(card);
+    const b = PW.bind(card);
+    // Ciel du jeu : 0 dégagé, 1-2 quelques nuages, 3-4 couvert, 5-7 pluie faible, 8-9 pluie, 10 orage.
+    const icon = s => s === 0 ? '☀' : s <= 2 ? '⛅' : s <= 4 ? '☁' : s <= 7 ? '🌦' : s <= 9 ? '🌧' : s === 10 ? '⛈' : '—';
+    return {
+      update(g) {
+        const n = Math.min(5, g('forecast.count', 0));
+        b.css('none', 'display', n ? 'none' : 'block');
+        for (let i = 0; i < 5; i++) {
+          const p = 'forecast.' + i, cur = g(p + '.current', false), m = g(p + '.minutes');
+          b.css('c' + i, 'visibility', i < n ? 'visible' : 'hidden');
+          if (i >= n) continue;
+          b.cls('c' + i, cur ? 'cur' : m != null && m < 0 ? 'past' : '');
+          b.text('w' + i, cur ? 'maint.' : m == null ? steps[i] : m < 0 ? 'passé' : m >= 90 ? Math.floor(m / 60) + ' h ' + String(Math.round(m % 60)).padStart(2, '0') : Math.round(m) + ' min');
+          const sky = g(p + '.sky', -1), rain = g(p + '.rain', 0);
+          b.text('i' + i, icon(sky >= 0 && sky <= 10 ? sky : -1));
+          b.text('r' + i, Math.round(rain) + ' %');
+          b.cls('r' + i, rain >= 60 ? 'high' : rain >= 30 ? 'mid' : '');
+          b.text('t' + i, Math.round(PW.unit.temp(g(p + '.temp', 0))) + '°');
+        }
+      },
+    };
+  },
+};
+
 /* ---------- Données de démonstration (éditeur, ou sans jeu) ---------- */
 PW.demo = (() => {
+  const forecastDemo = { 'forecast.count': 5 };
+  [[1, 21, 5, -40], [3, 20, 25, 32], [6, 18, 65, 104], [8, 17, 90, 176], [2, 19, 15, 248]].forEach(([sky, temp, rain, minutes], i) => Object.assign(forecastDemo, { [`forecast.${i}.sky`]: sky, [`forecast.${i}.temp`]: temp, [`forecast.${i}.rain`]: rain, [`forecast.${i}.minutes`]: minutes, [`forecast.${i}.current`]: i === 0 }));
   const d = {
     'game.version': 1, 'demo.map': true, 'session.track_length': 4000, 'session.track': 'Circuit de la Sarthe', 'session.type': 10, 'session.phase': 5, 'session.sector_yellow.1': false, 'session.sector_yellow.2': true, 'player.blue_flag': true, 'session.sector_yellow.3': false,
     'session.remaining': 5 * 3600 + 1234, 'session.max_laps': 0, 'session.vehicles': 12, 'weather.ambient': 21, 'weather.track': 32, 'weather.rain': 0,
@@ -880,5 +930,5 @@ PW.demo = (() => {
     Object.assign(d, { [`${p}.driver`]: nm, [`${p}.class`]: cls[i], [`${p}.place`]: i + 1, [`${p}.laps`]: 14, [`${p}.behind_leader`]: i * 4.3, [`${p}.lap_dist`]: 3200 - i * 160, [`${p}.behind_next`]: i ? 3.1 + Math.sin(i * 0.7) : 0, [`${p}.best_lap`]: 206.9 + i * 0.37,
       [`${p}.in_pits`]: false, [`${p}.is_player`]: nm === 'Toi' });
   });
-  return d;
+  return Object.assign(d, forecastDemo);
 })();
