@@ -11,6 +11,7 @@
 use crate::alerts;
 use crate::speech;
 use crate::draw::{Measure, D};
+use crate::hotkeys::{self, Binding};
 use crate::soft::{Fonts, SoftCanvas};
 use crate::{widgets, win};
 use pwcore::layout::{self, Layout};
@@ -232,6 +233,13 @@ pub fn run() {
     let mut alerts = alerts::Alerts::default();
     let mut next_alert = Instant::now();
     let mut next_fg = Instant::now();
+    // Raccourcis de l'overlay : masquer ou réafficher un type de widget, couper ou remettre la voix.
+    let manager = global_hotkey::GlobalHotKeyManager::new().ok();
+    let mut shortcuts = Shortcuts::default();
+    shortcuts.load(manager.as_ref());
+    let mut pads = hotkeys::Pads::default();
+    let mut hidden: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut muted = false;
     let start = Instant::now();
     // Diagnostic : PACEWALL_DEBUG=1 écrit des compteurs dans %TEMP%\pw-overlay.log.
     let debug = std::env::var_os("PACEWALL_DEBUG").is_some();
@@ -275,6 +283,7 @@ pub fn run() {
             hide_idle = settings::bool_of("overlay_hide_idle", true);
             voice = alerts::Config::load();
             per_alert = pwcore::voice_cfg::load();
+            shortcuts.load(manager.as_ref());
             let mtime = layout::modified();
             if mtime != layout_mtime {
                 layout_mtime = mtime;
@@ -284,9 +293,33 @@ pub fn run() {
             }
         }
 
-        let with_grid = layout.widgets.iter().any(|w| w.kind == "standings" || w.kind == "trackmap" || (w.kind == "timing" && w.opts.get("gaps").and_then(|v| v.as_bool()).unwrap_or(true)));
+        // Raccourcis enfoncés depuis le dernier passage (touches, puis boutons de volant).
+        let mut fired: Vec<Action> = Vec::new();
+        while let Ok(ev) = global_hotkey::GlobalHotKeyEvent::receiver().try_recv() {
+            if ev.state == global_hotkey::HotKeyState::Pressed {
+                fired.extend(shortcuts.keys.iter().filter(|(id, _)| *id == ev.id).map(|(_, a)| a.clone()));
+            }
+        }
+        if !shortcuts.buttons.is_empty() {
+            for hit in pads.pressed(shortcuts.buttons.iter().map(|(pad, _, _)| *pad)) {
+                fired.extend(shortcuts.buttons.iter().filter(|(pad, b, _)| (*pad, *b) == hit).map(|(_, _, a)| a.clone()));
+            }
+        }
+        for action in fired {
+            match action {
+                Action::Voice => muted = !muted,
+                Action::Widget(kind) => {
+                    if !hidden.remove(&kind) {
+                        hidden.insert(kind);
+                    }
+                    rendered.clear();
+                }
+            }
+        }
+
+        let with_grid = layout.widgets.iter().any(|w| matches!(w.kind.as_str(), "standings" | "trackmap" | "relative" | "pit" | "radar") || (w.kind == "timing" && w.opts.get("gaps").and_then(|v| v.as_bool()).unwrap_or(true)));
         // On ne lit le jeu en entier que si un widget doit être redessiné (le jeu publie plus vite que les widgets n'en ont besoin).
-        let alert_due = voice.enabled && now >= next_alert;
+        let alert_due = voice.enabled && !muted && now >= next_alert;
         let want = alert_due
             || panels.len() < layout.widgets.len()
             || layout.widgets.iter().zip(panels.iter()).any(|(spec, panel)| {
@@ -304,7 +337,7 @@ pub fn run() {
                 }
                 game = true;
                 data_version += 1;
-                if voice.enabled {
+                if voice.enabled && !muted {
                     next_alert = now + Duration::from_millis(250);
                     for phrase in alerts.update(&data, &voice, now) {
                         let acfg = pwcore::voice_cfg::id_of_key(phrase.key).and_then(|id| per_alert.get(id)).cloned().unwrap_or_default();
@@ -354,7 +387,7 @@ pub fn run() {
         }
 
         let mut sleep = Duration::from_millis(if game { 250 } else { 500 });
-        if voice.enabled && game {
+        if voice.enabled && !muted && game {
             sleep = sleep.min(next_alert.saturating_duration_since(now).max(Duration::from_millis(20)));
         }
         if let (true, Some(mon)) = (visible, mon.clone()) {
@@ -370,6 +403,11 @@ pub fn run() {
 
             for (i, spec) in layout.widgets.iter().enumerate() {
                 let Some(panel) = panels.get_mut(i) else { continue };
+                // Type de widget masqué par un raccourci.
+                if hidden.contains(&spec.kind) {
+                    panel.hide();
+                    continue;
+                }
                 let period = Duration::from_secs_f32(1.0 / widgets::hz(&spec.kind, spec).max(0.2));
                 let due = now.duration_since(panel.last) >= period;
                 // Le graphe des inputs avance avec le temps ; les autres widgets n'ont rien à refaire sans nouvelle donnée.
@@ -458,6 +496,10 @@ pub fn run() {
             }
         }
 
+        // Un bouton de volant sert de raccourci : on revient le lire au moins vingt fois par seconde.
+        if !shortcuts.buttons.is_empty() {
+            sleep = sleep.min(Duration::from_millis(50));
+        }
         // Veille jusqu'à la prochaine échéance, réveillée par un message (fermeture).
         unsafe {
             MsgWaitForMultipleObjects(None, false, sleep.as_millis().clamp(1, 1000) as u32, QS_ALLINPUT);
@@ -465,5 +507,59 @@ pub fn run() {
     }
     unsafe {
         windows::Win32::Media::timeEndPeriod(1);
+    }
+}
+
+#[derive(Clone)]
+enum Action {
+    Voice,
+    /// Masquer ou réafficher tous les widgets de ce type.
+    Widget(String),
+}
+
+/// Raccourcis de l'overlay tels qu'enregistrés dans les réglages.
+#[derive(Default)]
+struct Shortcuts {
+    /// Texte des réglages au dernier chargement (pour ne rien refaire s'ils n'ont pas changé).
+    raw: Vec<String>,
+    registered: Vec<global_hotkey::hotkey::HotKey>,
+    keys: Vec<(u32, Action)>,
+    buttons: Vec<(u32, u32, Action)>,
+}
+
+impl Shortcuts {
+    fn load(&mut self, manager: Option<&global_hotkey::GlobalHotKeyManager>) {
+        let all = settings::all();
+        let text = |k: &str| all.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let mut wanted: Vec<(String, Action)> = vec![(text("hk_voice"), Action::Voice)];
+        for (key, _) in hotkeys::WIDGET_ACTIONS {
+            wanted.push((text(key), Action::Widget(key.trim_start_matches("hk_").to_string())));
+        }
+        let raw: Vec<String> = wanted.iter().map(|(t, _)| t.clone()).collect();
+        if raw == self.raw {
+            return;
+        }
+        self.raw = raw;
+        if let Some(m) = manager {
+            for k in self.registered.drain(..) {
+                let _ = m.unregister(k);
+            }
+        }
+        self.keys.clear();
+        self.buttons.clear();
+        for (t, action) in wanted {
+            match hotkeys::parse(&t) {
+                Some(Binding::Key(k)) => {
+                    if let Some(m) = manager {
+                        if m.register(k).is_ok() {
+                            self.registered.push(k);
+                            self.keys.push((k.id(), action));
+                        }
+                    }
+                }
+                Some(Binding::Joy(pad, button)) => self.buttons.push((pad, button, action)),
+                None => {}
+            }
+        }
     }
 }

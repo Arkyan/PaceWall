@@ -3,7 +3,7 @@
 //! la fenêtre principale (`--ui`) et l'overlay (`--overlay`) sont des processus séparés, lancés quand il le faut.
 
 use crate::win;
-use global_hotkey::hotkey::{Code, HotKey, Modifiers};
+use crate::hotkeys::{self, Binding};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use pwcore::{live, recorder, settings};
 use serde_json::json;
@@ -96,11 +96,13 @@ pub fn run(minimized: bool) {
     }
     let _tray: Option<TrayIcon> = builder.build().ok();
 
-    // Ctrl+Alt+O : afficher / masquer l'overlay.
-    let hotkeys = GlobalHotKeyManager::new().ok();
-    if let Some(m) = &hotkeys {
-        let _ = m.register(HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyO));
+    // Raccourci pour afficher / fermer l'overlay : une touche (raccourci global) ou un bouton de volant (lu ci-dessous).
+    let manager = GlobalHotKeyManager::new().ok();
+    let mut overlay_key = hotkeys::parse(&settings::str_of("hk_overlay", "Ctrl+Alt+O"));
+    if let (Some(m), Some(Binding::Key(k))) = (&manager, overlay_key) {
+        let _ = m.register(k);
     }
+    let mut pads = hotkeys::Pads::default();
     GlobalHotKeyEvent::set_event_handler(Some(|e: GlobalHotKeyEvent| {
         if e.state == HotKeyState::Pressed {
             win::toggle_overlay();
@@ -140,7 +142,28 @@ pub fn run(minimized: bool) {
             win::set_autostart(settings::bool_of("autostart", false));
             auto.set_checked(settings::bool_of("overlay_auto", true));
             obs_item.set_checked(settings::bool_of("obs_server", false));
+            let wanted = hotkeys::parse(&settings::str_of("hk_overlay", "Ctrl+Alt+O"));
+            if wanted != overlay_key {
+                if let Some(m) = &manager {
+                    if let Some(Binding::Key(k)) = overlay_key {
+                        let _ = m.unregister(k);
+                    }
+                    if let Some(Binding::Key(k)) = wanted {
+                        let _ = m.register(k);
+                    }
+                }
+                overlay_key = wanted;
+            }
         }
+        // Bouton de volant : lu vingt fois par seconde, seulement s'il sert de raccourci.
+        let joy = if let Some(Binding::Joy(pad, button)) = overlay_key {
+            if pads.pressed(std::iter::once(pad)).contains(&(pad, button)) {
+                win::toggle_overlay();
+            }
+            true
+        } else {
+            false
+        };
 
         // Le jeu apparaît ou disparaît : l'overlay s'ouvre ou se ferme avec lui (si l'option est active).
         if Instant::now() >= next_watch {
@@ -159,7 +182,7 @@ pub fn run(minimized: bool) {
         }
 
         unsafe {
-            MsgWaitForMultipleObjects(None, false, 1000, QS_ALLINPUT);
+            MsgWaitForMultipleObjects(None, false, if joy { 50 } else { 1000 }, QS_ALLINPUT);
         }
     }
     obs.apply(false);

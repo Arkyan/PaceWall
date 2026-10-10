@@ -11,7 +11,7 @@ pub fn panel_frame() -> Frame {
 pub fn section(ui: &mut Ui, text: &str) {
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(6.0, 6.0), Sense::hover());
-        ui.painter().rect_filled(r, 0.0, ACCENT);
+        ui.painter().rect_filled(r, 0.0, ui_accent());
         ui.label(RichText::new(text.to_uppercase()).size(11.5).color(MUTED));
     });
     ui.add_space(2.0);
@@ -64,7 +64,7 @@ pub fn stat_sized(ui: &mut Ui, width: f32, label: &str, value: &str, unit: &str)
 
 /// Bouton plein d'accent (action principale).
 pub fn primary(ui: &mut Ui, text: &str) -> egui::Response {
-    ui.add(egui::Button::new(RichText::new(text.to_uppercase()).size(12.0).strong().color(ACCENT_INK)).fill(ACCENT).stroke(Stroke::new(1.0, ACCENT)))
+    ui.add(egui::Button::new(RichText::new(text.to_uppercase()).size(12.0).strong().color(ACCENT_INK)).fill(ui_accent()).stroke(Stroke::new(1.0, ui_accent())))
 }
 
 pub fn button(ui: &mut Ui, text: &str) -> egui::Response {

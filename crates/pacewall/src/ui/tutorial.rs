@@ -51,7 +51,7 @@ impl Tutorial {
         let modal = egui::Modal::new(egui::Id::new("pw-tutorial")).show(ctx, |ui| {
             ui.set_width(520.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("ÉTAPE {} SUR {STEPS}", self.step + 1)).size(11.5).color(ACCENT));
+                ui.label(RichText::new(format!("ÉTAPE {} SUR {STEPS}", self.step + 1)).size(11.5).color(ui_accent()));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if kit::button(ui, "Passer").clicked() {
                         leave = true;
@@ -155,7 +155,7 @@ impl Tutorial {
     fn obs(&mut self, ui: &mut Ui, action: &mut Option<Action>) {
         Self::title(ui, "Pour OBS (facultatif)");
         Self::line(ui, "Si tu streames, active le serveur OBS dans Réglages, puis ajoute dans OBS une « Source navigateur » de 1920 × 1080 avec l'adresse :");
-        ui.label(RichText::new("http://127.0.0.1:8470/overlay/obs").font(num_font(14.0)).color(ACCENT));
+        ui.label(RichText::new("http://127.0.0.1:8470/overlay/obs").font(num_font(14.0)).color(ui_accent()));
         ui.add_space(4.0);
         Self::line(ui, "Tu y verras les mêmes widgets, sans avoir besoin de capturer le jeu. Désactivé, le serveur ne consomme rien.");
         if kit::button(ui, "Ouvrir les Réglages").clicked() {

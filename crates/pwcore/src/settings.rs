@@ -28,6 +28,23 @@ fn defaults() -> Map<String, Value> {
         "autostart": false,            // lancer avec Windows
         "obs_server": false,           // serveur web pour OBS (source navigateur)
         "obs_port": 8470,
+        // Unités (communes à tous les widgets)
+        "unit_speed": "kmh",           // "kmh" ou "mph"
+        "unit_temp": "c",              // "c" ou "f"
+        "unit_pressure": "kpa",        // "kpa", "bar" ou "psi"
+        "unit_fuel": "l",              // "l" (litres) ou "gal" (gallons américains)
+        // Seuils de couleur
+        "thr_fuel_warn": 6,            // tours de carburant restants : orange en dessous
+        "thr_fuel_crit": 3,            // … rouge en dessous
+        "thr_wear_warn": 55,           // état des pneus (%) : orange en dessous
+        "thr_wear_crit": 30,           // … rouge en dessous
+        "thr_temp_window": 25,         // écart à la température idéale (°C) où le pneu est tout bleu ou tout rouge
+        "ui_accent": "cyan",           // couleur d'accent de la fenêtre PaceWall
+        // Raccourcis : touche (« Ctrl+Alt+O ») ou bouton de volant (« Joy1:B7 »), vide = aucun
+        "hk_overlay": "Ctrl+Alt+O",    // afficher / fermer l'overlay
+        "hk_voice": "",                // couper / remettre la voix
+        "hk_fuel": "", "hk_tyres": "", "hk_timing": "", "hk_inputs": "", "hk_standings": "", "hk_session": "",
+        "hk_trackmap": "", "hk_flags": "", "hk_relative": "", "hk_pit": "", "hk_radar": "",
     }) else { unreachable!() };
     m
 }

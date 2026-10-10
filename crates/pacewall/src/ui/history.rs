@@ -198,10 +198,10 @@ impl State {
                     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 74.0), Sense::click());
                     let on = self.selected == Some(s.id);
                     if on || resp.hovered() {
-                        ui.painter().rect_filled(rect, 0.0, ACCENT.gamma_multiply(0.10));
+                        ui.painter().rect_filled(rect, 0.0, ui_accent().gamma_multiply(0.10));
                     }
                     if on {
-                        ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, vec2(3.0, rect.height())), 0.0, ACCENT);
+                        ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, vec2(3.0, rect.height())), 0.0, ui_accent());
                     }
                     let p = ui.painter();
                     p.text(rect.min + vec2(16.0, 10.0), egui::Align2::LEFT_TOP, &s.track, egui::FontId::proportional(14.5), TEXT);
@@ -319,7 +319,7 @@ impl State {
     fn charts(&self, ui: &mut Ui) {
         let series = |f: &dyn Fn(&Lap) -> Option<f64>| -> Vec<[f64; 2]> { self.laps.iter().filter_map(|l| f(l).map(|v| [l.lap as f64, v])).collect() };
         let charts: [(&str, Vec<[f64; 2]>, egui::Color32); 4] = [
-            ("Temps au tour (s)", series(&|l| (l.valid && !l.pit).then_some(l.time)), ACCENT),
+            ("Temps au tour (s)", series(&|l| (l.valid && !l.pit).then_some(l.time)), ui_accent()),
             ("Carburant par tour (L)", series(&|l| l.fuel), BLUE),
             ("État des pneus (%)", series(&|l| Some(l.wear_end)), OK),
             ("Température des pneus (°C)", series(&|l| Some(l.tyre_temp)), BAD),

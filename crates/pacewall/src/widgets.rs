@@ -10,7 +10,7 @@ use pwcore::trackmap::{self, TrackMap};
 use pwcore::Data;
 use std::collections::VecDeque;
 
-pub const KINDS: [(&str, &str); 8] = [
+pub const KINDS: [(&str, &str); 11] = [
     ("fuel", "Carburant et énergie"),
     ("tyres", "Pneus"),
     ("timing", "Chrono et écarts"),
@@ -19,6 +19,9 @@ pub const KINDS: [(&str, &str); 8] = [
     ("session", "Session et météo"),
     ("trackmap", "Carte du circuit"),
     ("flags", "Drapeaux"),
+    ("relative", "Relatif"),
+    ("pit", "Arrêt au stand"),
+    ("radar", "Radar de proximité"),
 ];
 
 pub fn name(kind: &str) -> &'static str {
@@ -47,14 +50,15 @@ pub fn options(kind: &str) -> &'static [Opt] {
         "fuel" => &[
             Opt { id: "energy", label: "Afficher l'énergie virtuelle", kind: Bool(true) },
             Opt { id: "margin", label: "Marge de sécurité (tours)", kind: Num { min: 0.0, max: 3.0, step: 0.5, def: 1.0 } },
+            Opt { id: "target", label: "Objectif de consommation (+1 tour)", kind: Bool(true) },
         ],
         "tyres" => &[
-            Opt { id: "pressure", label: "Pression", kind: Choice(&[("kpa", "kPa"), ("bar", "bar"), ("psi", "psi"), ("off", "Masquer")], "kpa") },
+            Opt { id: "pressure", label: "Pression", kind: Choice(&[("auto", "Unité des réglages"), ("kpa", "kPa"), ("bar", "bar"), ("psi", "psi"), ("off", "Masquer")], "auto") },
             Opt { id: "brakes", label: "Températures des freins", kind: Bool(false) },
             Opt { id: "tempsrc", label: "Température affichée", kind: Choice(&[("carcass", "Carcasse"), ("inner", "Couche interne"), ("surface", "Surface (moyenne)")], "carcass") },
             Opt { id: "tempoffset", label: "Décalage de température (°C)", kind: Num { min: -10.0, max: 10.0, step: 0.5, def: 0.0 } },
             Opt { id: "wearmode", label: "Affichage de l'usure", kind: Choice(&[("state", "État du pneu (100 → 0 %)"), ("used", "Usure (0 → 100 %)")], "state") },
-            Opt { id: "unit", label: "Unité de température", kind: Choice(&[("c", "°C"), ("f", "°F")], "c") },
+            Opt { id: "unit", label: "Unité de température", kind: Choice(&[("auto", "Unité des réglages"), ("c", "°C"), ("f", "°F")], "auto") },
         ],
         "timing" => &[Opt { id: "gaps", label: "Écarts devant / derrière", kind: Bool(true) }],
         "inputs" => &[
@@ -63,7 +67,7 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "window", label: "Durée du graphe", kind: Choice(&[("5", "5 s"), ("10", "10 s"), ("20", "20 s")], "10") },
             Opt { id: "steering", label: "Volant dans le graphe", kind: Bool(true) },
             Opt { id: "clutch", label: "Embrayage", kind: Bool(false) },
-            Opt { id: "mph", label: "Vitesse en mph", kind: Bool(false) },
+            Opt { id: "mph", label: "Toujours en mph (sinon : unité des réglages)", kind: Bool(false) },
         ],
         "standings" => &[
             Opt { id: "ahead", label: "Voitures devant", kind: Num { min: 0.0, max: 8.0, step: 1.0, def: 3.0 } },
@@ -80,6 +84,17 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "fps", label: "Fluidité (images/s)", kind: Choice(&[("10", "10"), ("20", "20"), ("30", "30")], "20") },
             Opt { id: "sectors", label: "Limites des secteurs", kind: Bool(true) },
             Opt { id: "numbers", label: "Numéro dans les pastilles", kind: Choice(&[("none", "Aucun"), ("class", "Place en classe"), ("overall", "Place au général")], "none") },
+        ],
+        "relative" => &[
+            Opt { id: "ahead", label: "Voitures devant", kind: Num { min: 0.0, max: 6.0, step: 1.0, def: 3.0 } },
+            Opt { id: "behind", label: "Voitures derrière", kind: Num { min: 0.0, max: 6.0, step: 1.0, def: 3.0 } },
+            Opt { id: "place", label: "Place affichée", kind: Choice(&[("overall", "Au général"), ("class", "En classe")], "overall") },
+        ],
+        "pit" => &[Opt { id: "loss", label: "Temps perdu par un arrêt (s)", kind: Num { min: 20.0, max: 150.0, step: 1.0, def: 60.0 } }],
+        "radar" => &[
+            Opt { id: "range", label: "Portée devant et derrière (m)", kind: Num { min: 6.0, max: 30.0, step: 1.0, def: 12.0 } },
+            Opt { id: "autohide", label: "Masquer quand personne n'est proche", kind: Bool(true) },
+            Opt { id: "fps", label: "Fluidité (images/s)", kind: Choice(&[("10", "10"), ("20", "20"), ("30", "30")], "20") },
         ],
         _ => NO_OPTS,
     }
@@ -127,6 +142,8 @@ pub fn hz(kind: &str, spec: &WidgetSpec) -> f32 {
         "standings" => 1.0,
         "trackmap" => spec.num("fps", 20.0) as f32,
         "flags" => 4.0,
+        "relative" => 4.0,
+        "radar" => spec.num("fps", 20.0) as f32,
         _ => 1.0,
     }
 }
@@ -146,6 +163,9 @@ pub struct WState {
     green_until: f64,
     /// Orientation automatique de la carte, calculée une fois par circuit et par zone : (circuit, points, zone) → degrés.
     map_angle: Option<((Option<String>, usize, u32, u32), f32)>,
+    /// Radar : dernière position du joueur et direction de marche (repère de la carte), pour orienter les voitures voisines.
+    radar_last: Option<(f32, f32)>,
+    radar_dir: Option<(f32, f32)>,
 }
 
 pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
@@ -158,14 +178,18 @@ pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, 
         "session" => session(d, spec, data),
         "trackmap" => trackmap_widget(d, spec, data, st, now),
         "flags" => flags(d, spec, data, st, now),
+        "relative" => relative(d, spec, data),
+        "pit" => pit(d, spec, data),
+        "radar" => radar(d, spec, data, st, now),
         _ => (0.0, 0.0),
     }
 }
 
 fn lap_color(laps: Option<f64>) -> Color32 {
+    let p = crate::prefs::get();
     match laps {
-        Some(l) if l < 3.0 => BAD,
-        Some(l) if l < 6.0 => WARN,
+        Some(l) if l < p.fuel_crit => BAD,
+        Some(l) if l < p.fuel_warn => WARN,
         _ => TEXT,
     }
 }
@@ -196,6 +220,7 @@ fn resource(
     add: Option<f64>,
     limiting: bool,
     margin: f64,
+    target: bool,
 ) {
     let x0 = 16.0;
     // Titre seulement si demandé ; sinon les valeurs, avec leur unité, suffisent.
@@ -226,14 +251,30 @@ fn resource(
     let lim_color = if limiting { d.accent() } else { lap_color(laps) };
     d.text(cols[0], top + 60.0, &laps_txt, 14.0, if limiting { lim_color } else { lap_color(laps) }, Font::Num, HAlign::Left);
     d.text(cols[1], top + 60.0, &per_txt, 14.0, MUTED, Font::Num, HAlign::Left);
-    d.text(cols[2], top + 60.0, &add_txt, 14.0, TEXT, Font::Num, HAlign::Left);
+    d.text(w - 16.0, top + 60.0, &add_txt, 14.0, TEXT, Font::Num, HAlign::Right);
+
+    // Objectif : la consommation à tenir pour boucler un tour de plus avec ce qu'il reste.
+    if target {
+        let text = match (level, per, laps) {
+            (Some(lv), Some(p), Some(l)) if p > 0.0 && lv > 0.0 => {
+                let goal = lv / (l.floor() + 1.0);
+                format!("+1 tour : {goal:.2} {unit}/tour ({:.0} % de moins)", (1.0 - goal / p).max(0.0) * 100.0)
+            }
+            _ => "+1 tour : —".into(),
+        };
+        d.text(x0, top + 80.0, &text, 12.0, MUTED, Font::Num, HAlign::Left);
+    }
 }
 
 fn fuel(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let w = 300.0;
     let energy = spec.flag("energy", true);
     let margin = spec.num("margin", 1.0);
-    let block = 92.0 + if d.titles() { 16.0 } else { 0.0 };
+    let target = spec.flag("target", true);
+    let prefs = crate::prefs::get();
+    // Litres ou gallons : le niveau, la consommation et la quantité à ajouter sont convertis ensemble.
+    let vol = |v: Option<f64>| v.map(|v| prefs.fuel(v).0);
+    let block = 92.0 + if d.titles() { 16.0 } else { 0.0 } + if target { 20.0 } else { 0.0 };
     let h = if energy { block * 2.0 + 6.0 } else { block };
     d.card(w, h);
     let lim = data.text("strategy.limiting");
@@ -242,14 +283,15 @@ fn fuel(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         0.0,
         w,
         "Carburant",
-        "L",
-        data.num("fuel.level"),
+        prefs.fuel(0.0).1,
+        vol(data.num("fuel.level")),
         data.num("fuel.percent"),
-        data.num("strategy.fuel_per_lap"),
+        vol(data.num("strategy.fuel_per_lap")),
         data.num("strategy.fuel_laps_left"),
-        data.num("strategy.fuel_to_add"),
+        vol(data.num("strategy.fuel_to_add")),
         lim == "fuel",
         margin,
+        target,
     );
     if energy {
         d.sep(16.0, block + 1.0, w - 32.0);
@@ -266,6 +308,7 @@ fn fuel(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
             data.num("strategy.energy_to_add"),
             lim == "energy",
             margin,
+            target,
         );
     }
     (w, h)
@@ -276,8 +319,14 @@ fn fuel(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
 fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let w = 262.0;
     let brakes = spec.flag("brakes", false);
-    let fahrenheit = spec.choice("unit", "c") == "f";
-    let pressure = spec.choice("pressure", "kpa");
+    let prefs = crate::prefs::get();
+    // « auto » : l'unité choisie dans les réglages ; une unité imposée sur ce widget garde la priorité.
+    let fahrenheit = match spec.choice("unit", "auto") {
+        "c" => false,
+        "f" => true,
+        _ => prefs.fahrenheit,
+    };
+    let pressure = spec.choice("pressure", "auto");
     let source = spec.choice("tempsrc", "carcass");
     let offset = spec.num("tempoffset", 0.0);
     let worn = spec.choice("wearmode", "state") == "used";
@@ -315,7 +364,8 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         let wear = data.f(&format!("tyre.{n}.wear"), 0.0);
         // Bleu = froid, vert = fenêtre idéale, rouge = trop chaud.
         let dlt = (t - opt) as f32;
-        let hue = if dlt < 0.0 { 130.0 + (-dlt / 25.0).min(1.0) * 80.0 } else { 130.0 - (dlt / 25.0).min(1.0) * 130.0 };
+        let win = prefs.temp_window as f32;
+        let hue = if dlt < 0.0 { 130.0 + (-dlt / win).min(1.0) * 80.0 } else { 130.0 - (dlt / win).min(1.0) * 130.0 };
         let tint = if t.is_finite() { hsl(hue, 0.7, 0.52) } else { MUTED };
         d.fill(x, y, cw, 3.0, tint);
         let ttxt = if t.is_finite() { format!("{:.0}°", temp(t)) } else { "—".into() };
@@ -324,14 +374,15 @@ fn tyres(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         let shown = if worn { 100.0 - wear } else { wear };
         let wf = (shown / 100.0) as f32;
         d.fill(x + 8.0, y + 42.0, cw - 16.0, 3.0, Color32::from_white_alpha(26));
-        d.fill(x + 8.0, y + 42.0, (cw - 16.0) * wf.clamp(0.0, 1.0), 3.0, if wear < 30.0 { BAD } else if wear < 55.0 { WARN } else { OK });
+        d.fill(x + 8.0, y + 42.0, (cw - 16.0) * wf.clamp(0.0, 1.0), 3.0, if wear < prefs.wear_crit { BAD } else if wear < prefs.wear_warn { WARN } else { OK });
         let p = data.f(&format!("tyre.{n}.pressure"), 0.0);
         let ptxt = match pressure {
             "off" => String::new(),
             _ if p <= 0.0 => String::new(),
             "bar" => format!("{:.2} bar · ", p / 100.0),
             "psi" => format!("{:.1} psi · ", p * 0.145038),
-            _ => format!("{p:.0} kPa · "),
+            "kpa" => format!("{p:.0} kPa · "),
+            _ => format!("{} · ", prefs.pressure(p)),
         };
         d.text(x + cw / 2.0, y + 49.0, &format!("{ptxt}{shown:.0} %"), 11.0, MUTED, Font::Num, HAlign::Center);
     }
@@ -430,7 +481,7 @@ fn inputs(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (
     let g = if gear < 0 { "R".to_string() } else if gear == 0 { "N".to_string() } else { gear.to_string() };
     d.text(px + 24.0, 30.0, &g, 54.0, d.accent(), Font::Num, HAlign::Center);
     let kmh = data.f("player.speed", 0.0);
-    let (v, unit) = if spec.flag("mph", false) { (kmh * 0.621371, "mph") } else { (kmh, "km/h") };
+    let (v, unit) = if spec.flag("mph", false) { (kmh * 0.621371, "mph") } else { crate::prefs::get().speed(kmh) };
     let sx = px + 62.0;
     let vw = d.text(sx, 38.0, &format!("{v:.0}"), 24.0, TEXT, Font::Num, HAlign::Left);
     d.text(sx + vw + 4.0, 48.0, unit, 11.0, MUTED, Font::Ui, HAlign::Left);
@@ -677,8 +728,8 @@ fn session(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         d.sep(16.0, wy - 6.0, w - 32.0);
         let rain = data.f("weather.rain", 0.0);
         let cols = [
-            ("Air", draw::n(data.num("weather.ambient"), 0) + "°"),
-            ("Piste", draw::n(data.num("weather.track"), 0) + "°"),
+            ("Air", draw::n(data.num("weather.ambient").map(|v| crate::prefs::get().temp(v)), 0) + "°"),
+            ("Piste", draw::n(data.num("weather.track").map(|v| crate::prefs::get().temp(v)), 0) + "°"),
             ("Pluie", if rain > 1.0 { format!("{rain:.0} %") } else { "—".into() }),
         ];
         for (i, (l, v)) in cols.iter().enumerate() {
@@ -1128,4 +1179,290 @@ mod gap_tests {
         // Seul en piste : rien à afficher.
         assert_eq!(neighbour_gaps(&data(&[(1000.0, true, false)], 180.0)), (None, None));
     }
+}
+
+/* ---------- Relatif ---------- */
+
+/// Nom court : « J. Dupont ».
+fn short_name(name: &str) -> String {
+    let parts: Vec<&str> = name.split_whitespace().collect();
+    if parts.len() > 1 {
+        format!("{}. {}", parts[0].chars().next().unwrap_or(' '), parts[1..].join(" "))
+    } else {
+        name.to_string()
+    }
+}
+
+/// Une voiture vue depuis celle du joueur.
+struct Near {
+    name: String,
+    class: String,
+    place: i64,
+    rank: i64,
+    /// Distance le long de la piste : positive devant le joueur, négative derrière (mètres).
+    ahead: f64,
+    /// Tours d'avance sur le joueur au classement : +1 = il nous a pris un tour, −1 = on lui en a pris un.
+    laps: i64,
+    pit: bool,
+    me: bool,
+}
+
+/// Les voitures du classement, situées par rapport au joueur sur la piste. Vide si le joueur est introuvable.
+fn near_cars(data: &Data) -> Vec<Near> {
+    let length = data.f("session.track_length", 0.0);
+    let n = (data.f("session.vehicles", 0.0) as usize).min(104);
+    let Some(me) = (0..n).find(|i| data.flag(&format!("grid.{i:03}.is_player"))) else { return Vec::new() };
+    if length < 100.0 {
+        return Vec::new();
+    }
+    let total = |i: usize| data.f(&format!("grid.{i:03}.laps"), 0.0) * length + data.f(&format!("grid.{i:03}.lap_dist"), 0.0);
+    let (my_dist, my_total) = (data.f(&format!("grid.{me:03}.lap_dist"), 0.0), total(me));
+    let mut cars: Vec<Near> = (0..n)
+        .filter_map(|i| {
+            let p = format!("grid.{i:03}");
+            let dist = data.num(&format!("{p}.lap_dist"))?;
+            let mut ahead = (dist - my_dist).rem_euclid(length);
+            if ahead > length / 2.0 {
+                ahead -= length;
+            }
+            Some(Near {
+                name: data.text(&format!("{p}.driver")).to_string(),
+                class: data.text(&format!("{p}.class")).to_string(),
+                place: data.f(&format!("{p}.place"), 0.0) as i64,
+                rank: 0,
+                ahead: if i == me { 0.0 } else { ahead },
+                laps: ((total(i) - my_total - ahead) / length).round() as i64,
+                pit: data.flag(&format!("{p}.in_pits")),
+                me: i == me,
+            })
+        })
+        .collect();
+    // Place en classe.
+    let mut order: Vec<usize> = (0..cars.len()).collect();
+    order.sort_by_key(|&i| cars[i].place);
+    let mut seen: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for i in order {
+        let c = seen.entry(cars[i].class.clone()).or_insert(0);
+        *c += 1;
+        cars[i].rank = *c;
+    }
+    cars
+}
+
+fn relative(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
+    let w = 300.0;
+    let (n_ahead, n_behind) = (spec.num("ahead", 3.0) as usize, spec.num("behind", 3.0) as usize);
+    let rows = n_ahead + n_behind + 1;
+    let class_place = spec.choice("place", "overall") == "class";
+    let top = if d.titles() { 30.0 } else { 8.0 };
+    let h = top + rows as f32 * 24.0 + 10.0;
+    d.card(w, h);
+    if d.titles() {
+        d.label(16.0, 10.0, "Relatif", MUTED);
+        d.label_right(w - 16.0, 10.0, "sur la piste", d.accent());
+    }
+    let cars = near_cars(data);
+    let Some(me) = cars.iter().find(|c| c.me) else { return (w, h) };
+    // Au moins 15 m/s : à l'arrêt, un écart en secondes n'aurait pas de sens.
+    let speed = (data.f("player.speed", 0.0) / 3.6).max(15.0);
+    // Les voitures aux stands ne comptent pas, sauf si on y est aussi.
+    let on_track = |c: &&Near| !c.me && (!c.pit || me.pit);
+    let mut front: Vec<&Near> = cars.iter().filter(on_track).filter(|c| c.ahead > 0.0).collect();
+    front.sort_by(|a, b| a.ahead.total_cmp(&b.ahead));
+    front.truncate(n_ahead);
+    front.reverse();
+    let mut back: Vec<&Near> = cars.iter().filter(on_track).filter(|c| c.ahead <= 0.0).collect();
+    back.sort_by(|a, b| b.ahead.total_cmp(&a.ahead));
+    back.truncate(n_behind);
+
+    // Le joueur reste à sa ligne, même s'il manque des voitures devant.
+    let first = n_ahead - front.len();
+    for (row, c) in front.iter().chain(std::iter::once(&me)).chain(back.iter()).enumerate() {
+        let y = top + (first + row) as f32 * 24.0;
+        if c.me {
+            d.fill(8.0, y, w - 8.0, 22.0, d.accent().gamma_multiply(0.22));
+        }
+        d.fill(8.0, y + 2.0, 3.0, 18.0, class_color(&c.class));
+        let pos = if class_place { c.rank } else { c.place };
+        d.text(42.0, y + 3.0, &pos.to_string(), 14.0, TEXT, Font::Num, HAlign::Right);
+        // Rouge : il nous a pris un tour (à laisser passer). Bleu : on lui a pris un tour. Gris : aux stands.
+        let color = if c.pit {
+            MUTED
+        } else if c.laps > 0 {
+            BAD
+        } else if c.laps < 0 {
+            BLUE
+        } else {
+            TEXT
+        };
+        d.text(50.0, y + 3.0, &short_name(&c.name), 14.0, color, Font::Ui, HAlign::Left);
+        if !c.me {
+            // Même convention que le classement : « + » derrière nous, « − » devant.
+            d.text(w - 16.0, y + 3.0, &draw::signed(Some(-c.ahead / speed), 1), 13.0, MUTED, Font::Num, HAlign::Right);
+        }
+    }
+    (w, h)
+}
+
+/* ---------- Arrêt au stand ---------- */
+
+fn pit(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
+    let w = 300.0;
+    let loss = spec.num("loss", 60.0);
+    let hdr = if d.titles() { 18.0 } else { 0.0 };
+    let h = hdr + 118.0;
+    d.card(w, h);
+    if d.titles() {
+        d.label(16.0, 10.0, "Arrêt au stand", MUTED);
+        d.label_right(w - 16.0, 10.0, &format!("{loss:.0} s perdues"), d.accent());
+    }
+    let y0 = hdr + 10.0;
+    let is_race = (10..=13).contains(&(data.f("session.type", -1.0) as i64));
+
+    // Retard de chaque voiture sur le leader, dans l'ordre du classement : celui du jeu, sinon la somme des écarts.
+    let n = (data.f("session.vehicles", 0.0) as usize).min(104);
+    let mut cars: Vec<(i64, String, String, f64, bool)> = (0..n)
+        .filter_map(|i| {
+            let p = format!("grid.{i:03}");
+            let place = data.num(&format!("{p}.place"))? as i64;
+            Some((place, data.text(&format!("{p}.driver")).to_string(), data.text(&format!("{p}.class")).to_string(), data.f(&format!("{p}.behind_next"), 0.0).max(0.0), data.flag(&format!("{p}.is_player"))))
+        })
+        .collect();
+    cars.sort_by_key(|c| c.0);
+    let mut behind = Vec::with_capacity(cars.len());
+    let mut sum = 0.0;
+    for (i, c) in cars.iter().enumerate() {
+        sum += if i == 0 { 0.0 } else { c.3 };
+        behind.push(sum);
+    }
+    let me = cars.iter().position(|c| c.4);
+    let (Some(me), true) = (me, is_race) else {
+        d.text(16.0, y0 + 6.0, "Estimation en course uniquement", 13.0, MUTED, Font::Ui, HAlign::Left);
+        return (w, h);
+    };
+    // Après l'arrêt : notre retard sur le leader augmente du temps perdu ; on se replace parmi les autres.
+    let mine = behind[me] + loss;
+    let others = || (0..cars.len()).filter(|&i| i != me);
+    let place = 1 + others().filter(|&i| behind[i] < mine).count();
+    let class_place = 1 + others().filter(|&i| behind[i] < mine && cars[i].2 == cars[me].2).count();
+    let front = others().filter(|&i| behind[i] < mine).max_by(|a, b| behind[*a].total_cmp(&behind[*b]));
+    let back = others().filter(|&i| behind[i] >= mine).min_by(|a, b| behind[*a].total_cmp(&behind[*b]));
+
+    let lost = place as i64 - cars[me].0;
+    d.text(16.0, y0, &format!("P{place}"), 30.0, TEXT, Font::Num, HAlign::Left);
+    d.text(w - 16.0, y0 + 2.0, &format!("P{class_place} en classe"), 13.0, MUTED, Font::Num, HAlign::Right);
+    d.text(w - 16.0, y0 + 20.0, &if lost > 0 { format!("{lost} place(s) perdue(s)") } else { "aucune place perdue".into() }, 12.0, if lost > 0 { WARN } else { OK }, Font::Ui, HAlign::Right);
+    d.sep(16.0, y0 + 42.0, w - 32.0);
+    let line = |y: f32, label: &str, who: Option<usize>| {
+        d.label(16.0, y + 4.0, label, MUTED);
+        match who {
+            Some(i) => {
+                d.text(86.0, y + 1.0, &short_name(&cars[i].1), 14.0, TEXT, Font::Ui, HAlign::Left);
+                // Moins de 3 s d'écart à la sortie : on ressort dans le trafic.
+                let gap = (behind[i] - mine).abs();
+                d.text(w - 16.0, y + 1.0, &format!("{gap:.1} s"), 14.0, if gap < 3.0 { WARN } else { TEXT }, Font::Num, HAlign::Right);
+            }
+            None => {
+                d.text(w - 16.0, y + 1.0, "personne", 13.0, MUTED, Font::Ui, HAlign::Right);
+            }
+        }
+    };
+    line(y0 + 48.0, "Devant", front);
+    line(y0 + 70.0, "Derrière", back);
+    (w, h)
+}
+
+/* ---------- Radar de proximité ---------- */
+
+fn radar(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
+    let (w, h) = (130.0_f32, 190.0_f32);
+    if d.measuring() {
+        return (w, h);
+    }
+    let range = spec.num("range", 12.0).clamp(6.0, 30.0) as f32;
+    let scale = (h / 2.0 - 8.0) / range; // pixels du widget par mètre
+    let side = (w / 2.0 - 6.0) / scale; // portée sur les côtés, en mètres
+
+    // Positions dans le repère de la carte (x, −z), lissées entre deux mesures du jeu.
+    let n = (data.f("session.vehicles", 0.0) as usize).min(104);
+    let mut me: Option<(f32, f32)> = None;
+    let mut others: Vec<(f32, f32, String)> = Vec::new();
+    for i in 0..n {
+        let p = format!("grid.{i:03}");
+        let (Some(x), Some(z)) = (data.num(&format!("{p}.x")), data.num(&format!("{p}.z"))) else { continue };
+        let raw = (x as f32, -z as f32);
+        let e = st.car_pos.entry(i).or_insert((raw.0, raw.1, now, 0.0, 0.0));
+        if raw != (e.0, e.1) {
+            let dt = (now - e.2) as f32;
+            let (dx, dy) = (raw.0 - e.0, raw.1 - e.1);
+            let ok = dt > 0.005 && dt < 1.0 && dx.abs() + dy.abs() < 150.0 && (dx.abs() + dy.abs()) / dt < 120.0;
+            *e = (raw.0, raw.1, now, if ok { dx / dt } else { 0.0 }, if ok { dy / dt } else { 0.0 });
+        }
+        let lead = ((now - e.2) as f32).clamp(0.0, 0.25);
+        let pos = (e.0 + e.3 * lead, e.1 + e.4 * lead);
+        if data.flag(&format!("{p}.is_player")) {
+            me = Some(pos);
+        } else if !data.flag(&format!("{p}.in_pits")) {
+            others.push((pos.0, pos.1, data.text(&format!("{p}.class")).to_string()));
+        }
+    }
+    // Direction de marche : celle du dernier déplacement (gardée à l'arrêt).
+    if let Some(m) = me {
+        if let Some(last) = st.radar_last {
+            let (dx, dy) = (m.0 - last.0, m.1 - last.1);
+            let len = (dx * dx + dy * dy).sqrt();
+            if len > 0.3 && len < 60.0 {
+                let (nx, ny) = (dx / len, dy / len);
+                st.radar_dir = Some(match st.radar_dir {
+                    Some((ox, oy)) => {
+                        let (bx, by) = (ox * 0.6 + nx * 0.4, oy * 0.6 + ny * 0.4);
+                        let l = (bx * bx + by * by).sqrt().max(1e-3);
+                        (bx / l, by / l)
+                    }
+                    None => (nx, ny),
+                });
+                st.radar_last = Some(m);
+            } else if len >= 60.0 {
+                st.radar_last = Some(m);
+            }
+        } else {
+            st.radar_last = Some(m);
+        }
+    }
+    // Voitures voisines dans le repère du joueur : (à droite, devant), en mètres.
+    let mut near: Vec<(f32, f32, String)> = Vec::new();
+    if let (Some(m), Some((fx, fy))) = (me, st.radar_dir) {
+        for (x, y, class) in others {
+            let (rx, ry) = (x - m.0, y - m.1);
+            let (fwd, right) = (rx * fx + ry * fy, rx * -fy + ry * fx);
+            if fwd.abs() <= range && right.abs() <= side {
+                near.push((right, fwd, class));
+            }
+        }
+    }
+    if d.is_preview() && near.is_empty() {
+        // Aperçu de l'éditeur : deux voitures d'exemple.
+        near = vec![(-2.4, 1.5, "LMP2".into()), (2.6, -7.0, "LMGT3".into())];
+    }
+    if near.is_empty() && spec.flag("autohide", true) {
+        return (w, h);
+    }
+
+    d.card(w, h);
+    let (cx, cy) = (w / 2.0, h / 2.0);
+    let (car_w, car_l) = (2.0 * scale, 4.7 * scale);
+    // Alerte de côté : rouge si une voiture est à notre hauteur, orange si elle arrive.
+    for dir in [-1.0f32, 1.0] {
+        let worst = near.iter().filter(|c| c.0 * dir > 0.6 && c.0.abs() < 4.6).map(|c| c.1.abs()).fold(f32::MAX, f32::min);
+        let color = if worst < 4.9 { Some(BAD) } else if worst < 9.0 { Some(WARN) } else { None };
+        if let Some(c) = color {
+            let x = if dir < 0.0 { 4.0 } else { w - 10.0 };
+            d.fill(x, 8.0, 6.0, h - 16.0, c);
+        }
+    }
+    for (right, fwd, class) in &near {
+        d.fill(cx + right * scale - car_w / 2.0, cy - fwd * scale - car_l / 2.0, car_w, car_l, class_color(class));
+    }
+    d.fill(cx - car_w / 2.0, cy - car_l / 2.0, car_w, car_l, d.accent());
+    (w, h)
 }

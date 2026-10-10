@@ -12,6 +12,21 @@ pub const TEXT: Color32 = Color32::from_rgb(232, 237, 244);
 pub const MUTED: Color32 = Color32::from_rgb(127, 138, 154);
 pub const ACCENT: Color32 = Color32::from_rgb(25, 211, 243);
 pub const ACCENT_INK: Color32 = Color32::from_rgb(3, 16, 20);
+
+/// Couleur d'accent de la fenêtre PaceWall (réglage « ui_accent »). Les widgets gardent chacun la leur.
+static UI_ACCENT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x19D3F3);
+
+pub fn ui_accent() -> Color32 {
+    let v = UI_ACCENT.load(std::sync::atomic::Ordering::Relaxed);
+    Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
+}
+
+/// Applique la couleur d'accent choisie dans les réglages (identifiant de `widgets::ACCENTS`).
+pub fn load_ui_accent() {
+    let id = pwcore::settings::str_of("ui_accent", "cyan");
+    let c = crate::widgets::ACCENTS.iter().find(|a| a.0 == id).map(|a| a.2).unwrap_or(ACCENT);
+    UI_ACCENT.store((c.r() as u32) << 16 | (c.g() as u32) << 8 | c.b() as u32, std::sync::atomic::Ordering::Relaxed);
+}
 pub const OK: Color32 = Color32::from_rgb(56, 224, 123);
 pub const WARN: Color32 = Color32::from_rgb(255, 176, 32);
 pub const BAD: Color32 = Color32::from_rgb(255, 77, 94);
@@ -62,16 +77,22 @@ pub fn install(ctx: &egui::Context) {
         fonts.families.insert(FontFamily::Monospace, num);
     }
     ctx.set_fonts(fonts);
+    apply_visuals(ctx);
+}
 
+/// Couleurs et formes de la fenêtre ; à rappeler quand la couleur d'accent change.
+pub fn apply_visuals(ctx: &egui::Context) {
+    load_ui_accent();
+    let accent = ui_accent();
     let mut v = egui::Visuals::dark();
     v.panel_fill = BG;
     v.window_fill = PANEL;
     v.extreme_bg_color = PANEL2;
     v.faint_bg_color = PANEL;
     v.override_text_color = Some(TEXT);
-    v.selection.bg_fill = ACCENT.gamma_multiply(0.35);
-    v.selection.stroke = Stroke::new(1.0, ACCENT);
-    v.hyperlink_color = ACCENT;
+    v.selection.bg_fill = accent.gamma_multiply(0.35);
+    v.selection.stroke = Stroke::new(1.0, accent);
+    v.hyperlink_color = accent;
     v.window_stroke = Stroke::new(1.0, LINE);
     let r = CornerRadius::same(2);
     for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
@@ -83,8 +104,8 @@ pub fn install(ctx: &egui::Context) {
     v.widgets.inactive.bg_stroke = Stroke::new(1.0, LINE);
     v.widgets.hovered.bg_fill = PANEL2;
     v.widgets.hovered.weak_bg_fill = PANEL2;
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT);
-    v.widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, accent);
+    v.widgets.active.bg_stroke = Stroke::new(1.0, accent);
     ctx.set_visuals(v);
 
     ctx.global_style_mut(|s| {

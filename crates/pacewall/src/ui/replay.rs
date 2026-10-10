@@ -107,7 +107,7 @@ impl View {
         opts.entry("numbers").or_insert(json!("class"));
         let map = WidgetSpec { id: "replay-map".into(), kind: "trackmap".into(), x: 0.0, y: 0.0, scale: 1.0, opacity: 1.0, opts };
 
-        let wheels = [("AVG", "fl", ACCENT), ("AVD", "fr", BLUE), ("ARG", "rl", OK), ("ARD", "rr", WARN)];
+        let wheels = [("AVG", "fl", ui_accent()), ("AVD", "fr", BLUE), ("ARG", "rl", OK), ("ARD", "rr", WARN)];
         let per_wheel = |field: &str| -> Vec<Curve> { wheels.iter().map(|(name, w, c)| (*name, *c, replay.series(&format!("tyre.{w}.{field}")))).collect() };
         let telemetry = vec![
             ("Carburant (L)", vec![("Carburant", BLUE, replay.series("fuel.level"))]),
@@ -526,7 +526,7 @@ impl View {
                 Some((_, true)) => format!("{title} −"),
                 None => title.to_string(),
             };
-            let color = if active.is_some() { ACCENT } else if resp.hovered() { TEXT } else { MUTED };
+            let color = if active.is_some() { ui_accent() } else if resp.hovered() { TEXT } else { MUTED };
             let (pos, al) = if *right { (egui::pos2(x + widths[i] - 10.0, head.center().y), Align2::RIGHT_CENTER) } else { (egui::pos2(x + 10.0, head.center().y), Align2::LEFT_CENTER) };
             ui.painter().text(pos, al, label, ui_font(10.5), color);
             x += widths[i];
@@ -549,7 +549,7 @@ impl View {
                 if let Some(c) = followed {
                     p.rect_filled(rect, 0.0, c.gamma_multiply(0.16));
                 } else if r.is_player {
-                    p.rect_filled(rect, 0.0, ACCENT.gamma_multiply(0.14));
+                    p.rect_filled(rect, 0.0, ui_accent().gamma_multiply(0.14));
                 } else if resp.hovered() {
                     p.rect_filled(rect, 0.0, Color32::from_white_alpha(12));
                 } else if n % 2 == 1 {
@@ -604,7 +604,7 @@ impl View {
                 let resp = ui.interact(bar, ui.id().with(("replay_stint", r.idx)), Sense::click_and_drag());
                 let p = ui.painter();
                 if r.is_player {
-                    p.rect_filled(rect, 0.0, ACCENT.gamma_multiply(0.14));
+                    p.rect_filled(rect, 0.0, ui_accent().gamma_multiply(0.14));
                 } else if n % 2 == 1 {
                     p.rect_filled(rect, 0.0, Color32::from_white_alpha(5));
                 }

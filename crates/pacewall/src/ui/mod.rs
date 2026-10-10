@@ -180,12 +180,12 @@ impl App {
             ui.add_space(if wide { 16.0 } else { 19.0 });
             let (r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
             ui.painter().rect_filled(r, 0.0, BG);
-            ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(3.0, 26.0)), 0.0, ACCENT);
+            ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(3.0, 26.0)), 0.0, ui_accent());
             ui.painter().text(r.center() + vec2(1.0, 0.0), Align2::CENTER_CENTER, "PW", num_font(11.0), TEXT);
             if wide {
                 ui.label(egui::RichText::new("PACE").size(15.0).strong());
                 ui.add_space(-8.0);
-                ui.label(egui::RichText::new("WALL").size(15.0).strong().color(ACCENT));
+                ui.label(egui::RichText::new("WALL").size(15.0).strong().color(ui_accent()));
             }
         });
         ui.add_space(18.0);
@@ -203,12 +203,12 @@ impl App {
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
             let on = self.page == page;
             if on || resp.hovered() {
-                ui.painter().rect_filled(rect, 0.0, ACCENT.gamma_multiply(0.10));
+                ui.painter().rect_filled(rect, 0.0, ui_accent().gamma_multiply(0.10));
             }
             if on {
-                ui.painter().rect_filled(Rect::from_min_size(rect.min, vec2(3.0, rect.height())), 0.0, ACCENT);
+                ui.painter().rect_filled(Rect::from_min_size(rect.min, vec2(3.0, rect.height())), 0.0, ui_accent());
             }
-            let color = if on { ACCENT } else { MUTED };
+            let color = if on { ui_accent() } else { MUTED };
             let icon_box = Rect::from_center_size(pos2(rect.min.x + if wide { 30.0 } else { rect.width() / 2.0 }, rect.center().y), vec2(18.0, 18.0));
             icon(ui.painter(), icon_box, page, color);
             if wide {

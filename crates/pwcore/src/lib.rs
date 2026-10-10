@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 //! Cœur de PaceWall, partagé par le processus de fond, l'interface, l'overlay native et le serveur OBS.
 //!
 //! - `live` : lit la mémoire partagée de Le Mans Ultimate et produit des `Data` (clé → valeur, unités converties).

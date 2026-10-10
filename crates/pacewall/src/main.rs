@@ -11,8 +11,10 @@
 mod alerts;
 mod daemon;
 mod draw;
+mod hotkeys;
 mod install;
 mod overlay;
+mod prefs;
 mod probe;
 mod soft;
 mod speech;

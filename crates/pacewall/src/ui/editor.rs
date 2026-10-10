@@ -350,7 +350,7 @@ impl State {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
             }
             if self.selected.as_deref() == Some(spec.id.as_str()) {
-                painter.rect_stroke(rect.expand(3.0), 0.0, Stroke::new(2.0, ACCENT), StrokeKind::Outside);
+                painter.rect_stroke(rect.expand(3.0), 0.0, Stroke::new(2.0, ui_accent()), StrokeKind::Outside);
             }
             // Carte : on trace sa zone en tirant sur les coins ; le circuit s'y adapte et s'y tourne tout seul.
             if spec.kind == "trackmap" && self.selected.as_deref() == Some(spec.id.as_str()) {
@@ -360,7 +360,7 @@ impl State {
                     let corner = egui::pos2(if cx == 0 { rect.min.x } else { rect.max.x }, if cy == 0 { rect.min.y } else { rect.max.y });
                     let hit = Rect::from_center_size(corner, vec2(16.0, 16.0));
                     let r = ui.interact(hit, Id::new(("pw-zone", &spec.id, cx, cy)), Sense::drag());
-                    painter.rect_filled(Rect::from_center_size(corner, vec2(9.0, 9.0)), 0.0, if r.hovered() || r.dragged() { Color32::WHITE } else { ACCENT });
+                    painter.rect_filled(Rect::from_center_size(corner, vec2(9.0, 9.0)), 0.0, if r.hovered() || r.dragged() { Color32::WHITE } else { ui_accent() });
                     if r.hovered() || r.dragged() {
                         ui.ctx().set_cursor_icon(if cx == cy { egui::CursorIcon::ResizeNwSe } else { egui::CursorIcon::ResizeNeSw });
                     }

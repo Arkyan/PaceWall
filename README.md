@@ -52,6 +52,12 @@ chrono et écarts, pilotage (rapport, vitesse, pédales, **graphe des inputs**),
 session et météo, **carte du circuit**. Les mêmes sont écrits en Rust (overlay, aperçu) et en JavaScript (OBS) : `crates/pacewall/src/widgets.rs`
 et `crates/server/overlay/widgets.js`.
 
+Overlay du joueur uniquement pour l'instant (pas encore dans la version OBS) : **relatif** (voitures autour de soi sur la piste, écart en secondes, rouge = il nous a pris un tour, bleu = on lui en a pris un), **arrêt au stand** (place et trafic à la sortie, d'après un temps perdu réglable), **radar de proximité** (voitures à côté, alerte de côté rouge ou orange) et **objectif de consommation** dans le widget carburant (consommation à tenir pour boucler un tour de plus).
+
+## Réglages communs
+
+Onglet Réglages : **unités** (km/h ou mph, °C ou °F, kPa / bar / psi, litres ou gallons), **seuils de couleur** (carburant, état et température des pneus), **couleur d'accent** de la fenêtre, et **raccourcis** : une touche (« Ctrl+Alt+O ») ou un bouton de volant (« Joy1:B7 ») pour afficher l'overlay, couper la voix, ou masquer et réafficher un type de widget en roulant. Les touches sont des raccourcis globaux de Windows ; les boutons sont lus vingt fois par seconde, seulement s'ils servent.
+
 ## Carte du circuit
 
 Inspirée de TinyPedal. Au premier tour propre sur un circuit, PaceWall enregistre la trajectoire et la garde dans

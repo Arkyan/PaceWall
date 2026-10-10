@@ -1,10 +1,12 @@
-//! Réglages : overlay, serveur OBS, lancement avec Windows, emplacements des fichiers.
+//! Réglages : overlay, unités, seuils de couleur, apparence, raccourcis, serveur OBS, lancement avec Windows, fichiers.
 
 use super::kit;
 use crate::theme::*;
+use crate::hotkeys;
 use crate::install;
+use crate::widgets;
 use crate::win;
-use eframe::egui::{self, Margin, RichText, Ui};
+use eframe::egui::{self, vec2, Margin, RichText, Sense, Stroke, StrokeKind, Ui};
 use pwcore::{db, layout, settings};
 use serde_json::json;
 
@@ -15,11 +17,15 @@ pub struct State {
     purge: bool,
     confirm_uninstall: bool,
     install_error: Option<String>,
+    /// Raccourci en cours de saisie (clé du réglage), message d'aide, et suivi des boutons de volant.
+    capturing: Option<&'static str>,
+    capture_hint: String,
+    pads: hotkeys::Pads,
 }
 
 impl Default for State {
     fn default() -> Self {
-        Self { monitors: Vec::new(), desktop_link: true, purge: false, confirm_uninstall: false, install_error: None }
+        Self { monitors: Vec::new(), desktop_link: true, purge: false, confirm_uninstall: false, install_error: None, capturing: None, capture_hint: String::new(), pads: hotkeys::Pads::default() }
     }
 }
 
@@ -34,6 +40,14 @@ impl State {
                 kit::page_title(ui, "Réglages", "Les changements sont enregistrés tout de suite.");
                 ui.set_max_width(760.0);
                 self.overlay(ui);
+                ui.add_space(14.0);
+                self.units(ui);
+                ui.add_space(14.0);
+                self.thresholds(ui);
+                ui.add_space(14.0);
+                self.appearance(ui);
+                ui.add_space(14.0);
+                self.shortcuts(ui);
                 ui.add_space(14.0);
                 self.obs(ui);
                 ui.add_space(14.0);
@@ -79,7 +93,171 @@ impl State {
                 });
             });
             ui.add_space(6.0);
-            ui.label(RichText::new("Raccourci pour l'afficher ou la masquer : Ctrl + Alt + O. Le jeu doit être en fenêtré ou sans bordure.").size(12.5).color(MUTED));
+            ui.label(RichText::new("Le jeu doit être en fenêtré ou sans bordure. Le raccourci pour l'afficher ou la fermer se règle plus bas.").size(12.5).color(MUTED));
+        });
+    }
+
+    /// Une ligne « libellé + liste de choix » enregistrée dans les réglages.
+    fn choice(ui: &mut Ui, label: &str, key: &str, default: &str, choices: &[(&str, &str)]) {
+        let current = settings::str_of(key, default);
+        let shown = choices.iter().find(|c| c.0 == current).map_or("", |c| c.1);
+        ui.horizontal(|ui| {
+            ui.allocate_ui_with_layout(vec2(190.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| ui.label(label));
+            egui::ComboBox::from_id_salt(key).width(210.0).selected_text(shown).show_ui(ui, |ui| {
+                for (value, name) in choices {
+                    if ui.selectable_label(current == *value, *name).clicked() {
+                        let _ = settings::set(key, json!(value));
+                    }
+                }
+            });
+        });
+    }
+
+    fn units(&mut self, ui: &mut Ui) {
+        kit::panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            kit::section(ui, "Unités");
+            ui.add_space(6.0);
+            Self::choice(ui, "Vitesse", "unit_speed", "kmh", &[("kmh", "km/h"), ("mph", "mph")]);
+            Self::choice(ui, "Température", "unit_temp", "c", &[("c", "°C"), ("f", "°F")]);
+            Self::choice(ui, "Pression des pneus", "unit_pressure", "kpa", &[("kpa", "kPa"), ("bar", "bar"), ("psi", "psi")]);
+            Self::choice(ui, "Carburant", "unit_fuel", "l", &[("l", "Litres"), ("gal", "Gallons (US)")]);
+            ui.label(RichText::new("Valables pour tous les widgets de l'overlay du joueur. Un widget réglé sur une unité précise la garde.").size(12.5).color(MUTED));
+        });
+    }
+
+    fn thresholds(&mut self, ui: &mut Ui) {
+        kit::panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            kit::section(ui, "Seuils de couleur");
+            ui.add_space(6.0);
+            let row = |ui: &mut Ui, label: &str, key: &str, default: i64, range: std::ops::RangeInclusive<i64>, unit: &str| {
+                let mut v = settings::int_of(key, default);
+                ui.horizontal(|ui| {
+                    ui.allocate_ui_with_layout(vec2(330.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| ui.label(label));
+                    if ui.add(egui::DragValue::new(&mut v).range(range).suffix(unit)).changed() {
+                        let _ = settings::set(key, json!(v));
+                    }
+                });
+            };
+            row(ui, "Carburant et énergie : orange en dessous de", "thr_fuel_warn", 6, 1..=30, " tours");
+            row(ui, "Carburant et énergie : rouge en dessous de", "thr_fuel_crit", 3, 0..=30, " tours");
+            row(ui, "État des pneus : orange en dessous de", "thr_wear_warn", 55, 0..=100, " %");
+            row(ui, "État des pneus : rouge en dessous de", "thr_wear_crit", 30, 0..=100, " %");
+            row(ui, "Pneu tout bleu ou tout rouge à partir d'un écart de", "thr_temp_window", 25, 5..=60, " °C");
+            ui.label(RichText::new("L'écart de température se mesure par rapport à la température idéale donnée par le jeu.").size(12.5).color(MUTED));
+        });
+    }
+
+    fn appearance(&mut self, ui: &mut Ui) {
+        kit::panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            kit::section(ui, "Apparence");
+            ui.add_space(6.0);
+            ui.label("Couleur d'accent de la fenêtre PaceWall");
+            let current = settings::str_of("ui_accent", "cyan");
+            ui.horizontal(|ui| {
+                for (id, name, color) in widgets::ACCENTS {
+                    let (rect, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
+                    ui.painter().rect_filled(rect.shrink(3.0), 0.0, *color);
+                    if current == *id {
+                        ui.painter().rect_stroke(rect, 0.0, Stroke::new(2.0, TEXT), StrokeKind::Inside);
+                    }
+                    if resp.on_hover_text(*name).clicked() {
+                        let _ = settings::set("ui_accent", json!(id));
+                        crate::theme::apply_visuals(ui.ctx());
+                    }
+                }
+            });
+            ui.label(RichText::new("La couleur de chaque widget de l'overlay se règle dans l'éditeur.").size(12.5).color(MUTED));
+        });
+    }
+
+    /// Saisie d'un raccourci : la prochaine touche (avec Ctrl, Alt ou Maj) ou le prochain bouton de volant.
+    fn capture(&mut self, ui: &mut Ui) {
+        let Some(key) = self.capturing else { return };
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        if let Some((pad, button)) = self.pads.pressed(0..16).first().copied() {
+            let _ = settings::set(key, json!(hotkeys::joy_text(pad, button)));
+            self.capturing = None;
+            return;
+        }
+        let pressed = ui.input(|i| {
+            i.events.iter().find_map(|ev| match ev {
+                egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. } => Some((*key, *modifiers)),
+                _ => None,
+            })
+        });
+        let Some((k, mods)) = pressed else { return };
+        if k == egui::Key::Escape {
+            self.capturing = None;
+            return;
+        }
+        let name = k.name();
+        let function = name.len() >= 2 && name.starts_with('F') && name[1..].chars().all(|c| c.is_ascii_digit());
+        let simple = name.len() == 1 && name.chars().all(|c| c.is_ascii_alphanumeric());
+        if !function && !simple {
+            self.capture_hint = "Touche non prise en charge : lettre, chiffre ou F1 à F12.".into();
+            return;
+        }
+        if simple && !(mods.ctrl || mods.alt) {
+            // Une lettre seule serait interceptée partout dans Windows, y compris en tapant du texte.
+            self.capture_hint = "Ajoute Ctrl ou Alt à cette touche (ou choisis une touche F1 à F12).".into();
+            return;
+        }
+        let mut text = String::new();
+        for (on, label) in [(mods.ctrl, "Ctrl+"), (mods.alt, "Alt+"), (mods.shift, "Maj+")] {
+            if on {
+                text.push_str(label);
+            }
+        }
+        text.push_str(name);
+        let _ = settings::set(key, json!(text));
+        self.capturing = None;
+    }
+
+    fn shortcuts(&mut self, ui: &mut Ui) {
+        self.capture(ui);
+        kit::panel_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            kit::section(ui, "Raccourcis");
+            ui.add_space(6.0);
+            ui.label(RichText::new("Une touche du clavier ou un bouton de volant. Les raccourcis des widgets les masquent ou les réaffichent en roulant.").size(12.5).color(MUTED));
+            ui.add_space(4.0);
+            let mut rows: Vec<(&'static str, String)> = vec![("hk_overlay", "Afficher / fermer l'overlay".into()), ("hk_voice", "Couper / remettre la voix".into())];
+            rows.extend(hotkeys::WIDGET_ACTIONS.iter().map(|(k, name)| (*k, format!("Masquer / afficher : {name}"))));
+            egui::Grid::new("shortcuts").num_columns(4).spacing([14.0, 6.0]).show(ui, |ui| {
+                for (key, label) in rows {
+                    let current = settings::str_of(key, "");
+                    ui.label(label);
+                    if self.capturing == Some(key) {
+                        ui.label(RichText::new("Appuie sur la touche ou le bouton…").color(WARN));
+                        if kit::button(ui, "Annuler").clicked() {
+                            self.capturing = None;
+                        }
+                        ui.label("");
+                    } else {
+                        // Un texte incompris (fichier modifié à la main) est signalé plutôt qu'ignoré en silence.
+                        let valid = current.is_empty() || hotkeys::parse(&current).is_some();
+                        ui.label(RichText::new(if current.is_empty() { "aucun" } else { current.as_str() }).font(num_font(12.5)).color(if !valid { BAD } else if current.is_empty() { MUTED } else { TEXT }));
+                        if kit::button(ui, "Changer").clicked() {
+                            self.capturing = Some(key);
+                            self.capture_hint.clear();
+                            // Les boutons déjà enfoncés ne comptent pas comme une nouvelle pression.
+                            let _ = self.pads.pressed(0..16);
+                        }
+                        if !current.is_empty() && kit::button(ui, "Effacer").clicked() {
+                            let _ = settings::set(key, json!(""));
+                        } else if current.is_empty() {
+                            ui.label("");
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+            if self.capturing.is_some() && !self.capture_hint.is_empty() {
+                ui.label(RichText::new(&self.capture_hint).color(WARN));
+            }
         });
     }
 
