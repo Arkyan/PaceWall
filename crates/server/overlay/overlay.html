@@ -4,38 +4,66 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PaceWall · Overlay</title>
-<link rel="stylesheet" href="/assets/overlay.css">
+<style>
+  /* Fond transparent : OBS ne montre que les widgets. */
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  canvas { position: absolute; display: block; }
+</style>
 </head>
-<body class="pw-page">
-<script src="/assets/widgets.js"></script>
-<script src="/assets/runtime.js"></script>
+<body>
 <script>
-  // /overlay/player  : mise en page « joueur » (fenêtre par-dessus le jeu)
   // /overlay/obs     : mise en page « OBS » (source navigateur, fond transparent)
-  // Options d'URL : ?only=fuel,tyres  (n'afficher que ces widgets)   ?demo=1  (données factices)
-  const target = location.pathname.split('/').pop() === 'obs' ? 'obs' : 'player';
+  // /overlay/player  : mise en page « joueur »
+  // Options d'URL : ?only=fuel,tyres  (n'afficher que ces widgets)   ?demo=1  (données de démonstration, sans le jeu)
+  //
+  // Les widgets ne sont pas dessinés ici : PaceWall les dessine avec le code de l'overlay du joueur et envoie chaque
+  // image sur /ws. Cette page ne fait que les poser à leur place : le rendu est identique par construction.
+  const target = location.pathname.split('/').pop() === 'player' ? 'player' : 'obs';
   const q = new URLSearchParams(location.search);
-  const only = q.get('only') ? q.get('only').split(',') : null;
-  let view;
-  // Diagnostic de performance : ?flat=nomask,noclip
-  for (const f of (q.get('flat') || '').split(',').filter(Boolean)) document.documentElement.classList.add('flat-' + f);
+  const only = q.get('only') ? q.get('only').split(',') : [];
+  const demo = !!q.get('demo');
+  const canvases = new Map();
+  let ws = null, askedHeight = 0;
 
-  async function load() {
-    const layouts = await PW.loadLayouts();
-    const layout = JSON.parse(JSON.stringify((layouts.targets && layouts.targets[target]) || PW.defaultLayout()));
-    // ?opt=inputs.graph:false,fuel.energy:false : surcharge d'options (diagnostic, sans toucher à la mise en page)
-    for (const o of (q.get('opt') || '').split(',').filter(Boolean)) {
-      const [path, raw] = o.split(':'), [type, key] = path.split('.');
-      const value = raw === 'true' ? true : raw === 'false' ? false : raw;
-      layout.widgets.filter(w => w.type === type).forEach(w => { w.opts = { ...w.opts, [key]: value }; });
-    }
-    if (view) view.setLayout(layout);
-    else view = PW.createView(document.body, { layout, only });
+  // Hauteur de la page en pixels réels : les widgets sont dessinés à cette taille, sans remise à l'échelle.
+  const pixelHeight = () => Math.max(120, Math.round(innerHeight * devicePixelRatio));
+  const ask = () => {
+    askedHeight = pixelHeight();
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ frames: { target, height: askedHeight, only, demo } }));
+  };
+  const clear = () => { for (const c of canvases.values()) c.remove(); canvases.clear(); };
+
+  function show(buffer) {
+    const v = new DataView(buffer);
+    if (v.getUint8(0) !== 1) return;
+    const index = v.getUint16(1, true), x = v.getFloat32(3, true), y = v.getFloat32(7, true), opacity = v.getFloat32(11, true);
+    const w = v.getUint16(15, true), h = v.getUint16(17, true);
+    let c = canvases.get(index);
+    if (!w || !h) { if (c) c.style.display = 'none'; return; }
+    if (!c) { c = document.createElement('canvas'); document.body.appendChild(c); canvases.set(index, c); }
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const dpr = devicePixelRatio;
+    c.style.cssText = `display:block;left:${x * 100}%;top:${y * 100}%;width:${w / dpr}px;height:${h / dpr}px;opacity:${opacity}`;
+    c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(buffer, 19, w * h * 4), w, h), 0, 0);
   }
 
-  PW.feed.onLayout(load);          // l'éditeur vient d'enregistrer : on recharge la mise en page
-  PW.feed.setMode(q.get('demo') ? 'demo' : 'live');
-  load();
+  function connect() {
+    ws = new WebSocket('ws://' + location.host + '/ws');
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = ask;
+    ws.onmessage = e => {
+      if (typeof e.data !== 'string') { show(e.data); return; }
+      const m = JSON.parse(e.data);
+      // Nouvelle mise en page, ou jeu fermé : on repart d'une page vide.
+      if (m.t === 'reset' || m.t === 'hide') clear();
+    };
+    ws.onclose = () => { ws = null; clear(); setTimeout(connect, 1500); };
+  }
+
+  // Taille de la source changée dans OBS : on redemande des images à la nouvelle taille.
+  let resizeTimer = 0;
+  addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (pixelHeight() !== askedHeight) ask(); }, 200); });
+  connect();
 </script>
 </body>
 </html>

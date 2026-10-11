@@ -330,7 +330,7 @@ pub fn run() {
         let want = alert_due
             || panels.len() < layout.widgets.len()
             || layout.widgets.iter().zip(panels.iter()).any(|(spec, panel)| {
-                now.duration_since(panel.last) >= Duration::from_secs_f32(1.0 / widgets::hz(&spec.kind, spec).max(0.2))
+                now.duration_since(panel.last) >= Duration::from_secs_f32(1.0 / widgets::hz_state(&spec.kind, spec, &panel.state).max(0.2))
             });
         let t = Instant::now();
         let update = live.poll_if(with_grid, want);
@@ -416,7 +416,7 @@ pub fn run() {
                     panel.hide();
                     continue;
                 }
-                let period = Duration::from_secs_f32(1.0 / widgets::hz(&spec.kind, spec).max(0.2));
+                let period = Duration::from_secs_f32(1.0 / widgets::hz_state(&spec.kind, spec, &panel.state).max(0.2));
                 let due = now.duration_since(panel.last) >= period;
                 // Le graphe des inputs avance avec le temps ; les autres widgets n'ont rien à refaire sans nouvelle donnée.
                 let time_driven = (spec.kind == "inputs" && spec.flag("graph", true)) || spec.kind == "radar" || panel.state.animating();

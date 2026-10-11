@@ -13,6 +13,7 @@ mod daemon;
 mod draw;
 mod hotkeys;
 mod install;
+mod obs_painter;
 mod overlay;
 mod prefs;
 mod probe;

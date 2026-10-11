@@ -34,7 +34,7 @@ impl Obs {
             (true, false) => {
                 let stop = Arc::new(AtomicBool::new(false));
                 let (flag, port) = (stop.clone(), server::port());
-                std::thread::spawn(move || server::run(port, flag));
+                std::thread::spawn(move || server::run(port, flag, Some(crate::obs_painter::factory)));
                 self.stop = Some(stop);
             }
             (false, true) => {

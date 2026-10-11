@@ -28,6 +28,7 @@ fn defaults() -> Map<String, Value> {
         "autostart": false,            // lancer avec Windows
         "obs_server": false,           // serveur web pour OBS (source navigateur)
         "obs_port": 8470,
+        "obs_fps": 30,                 // images par seconde au plus pour les widgets d'OBS (5 à 60)
         "lmu_api_port": 6397,          // port du service web local de Le Mans Ultimate (prévisions météo)
         // Unités (communes à tous les widgets)
         "unit_speed": "kmh",           // "kmh" ou "mph"

@@ -5,7 +5,7 @@ use crate::draw::{Canvas, Font, HAlign};
 use ab_glyph::{Font as _, FontArc, OutlineCurve, Point};
 use eframe::egui::Color32;
 use std::collections::HashMap;
-use tiny_skia::{FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PixmapMut, Rect, Stroke, Transform};
+use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, PixmapMut, Rect, Transform};
 
 /// Masque de transparence d'un caractère déjà dessiné à une taille donnée.
 struct GlyphBmp {
@@ -24,6 +24,8 @@ pub struct Fonts {
     bitmaps: HashMap<(bool, char, u32), Option<GlyphBmp>>,
     /// Couches pré-dessinées (tracé des circuits) : position du coin et image.
     layers: HashMap<u64, (i32, i32, Pixmap)>,
+    /// Masque de travail des traits (réutilisé d'un trait à l'autre pour ne rien allouer).
+    mask: Vec<u8>,
 }
 
 fn load(name: &str) -> Option<FontArc> {
@@ -40,7 +42,7 @@ impl Fonts {
         let mut num: Vec<FontArc> = load("consola.ttf").into_iter().collect();
         ui.extend(fallback.iter().cloned());
         num.extend(fallback.iter().cloned());
-        Self { ui, num, cache: HashMap::new(), bitmaps: HashMap::new(), layers: HashMap::new() }
+        Self { ui, num, cache: HashMap::new(), bitmaps: HashMap::new(), layers: HashMap::new(), mask: Vec::new() }
     }
 
     fn chain(&self, num: bool) -> &[FontArc] {
@@ -154,25 +156,36 @@ pub struct SoftCanvas<'a> {
     pub fonts: &'a mut Fonts,
 }
 
-fn paint(c: Color32) -> Paint<'static> {
-    let [r, g, b, a] = c.to_srgba_unmultiplied();
-    let mut p = Paint::default();
-    p.set_color_rgba8(r, g, b, a);
-    p.anti_alias = true;
-    p
+/// Division par 255 exacte et arrondie, sans division (les compositions en font des centaines de milliers par image).
+#[inline(always)]
+fn div255(v: u32) -> u32 {
+    let v = v + 128;
+    (v + (v >> 8)) >> 8
 }
 
-fn path_of(pts: &[(f32, f32)], close: bool) -> Option<Path> {
-    let mut pb = PathBuilder::new();
-    let (first, rest) = pts.split_first()?;
-    pb.move_to(first.0, first.1);
-    for &(x, y) in rest {
-        pb.line_to(x, y);
+/// Pose une couleur prémultipliée sur un pixel prémultiplié (« source par-dessus »).
+#[inline(always)]
+fn over(px: &mut [u8], [r, g, b, a]: [u8; 4]) {
+    if a == 255 || px[3] == 0 {
+        // Source opaque, ou pixel encore vide : rien à mélanger.
+        px.copy_from_slice(&[r, g, b, a]);
+    } else if a != 0 {
+        let inv = 255 - a as u32;
+        px[0] = (r as u32 + div255(px[0] as u32 * inv)) as u8;
+        px[1] = (g as u32 + div255(px[1] as u32 * inv)) as u8;
+        px[2] = (b as u32 + div255(px[2] as u32 * inv)) as u8;
+        px[3] = (a as u32 + div255(px[3] as u32 * inv)) as u8;
     }
-    if close {
-        pb.close();
+}
+
+/// Comme `over`, pour une couleur couverte à `cov` / 255 (bords lissés, masque d'un caractère).
+#[inline(always)]
+fn over_cov(px: &mut [u8], [r, g, b, a]: [u8; 4], cov: u32) {
+    if cov >= 255 {
+        over(px, [r, g, b, a]);
+    } else if cov > 0 {
+        over(px, [div255(r as u32 * cov) as u8, div255(g as u32 * cov) as u8, div255(b as u32 * cov) as u8, div255(a as u32 * cov) as u8]);
     }
-    pb.finish()
 }
 
 impl SoftCanvas<'_> {
@@ -185,20 +198,15 @@ impl SoftCanvas<'_> {
         if x0 >= x1 || y0 >= y1 {
             return;
         }
-        let [r, g, b, a] = color.to_array();
-        let inv = 255 - a as u32;
+        let c = color.to_array();
+        if c[3] == 0 {
+            return;
+        }
         let data = self.pm.data_mut();
         for y in y0..y1 {
             let row = (y * pw) as usize * 4;
             for px in data[row + x0 as usize * 4..row + x1 as usize * 4].chunks_exact_mut(4) {
-                if a == 255 {
-                    px.copy_from_slice(&[r, g, b, 255]);
-                } else {
-                    px[0] = (r as u32 + px[0] as u32 * inv / 255) as u8;
-                    px[1] = (g as u32 + px[1] as u32 * inv / 255) as u8;
-                    px[2] = (b as u32 + px[2] as u32 * inv / 255) as u8;
-                    px[3] = (a as u32 + px[3] as u32 * inv / 255) as u8;
-                }
+                over(px, c);
             }
         }
     }
@@ -266,21 +274,114 @@ impl Canvas for SoftCanvas<'_> {
     }
 
     fn circle(&mut self, x: f32, y: f32, r: f32, fill: Color32, stroke: Option<(f32, Color32)>) {
-        let Some(path) = PathBuilder::from_circle(x, y, r.max(0.5)) else { return };
-        self.pm.fill_path(&path, &paint(fill), FillRule::Winding, Transform::identity(), None);
-        if let Some((width, color)) = stroke {
-            let st = Stroke { width, ..Stroke::default() };
-            self.pm.stroke_path(&path, &paint(color), &st, Transform::identity(), None);
+        // Disque et anneau tramés par la distance au centre : le bord est lissé sur un pixel. Bien plus léger que de
+        // construire un chemin et de le remplir, pour les dizaines de pastilles d'une carte ou d'un radar.
+        let r = r.max(0.5);
+        let (fill, ring) = (fill.to_array(), stroke.map(|(w, c)| (w.max(0.0), c.to_array())));
+        let (outer, inner) = match ring {
+            Some((w, _)) => (r + w / 2.0, (r - w / 2.0).max(0.0)),
+            None => (r, r),
+        };
+        let (pw, ph) = (self.pm.width() as i32, self.pm.height() as i32);
+        let (x0, x1) = (((x - outer - 1.0).floor() as i32).max(0), ((x + outer + 1.0).ceil() as i32).min(pw));
+        let (y0, y1) = (((y - outer - 1.0).floor() as i32).max(0), ((y + outer + 1.0).ceil() as i32).min(ph));
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        let far2 = (outer + 0.5) * (outer + 0.5);
+        // À l'intérieur de ce rayon, le pixel est entièrement dans le disque et hors de l'anneau : pas de racine carrée.
+        let core = (if ring.is_some() { inner } else { r } - 0.5).max(0.0);
+        let core2 = core * core;
+        let data = self.pm.data_mut();
+        for py in y0..y1 {
+            let dy = py as f32 + 0.5 - y;
+            let row = (py * pw) as usize * 4;
+            for px in x0..x1 {
+                let dx = px as f32 + 0.5 - x;
+                let d2 = dx * dx + dy * dy;
+                if d2 >= far2 {
+                    continue;
+                }
+                let o = row + px as usize * 4;
+                if d2 <= core2 {
+                    over(&mut data[o..o + 4], fill);
+                    continue;
+                }
+                let d = d2.sqrt();
+                if fill[3] != 0 {
+                    over_cov(&mut data[o..o + 4], fill, ((r + 0.5 - d).clamp(0.0, 1.0) * 255.0) as u32);
+                }
+                if let Some((_, color)) = ring {
+                    let cov = (outer + 0.5 - d).clamp(0.0, 1.0) * (d - inner + 0.5).clamp(0.0, 1.0);
+                    over_cov(&mut data[o..o + 4], color, (cov * 255.0) as u32);
+                }
+            }
         }
     }
 
     fn polyline(&mut self, pts: &[(f32, f32)], width: f32, color: Color32) {
-        // Les traits longs (tracés de circuit) sont faits de segments presque alignés : jonctions à angle vif, bien moins
-        // coûteuses que des jonctions arrondies, sans différence visible.
-        let join = if pts.len() > 40 { LineJoin::Miter } else { LineJoin::Round };
-        let Some(path) = path_of(pts, false) else { return };
-        let st = Stroke { width, line_cap: LineCap::Round, line_join: join, ..Stroke::default() };
-        self.pm.stroke_path(&path, &paint(color), &st, Transform::identity(), None);
+        // Trait à bouts et jonctions arrondis : chaque segment est une « gélule » tramée par la distance au segment.
+        // Les couvertures sont d'abord réunies dans un masque (le maximum, pour qu'un trait translucide ne se
+        // superpose pas à lui-même aux jonctions), puis la couleur est posée une seule fois.
+        if pts.len() < 2 {
+            return;
+        }
+        let half = (width / 2.0).max(0.5);
+        let reach = half + 1.0;
+        let (pw, ph) = (self.pm.width() as i32, self.pm.height() as i32);
+        let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+        for p in pts {
+            lo = (lo.0.min(p.0), lo.1.min(p.1));
+            hi = (hi.0.max(p.0), hi.1.max(p.1));
+        }
+        let (bx0, bx1) = (((lo.0 - reach).floor() as i32).max(0), ((hi.0 + reach).ceil() as i32).min(pw));
+        let (by0, by1) = (((lo.1 - reach).floor() as i32).max(0), ((hi.1 + reach).ceil() as i32).min(ph));
+        if bx0 >= bx1 || by0 >= by1 {
+            return;
+        }
+        let (bw, bh) = ((bx1 - bx0) as usize, (by1 - by0) as usize);
+        let mut mask = std::mem::take(&mut self.fonts.mask);
+        mask.clear();
+        mask.resize(bw * bh, 0);
+        let (full2, far2) = ((half - 0.5).max(0.0).powi(2), (half + 0.5).powi(2));
+        for seg in pts.windows(2) {
+            let ((ax, ay), (bx, by)) = (seg[0], seg[1]);
+            let (dx, dy) = (bx - ax, by - ay);
+            let len2 = dx * dx + dy * dy;
+            let (x0, x1) = (((ax.min(bx) - reach).floor() as i32).max(bx0), ((ax.max(bx) + reach).ceil() as i32).min(bx1));
+            let (y0, y1) = (((ay.min(by) - reach).floor() as i32).max(by0), ((ay.max(by) + reach).ceil() as i32).min(by1));
+            for py in y0..y1 {
+                let cy = py as f32 + 0.5 - ay;
+                let row = (py - by0) as usize * bw;
+                for px in x0..x1 {
+                    let cx = px as f32 + 0.5 - ax;
+                    // Point du segment le plus proche du centre du pixel.
+                    let t = if len2 > 1e-6 { ((cx * dx + cy * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
+                    let (ex, ey) = (cx - dx * t, cy - dy * t);
+                    let d2 = ex * ex + ey * ey;
+                    if d2 >= far2 {
+                        continue;
+                    }
+                    let cov = if d2 <= full2 { 255 } else { ((half + 0.5 - d2.sqrt()).clamp(0.0, 1.0) * 255.0) as u8 };
+                    let m = &mut mask[row + (px - bx0) as usize];
+                    if cov > *m {
+                        *m = cov;
+                    }
+                }
+            }
+        }
+        let c = color.to_array();
+        let data = self.pm.data_mut();
+        for (j, line) in mask.chunks_exact(bw).enumerate() {
+            let row = ((by0 + j as i32) * pw + bx0) as usize * 4;
+            for (i, m) in line.iter().enumerate() {
+                if *m != 0 {
+                    let o = row + i * 4;
+                    over_cov(&mut data[o..o + 4], c, *m as u32);
+                }
+            }
+        }
+        self.fonts.mask = mask;
     }
 
     fn layer(&mut self, key: u64, rect: (f32, f32, f32, f32), f: &mut dyn FnMut(&mut dyn Canvas, (f32, f32))) {
@@ -318,19 +419,11 @@ impl Canvas for SoftCanvas<'_> {
                         continue;
                     }
                     let si = ((sy * sw + sx) * 4) as usize;
-                    let sa = src[si + 3] as u32;
-                    if sa == 0 {
+                    if src[si + 3] == 0 {
                         continue;
                     }
                     let di = ((dy * dw + dx) * 4) as usize;
-                    if sa == 255 {
-                        dst[di..di + 4].copy_from_slice(&src[si..si + 4]);
-                    } else {
-                        let inv = 255 - sa;
-                        for c in 0..4 {
-                            dst[di + c] = (src[si + c] as u32 + (dst[di + c] as u32 * inv + 127) / 255).min(255) as u8;
-                        }
-                    }
+                    over(&mut dst[di..di + 4], [src[si], src[si + 1], src[si + 2], src[si + 3]]);
                 }
             }
         }
@@ -347,7 +440,7 @@ impl Canvas for SoftCanvas<'_> {
         // La ligne de base est à l'ascendante sous le haut du texte.
         let base = (y + self.fonts.ascent(num) * size).round() as i32;
         let (pw, ph) = (self.pm.width() as i32, self.pm.height() as i32);
-        let [cr, cg, cb, ca] = color.to_array(); // prémultiplié
+        let color = color.to_array(); // prémultiplié
         let mut pen = left;
         for ch in s.chars() {
             let advance = match self.fonts.glyph(num, ch) {
@@ -373,13 +466,8 @@ impl Canvas for SoftCanvas<'_> {
                                 continue;
                             }
                             // Source prémultipliée × masque, composée sur l'image (source-over).
-                            let sa = ca as u32 * m / 255;
-                            let inv = 255 - sa;
                             let o = ((py * pw + px) * 4) as usize;
-                            data[o] = (cr as u32 * m / 255 + data[o] as u32 * inv / 255).min(255) as u8;
-                            data[o + 1] = (cg as u32 * m / 255 + data[o + 1] as u32 * inv / 255).min(255) as u8;
-                            data[o + 2] = (cb as u32 * m / 255 + data[o + 2] as u32 * inv / 255).min(255) as u8;
-                            data[o + 3] = (sa + data[o + 3] as u32 * inv / 255).min(255) as u8;
+                            over_cov(&mut data[o..o + 4], color, m);
                         }
                     }
                 }

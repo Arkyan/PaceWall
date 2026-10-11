@@ -16,14 +16,14 @@ et historique des sessions. Une application Windows **native et légère** ; le 
 | **Processus de fond** | `pacewall.exe` (ou au démarrage de Windows) | Icône de la zone de notification, raccourci Ctrl+Alt+O, surveillance du jeu, enregistrement de l'historique, serveur OBS à la demande. Aucune interface chargée. | 0,0 % CPU · 12 Mo |
 | **Overlay joueur** | lancée par le processus de fond quand le jeu démarre, fermée quand il s'arrête | Un widget = une petite fenêtre Windows transparente, insensible aux clics, dessinée par le processeur (tiny-skia). Pas de GPU, pas de navigateur. Lit le jeu directement. | ≈ 2 % CPU · 17 Mo |
 | **Fenêtre principale** | `pacewall.exe --ui` (clic sur l'icône) | Accueil, éditeur d'overlays, données en direct, historique, réglages (egui). Fermée, elle libère toute sa mémoire. | 0,1 % CPU · 90 Mo |
-| **Serveur OBS** | activé dans Réglages | Pages HTML des overlays pour une source navigateur OBS. Désactivé, il ne consomme rien. | — |
+| **Serveur OBS** | activé dans Réglages | Page pour une source navigateur OBS : les widgets y arrivent déjà dessinés, en images. Désactivé, il ne consomme rien. | — |
 
 À titre de comparaison, la première version (overlay dans un navigateur embarqué WebView2) pesait environ 380 Mo et 14 % de CPU.
 
 ```
 LMU ──► pwcore::live (mémoire partagée) ──┬─► overlay native (--overlay)
                                           ├─► fenêtre principale (--ui)
-                                          └─► serveur OBS (WebSocket + pages HTML)
+                                          └─► serveur OBS (WebSocket : images des widgets)
 ```
 
 ## Installation
@@ -49,10 +49,9 @@ LMU ──► pwcore::live (mémoire partagée) ──┬─► overlay native (
 
 Carburant et énergie (tours restants, conso, quantité à ajouter), pneus (température par rapport à l'optimum, usure, pression),
 chrono et écarts, pilotage (rapport, vitesse, pédales, **graphe des inputs**), classement (devant/derrière, couleurs de classe),
-session et météo, **carte du circuit**. Les mêmes sont écrits en Rust (overlay, aperçu) et en JavaScript (OBS) : `crates/pacewall/src/widgets.rs`
-et `crates/server/overlay/widgets.js`.
+session et météo, **carte du circuit**. Ils ne sont écrits qu'une fois, en Rust (`crates/pacewall/src/widgets.rs`) : l'overlay du joueur, l'aperçu de l'éditeur et la page d'OBS utilisent ce même dessin. Pour OBS, le serveur dessine chaque widget (`crates/pacewall/src/obs_painter.rs`) et envoie l'image à la page, qui la pose à sa place : le rendu est identique par construction. Une image n'est renvoyée que si elle a changé ; la cadence est plafonnée par `obs_fps` (30 par défaut). Options de la page : `?only=fuel,tyres`, `?demo=1`.
 
-Overlay du joueur uniquement pour l'instant (pas encore dans la version OBS) : **relatif** (voitures autour de soi sur la piste, écart en secondes, rouge = il nous a pris un tour, bleu = on lui en a pris un), **arrêt au stand** (place et trafic à la sortie, d'après un temps perdu réglable), **radar de proximité** (voitures à côté, alerte de côté rouge ou orange) et **objectif de consommation** dans le widget carburant (consommation à tenir pour boucler un tour de plus).
+Aussi : **relatif** (voitures autour de soi sur la piste, écart en secondes, rouge = il nous a pris un tour, bleu = on lui en a pris un), **arrêt au stand** (place et trafic à la sortie, d'après un temps perdu réglable), **radar de proximité** (voitures à côté, alerte de côté rouge ou orange) et **objectif de consommation** dans le widget carburant (consommation à tenir pour boucler un tour de plus).
 
 ## Prévisions météo
 
@@ -129,7 +128,7 @@ Variables utiles : `PACEWALL_DB` (dossier des fichiers de données, ex. `.dev/hi
 | `lmu` | Structures de la mémoire partagée de LMU (`packed(4)`, tailles et décalages vérifiés par test) et lecteur partiel |
 | `pwcore` | Lecture du jeu (`live`), clés de données (`flatten`), stratégie, historique SQLite, réglages, mises en page, données de démo |
 | `pacewall` | L'application : processus de fond, overlay, fenêtre principale, widgets natifs, rendu logiciel |
-| `server` | Serveur web pour OBS (axum) et pages HTML des overlays |
+| `server` | Serveur web pour OBS (axum) : envoie à la page les widgets dessinés par l'application |
 | `fakegame` | Faux jeu pour développer sans LMU |
 | `collector` | Petit outil console qui affiche les valeurs lues |
 

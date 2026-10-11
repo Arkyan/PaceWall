@@ -152,10 +152,20 @@ pub fn hz(kind: &str, spec: &WidgetSpec) -> f32 {
         "tyres" => 1.0,
         "standings" => 1.0,
         "trackmap" => spec.num("fps", 20.0) as f32,
-        "flags" => 15.0,
+        "flags" => 4.0,
         "relative" => 4.0,
         "radar" => spec.num("fps", 60.0) as f32,
         _ => 1.0,
+    }
+}
+
+/// Cadence selon l'état du widget : un panneau de drapeau qui clignote doit être redessiné plus souvent qu'un
+/// panneau fixe (ou vide).
+pub fn hz_state(kind: &str, spec: &WidgetSpec, st: &WState) -> f32 {
+    if kind == "flags" && st.animating {
+        15.0
+    } else {
+        hz(kind, spec)
     }
 }
 
