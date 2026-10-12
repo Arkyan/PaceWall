@@ -226,6 +226,9 @@ pub fn run() {
     let mut hide_idle = settings::bool_of("overlay_hide_idle", true);
     let mut fg_ok = true;
     let mut was_visible = false;
+    // État publié pour OBS (voir pwcore::overlay_state) : réécrit seulement quand il change.
+    let mut in_front = true;
+    let mut published: Option<pwcore::overlay_state::State> = None;
     // Alertes vocales : règles (alerts) et voix (speech) ; relues avec les autres réglages toutes les 2 s.
     let mut voice = alerts::Config::load();
     // Réglages alerte par alerte (onglet Alertes) : activée, phrase choisie, phrase personnalisée.
@@ -377,11 +380,20 @@ pub fn run() {
         // Premier plan : interrogé 4 fois par seconde seulement.
         if now >= next_fg {
             next_fg = now + Duration::from_millis(250);
-            fg_ok = (!fg_only || win::game_in_front()) && !win::overlay_hidden_for_capture();
+            in_front = !fg_only || win::game_in_front();
+            fg_ok = in_front && !win::overlay_hidden_for_capture();
         }
         // En pause ou au menu, plus rien ne bouge (temps du jeu figé) ou « en piste » est faux : on masque.
         let driving = !hide_idle || (data.flag("session.realtime") && live.idle() < Duration::from_millis(1500));
         let visible = game && fg_ok && driving;
+        // Pour OBS : le même état, sauf pendant une capture d'écran de l'éditeur (l'overlay ne se masque que pour la photo).
+        let mut kinds: Vec<String> = hidden.iter().cloned().collect();
+        kinds.sort();
+        let state = pwcore::overlay_state::State { visible: game && in_front && driving, hidden: kinds };
+        if published.as_ref() != Some(&state) {
+            pwcore::overlay_state::publish(&state);
+            published = Some(state);
+        }
         if visible != was_visible {
             was_visible = visible;
             log_event(&format!(

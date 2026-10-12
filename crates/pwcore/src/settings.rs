@@ -26,8 +26,10 @@ fn defaults() -> Map<String, Value> {
         "tutorial_done": false,        // le tutoriel de premier lancement a été vu
         "overlay_monitor": 0,          // index de l'écran (0 = principal)
         "autostart": false,            // lancer avec Windows
+        "update_check": true,          // chercher les nouvelles versions en ligne (au démarrage puis deux fois par jour)
         "obs_server": false,           // serveur web pour OBS (source navigateur)
         "obs_port": 8470,
+        "obs_follow": true,            // les widgets d'OBS s'affichent et se masquent en même temps que l'overlay du joueur
         "obs_fps": 30,                 // images par seconde au plus pour les widgets d'OBS (5 à 60)
         "lmu_api_port": 6397,          // port du service web local de Le Mans Ultimate (prévisions météo)
         // Unités (communes à tous les widgets)

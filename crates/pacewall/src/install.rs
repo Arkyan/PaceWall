@@ -50,6 +50,20 @@ pub fn is_installed() -> bool {
     installed_exe().is_file() && RegKey::predef(HKEY_CURRENT_USER).open_subkey(UNINSTALL_KEY).is_ok()
 }
 
+/// Version installée (celle que Windows affiche dans « Applications installées »), s'il y en a une.
+pub fn installed_version() -> Option<String> {
+    use winreg::{enums::HKEY_CURRENT_USER, RegKey};
+    if !installed_exe().is_file() {
+        return None;
+    }
+    RegKey::predef(HKEY_CURRENT_USER).open_subkey(UNINSTALL_KEY).ok()?.get_value("DisplayVersion").ok()
+}
+
+/// Les choix de l'installation en place, à reprendre lors d'une mise à jour.
+pub fn current_options() -> Options {
+    Options { desktop_shortcut: desktop_shortcut().is_some_and(|p| p.is_file()), autostart: pwcore::settings::bool_of("autostart", false) }
+}
+
 fn known_folder(id: &windows::core::GUID) -> Option<PathBuf> {
     unsafe {
         let p = SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None).ok()?;
@@ -132,6 +146,11 @@ pub fn install(opts: Options) -> Result<PathBuf, String> {
     let _ = key.set_value("InstallLocation", &dir.to_string_lossy().to_string());
     let _ = key.set_value("DisplayIcon", &target.to_string_lossy().to_string());
     let _ = key.set_value("UninstallString", &format!("\"{}\" --uninstall", target.display()));
+    // Taille affichée par Windows, en kilo-octets.
+    let _ = key.set_value("EstimatedSize", &(std::fs::metadata(&target).map_or(0, |m| m.len() / 1024) as u32));
+    if !crate::update::REPO.is_empty() {
+        let _ = key.set_value("URLInfoAbout", &format!("https://github.com/{}", crate::update::REPO));
+    }
     let _ = key.set_value("NoModify", &1u32);
     let _ = key.set_value("NoRepair", &1u32);
     Ok(target)

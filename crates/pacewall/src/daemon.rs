@@ -58,6 +58,8 @@ pub fn run(minimized: bool) {
 
     // L'historique s'enregistre en permanence, overlay ouverte ou non (2 lectures par seconde pendant une session).
     std::thread::spawn(recorder::run);
+    // Recherche de mises à jour : une requête peu après le démarrage, puis deux par jour (réglage « update_check »).
+    std::thread::spawn(crate::update::watch);
 
     // Menu de l'icône.
     let open = MenuItem::with_id("ui", "Ouvrir PaceWall", true, None);
@@ -65,11 +67,15 @@ pub fn run(minimized: bool) {
     let auto = CheckMenuItem::with_id("auto", "Overlay automatique avec le jeu", true, settings::bool_of("overlay_auto", true), None);
     let obs_item = CheckMenuItem::with_id("obs", "Serveur OBS", true, settings::bool_of("obs_server", false), None);
     let quit = MenuItem::with_id("quit", "Quitter", true, None);
+    // Ligne de version : devient « Installer la mise à jour » quand une version plus récente est trouvée.
+    let version = MenuItem::with_id("update", format!("PaceWall {}", crate::update::VERSION), false, None);
+    let mut next_update_look = Instant::now() + Duration::from_secs(40);
     let menu = Menu::new();
-    let _ = menu.append_items(&[&open, &overlay, &auto, &obs_item, &PredefinedMenuItem::separator(), &quit]);
+    let _ = menu.append_items(&[&open, &overlay, &auto, &obs_item, &PredefinedMenuItem::separator(), &version, &quit]);
 
     MenuEvent::set_event_handler(Some(|e: MenuEvent| match e.id.0.as_str() {
         "ui" => win::open_ui(None),
+        "update" => win::open_ui(Some("home")),
         "overlay" => win::toggle_overlay(),
         "auto" => {
             let _ = settings::set("overlay_auto", json!(!settings::bool_of("overlay_auto", true)));
@@ -165,6 +171,13 @@ pub fn run(minimized: bool) {
             false
         };
 
+        if Instant::now() >= next_update_look {
+            next_update_look = Instant::now() + Duration::from_secs(600);
+            if let Some(release) = crate::update::available() {
+                version.set_text(format!("Installer la mise à jour {}…", release.version));
+                version.set_enabled(true);
+            }
+        }
         // Le jeu apparaît ou disparaît : l'overlay s'ouvre ou se ferme avec lui (si l'option est active).
         if Instant::now() >= next_watch {
             next_watch = Instant::now() + Duration::from_secs(3);

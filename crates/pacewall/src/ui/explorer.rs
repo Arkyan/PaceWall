@@ -63,6 +63,9 @@ impl State {
     pub fn show(&mut self, ui: &mut Ui, feed: &mut Feed) {
         // La lecture ne se fait que sur cette page, à la cadence choisie.
         if !self.frozen {
+            // Service web du jeu (arrêt au stand, état de la voiture, prévisions) : demandé tant que la page est ouverte.
+            pwcore::carinfo::touch();
+            pwcore::forecast::touch();
             feed.poll(self.grid);
             ui.ctx().request_repaint_after(Duration::from_millis(1000 / self.hz as u64));
         }

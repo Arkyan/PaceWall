@@ -198,6 +198,8 @@ pub struct WState {
     radar_clock: Option<(f64, f64)>,
     /// Instant d'entrée dans la voie des stands (chronomètre de l'arrêt en cours).
     pit_since: Option<f64>,
+    /// Durée d'arrêt retenue (et si elle vient du jeu), figée à l'entrée des stands.
+    pit_stop: Option<(f64, bool)>,
     /// Le widget s'anime en ce moment (drapeau qui flotte) : il doit être redessiné même sans nouvelle donnée.
     animating: bool,
 }
@@ -1411,6 +1413,11 @@ mod gap_tests {
         pit_plan(&scene(4800.0, true, true), &mut st, 100.0, 25.0, 35.0);
         let p = pit_plan(&scene(4900.0, true, true), &mut st, 110.0, 25.0, 35.0);
         assert!((p.ghost.unwrap() - 2375.0).abs() < 1e-6);
+        // Pendant l'arrêt, le jeu n'annonce plus que 5 s : on garde les 40 s annoncées à l'entrée.
+        let mut shrunk = scene(4900.0, true, true).fields;
+        shrunk.iter_mut().find(|f| f.key == "pit.stop_time").unwrap().value = json!(5.0);
+        let p = pit_plan(&Data::new(shrunk), &mut st, 110.0, 25.0, 35.0);
+        assert!((p.stop - 40.0).abs() < 1e-9 && (p.ghost.unwrap() - 2375.0).abs() < 1e-6);
         // Arrêt plus long que prévu : on ne ressort jamais avant d'avoir parcouru le reste de la voie.
         let p = pit_plan(&scene(4900.0, true, true), &mut st, 400.0, 25.0, 35.0);
         assert!((p.ghost.unwrap() - (250.0 - 17.5 * 50.0 + 5000.0)).abs() < 1e-6);
@@ -1621,7 +1628,15 @@ struct PitPlan {
 /// utilisés tant que le circuit n'est pas appris ou que le jeu ne donne pas son estimation.
 fn pit_plan(data: &Data, st: &mut WState, now: f64, lane_opt: f64, stop_opt: f64) -> PitPlan {
     let game_stop = data.num("pit.stop_time").filter(|v| *v > 0.0);
-    let stop = game_stop.unwrap_or(stop_opt);
+    let current = (game_stop.unwrap_or(stop_opt), game_stop.is_some());
+    // Une fois dans la voie, on garde la durée annoncée à l'entrée (comme TinyPedal) : pendant l'arrêt, l'estimation
+    // du jeu fond à mesure que le travail avance, et le point de sortie prévu se mettrait à nous suivre.
+    let (stop, stop_from_game) = if data.flag("pit.in_pits") {
+        *st.pit_stop.get_or_insert(current)
+    } else {
+        st.pit_stop = Some(current);
+        current
+    };
     let length = data.f("session.track_length", 0.0);
     let n = (data.f("session.vehicles", 0.0) as usize).min(104);
     let me = (0..n).find(|i| data.flag(&format!("grid.{i:03}.is_player")));
@@ -1652,9 +1667,9 @@ fn pit_plan(data: &Data, st: &mut WState, now: f64, lane_opt: f64, stop_opt: f64
                 Some(since) => (lane + stop - (now - since)).max((exit - my_dist).rem_euclid(length).min(lane_length) / speed),
                 None => (entry - my_dist).rem_euclid(length) / pace + lane + stop,
             };
-            PitPlan { stop, stop_from_game: game_stop.is_some(), lane, lane_measured: true, loss, ghost: Some((exit - remaining * pace).rem_euclid(length)), pace }
+            PitPlan { stop, stop_from_game, lane, lane_measured: true, loss, ghost: Some((exit - remaining * pace).rem_euclid(length)), pace }
         }
-        _ => PitPlan { stop, stop_from_game: game_stop.is_some(), lane: lane_opt, lane_measured: false, loss: lane_opt + stop, ghost: None, pace: lap_time.filter(|_| length > 100.0).map_or(50.0, |t| length / t) },
+        _ => PitPlan { stop, stop_from_game, lane: lane_opt, lane_measured: false, loss: lane_opt + stop, ghost: None, pace: lap_time.filter(|_| length > 100.0).map_or(50.0, |t| length / t) },
     }
 }
 

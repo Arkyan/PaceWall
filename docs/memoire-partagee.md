@@ -579,15 +579,15 @@ produire le fichier s'ils ne retombent pas sur ces valeurs.
 - `mSectorFlag` qui ne vaut pas 0 au repos (d'où le test « égal à 1 ») ;
 - la version du jeu lue dans `gameVersion` (14200) ;
 - les données courantes affichées par PaceWall en jeu : carburant, pneus, régime, rapport, pédales, classement,
-  chronos, positions sur la carte.
+  chronos, positions sur la carte ;
+- le sens gauche / droite du radar (projection d'une voiture dans le repère d'une autre, formule de la section 7) ;
+- le drapeau bleu (`mFlag == 6`) et le jaune par secteur (`mSectorFlag`, première case = secteur 1) ;
+- les écarts calculés avec `mTimeIntoLap` et `mEstimatedLapTime`, comparés à l'affichage du jeu ;
+- les tours invalidés (`mLastLapTime ≤ 0`), les secteurs et les gommes, dans les replays.
 
 **Repris des en-têtes sans vérification en jeu** — à traiter avec prudence :
 
 - la plage de `mVirtualEnergy` et de `mStateOfCharge` (0 à 1 ou 0 à 100) ;
-- l'ordre des trois cases de `mSectorFlag` (secteur 1 en premier, ou secteur 3 comme `mSector`) ;
-- le signe gauche / droite quand on projette une voiture dans le repère d'une autre ;
-- `mTimeIntoLap` et `mEstimatedLapTime` dans les cas limites (stands, tour de sortie, voiture arrêtée) ;
-- le comportement de `mFlag` pour le drapeau bleu ;
 - l'ordre des zones de `mDentSeverity` ;
 - les unités que l'en-tête ne précise pas (traînée, appuis, hauteurs, couple de direction, pression de turbo,
   débattement du volant) ;

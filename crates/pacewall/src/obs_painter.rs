@@ -15,10 +15,12 @@ struct ObsPainter {
     states: Vec<WState>,
     /// Image de travail de chaque widget, gardée d'un dessin à l'autre (créer une image à chaque fois coûte cher).
     images: Vec<Option<Pixmap>>,
+    /// Ce que voit le joueur sur son overlay (relu 4 fois par seconde) : affichée ou non, types de widgets masqués.
+    follow: (std::time::Instant, bool, Vec<String>),
 }
 
 pub fn factory() -> Box<dyn Painter> {
-    Box::new(ObsPainter { fonts: Fonts::load(), states: Vec::new(), images: Vec::new() })
+    Box::new(ObsPainter { fonts: Fonts::load(), states: Vec::new(), images: Vec::new(), follow: (std::time::Instant::now() - std::time::Duration::from_secs(5), true, Vec::new()) })
 }
 
 /// Table de « dé-prémultiplication » : pour une opacité `a` et une composante prémultipliée `v`, la composante simple.
@@ -50,6 +52,26 @@ impl Painter for ObsPainter {
     fn reset(&mut self) {
         self.states.clear();
         self.images.clear();
+    }
+
+    fn visible(&mut self) -> bool {
+        if self.follow.0.elapsed() >= std::time::Duration::from_millis(250) {
+            let follow = pwcore::settings::bool_of("obs_follow", true);
+            let (visible, hidden) = match (follow, crate::win::overlay_running()) {
+                (false, _) => (true, Vec::new()),
+                // Overlay ouverte : OBS montre exactement ce qu'elle montre.
+                (true, true) => pwcore::overlay_state::read().map_or((true, Vec::new()), |s| (s.visible, s.hidden)),
+                // Overlay fermée alors qu'elle s'ouvre d'habitude avec le jeu : le joueur l'a masquée, OBS aussi.
+                // Si elle n'est pas utilisée du tout (OBS seul), les widgets restent affichés.
+                (true, false) => (!pwcore::settings::bool_of("overlay_auto", true), Vec::new()),
+            };
+            self.follow = (std::time::Instant::now(), visible, hidden);
+        }
+        self.follow.1
+    }
+
+    fn hidden(&self, spec: &WidgetSpec) -> bool {
+        self.follow.2.iter().any(|k| *k == spec.kind)
     }
 
     fn paint(&mut self, index: usize, spec: &WidgetSpec, data: &Data, unit: f32, now: f64) -> Frame {
@@ -239,7 +261,7 @@ mod bench {
     #[test]
     #[ignore]
     fn cost_per_widget() {
-        let mut painter = ObsPainter { fonts: Fonts::load(), states: Vec::new(), images: Vec::new() };
+        let mut painter = ObsPainter { fonts: Fonts::load(), states: Vec::new(), images: Vec::new(), follow: (Instant::now(), true, Vec::new()) };
         for (i, kind) in ["radar", "trackmap", "inputs", "standings", "relative", "fuel", "tyres", "timing", "flags", "session", "pit", "forecast"].iter().enumerate() {
             let mut spec = WidgetSpec::new(kind, kind, 0.0, 0.0);
             if *kind == "radar" {

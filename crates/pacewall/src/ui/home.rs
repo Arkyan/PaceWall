@@ -15,6 +15,7 @@ pub struct State {
     w: f32,
     last: Option<LastSession>,
     checked: Option<Instant>,
+    update: super::update_box::UpdateBox,
 }
 
 struct LastSession {
@@ -46,6 +47,7 @@ impl State {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::NONE.inner_margin(Margin::symmetric(30, 26)).show(ui, |ui| {
                 kit::page_title(ui, "Accueil", "Overlays de course pour Le Mans Ultimate.");
+                self.update.banner(ui);
                 // Les cartes se répartissent sur 1 à 4 colonnes selon la largeur : jamais de débordement.
                 let gap = 14.0;
                 let avail = ui.available_width();

@@ -11,7 +11,9 @@ mod home;
 mod kit;
 mod memory;
 mod settings_page;
+mod setup;
 mod tutorial;
+mod update_box;
 
 use crate::theme::*;
 use crate::win;
@@ -92,6 +94,11 @@ struct App {
     tutorial: tutorial::Tutorial,
     dbg_last: f64,
     sized: u8,
+}
+
+/// Fenêtre d'installation (voir `setup.rs`). `auto` : mise à jour sans question.
+pub fn setup(auto: bool) {
+    setup::run(auto);
 }
 
 pub fn run(page: Option<String>) {

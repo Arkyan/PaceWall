@@ -13,6 +13,7 @@ pub mod demo;
 pub mod flatten;
 pub mod forecast;
 pub mod layout;
+pub mod overlay_state;
 pub mod pitlane;
 #[cfg(windows)]
 pub mod live;

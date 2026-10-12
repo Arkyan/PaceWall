@@ -17,6 +17,7 @@ pub struct State {
     purge: bool,
     confirm_uninstall: bool,
     install_error: Option<String>,
+    update: super::update_box::UpdateBox,
     /// Raccourci en cours de saisie (clé du réglage), message d'aide, et suivi des boutons de volant.
     capturing: Option<&'static str>,
     capture_hint: String,
@@ -25,7 +26,7 @@ pub struct State {
 
 impl Default for State {
     fn default() -> Self {
-        Self { monitors: Vec::new(), desktop_link: true, purge: false, confirm_uninstall: false, install_error: None, capturing: None, capture_hint: String::new(), pads: hotkeys::Pads::default() }
+        Self { monitors: Vec::new(), desktop_link: true, purge: false, confirm_uninstall: false, install_error: None, update: Default::default(), capturing: None, capture_hint: String::new(), pads: hotkeys::Pads::default() }
     }
 }
 
@@ -271,6 +272,11 @@ impl State {
                 let _ = settings::set("obs_server", json!(on));
             }
             ui.label(RichText::new("Désactivé, il ne consomme rien. Activé, il ne lit le jeu que si une source OBS est ouverte.").size(12.5).color(MUTED));
+            let mut follow = settings::bool_of("obs_follow", true);
+            if ui.checkbox(&mut follow, "Les widgets d'OBS suivent mon overlay").changed() {
+                let _ = settings::set("obs_follow", json!(follow));
+            }
+            ui.label(RichText::new("Quand ton overlay se masque (menus, pause, jeu en arrière-plan, raccourci), les widgets disparaissent aussi dans OBS.").size(12.5).color(MUTED));
             ui.add_space(8.0);
             let mut port = settings::int_of("obs_port", 8470);
             ui.horizontal(|ui| {
@@ -308,8 +314,10 @@ impl State {
                 if kit::button(ui, "Revoir le tutoriel").clicked() {
                     super::request_tutorial();
                 }
-                ui.label(RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION"))).size(12.5).color(MUTED));
+                ui.label(RichText::new(format!("Version {}", crate::update::version_label())).size(12.5).color(MUTED));
             });
+            ui.add_space(10.0);
+            self.update.settings(ui);
             ui.add_space(10.0);
             self.installation(ui);
         });

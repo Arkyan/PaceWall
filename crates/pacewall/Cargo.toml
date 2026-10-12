@@ -1,6 +1,6 @@
 [package]
 name = "pacewall"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "PaceWall : overlays de course natifs pour Le Mans Ultimate"
 
@@ -19,6 +19,7 @@ global-hotkey = "0.8"
 png = "0.17"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 winreg = "0.56"
+sha2 = "0.10"
 windows = { version = "0.58", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
@@ -27,6 +28,7 @@ windows = { version = "0.58", features = [
   "Win32_Media_Audio",
   "Win32_Media_Multimedia",
   "Win32_System_Com",
+  "Win32_System_Com_Urlmon",
   "Win32_Storage_FileSystem",
   "Win32_UI_Shell",
   "Win32_UI_Controls_Dialogs",
@@ -37,3 +39,6 @@ windows = { version = "0.58", features = [
   "Win32_UI_HiDpi",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+[build-dependencies]
+winresource = "0.1"

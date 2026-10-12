@@ -2,6 +2,10 @@
 resolver = "2"
 members = ["crates/lmu", "crates/collector", "crates/fakegame", "crates/pwcore", "crates/server", "crates/pacewall"]
 
+# La version de PaceWall, pour tous les crates. Modifiée par tools/release.ps1.
+[workspace.package]
+version = "0.9.0"
+
 [profile.release]
 opt-level = "s"
 lto = true

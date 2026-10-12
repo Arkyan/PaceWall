@@ -1,6 +1,6 @@
 [package]
 name = "pwcore"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "Cœur de PaceWall : lecture du jeu, stratégie, historique, réglages, mises en page"
 

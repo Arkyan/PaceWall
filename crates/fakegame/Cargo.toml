@@ -1,6 +1,6 @@
 [package]
 name = "fakegame"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "Faux Le Mans Ultimate : crée LMU_Data avec des valeurs qui bougent, pour développer sans le jeu"
 

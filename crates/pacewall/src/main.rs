@@ -22,12 +22,15 @@ mod speech;
 mod ui;
 mod voice_clips;
 mod theme;
+mod update;
 mod widgets;
 mod win;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let has = |f: &str| args.iter().any(|a| a == f);
+    // Le fichier d'installation est ce même programme sous un autre nom (PaceWall-Setup-x.y.z.exe).
+    let named_setup = std::env::current_exe().ok().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_lowercase())).is_some_and(|s| s.contains("setup"));
     if has("--install") {
         // Installation sans interface : `pacewall.exe --install [--desktop] [--autostart]`.
         if let Ok(exe) = install::install(install::Options { desktop_shortcut: has("--desktop"), autostart: has("--autostart") }) {
@@ -36,6 +39,11 @@ fn main() {
     } else if has("--uninstall") {
         // Désinstallation : `pacewall.exe --uninstall [--purge]` (--purge supprime aussi les données).
         install::uninstall(has("--purge"));
+    } else if has("--update") {
+        // Lancé par PaceWall après le téléchargement d'une nouvelle version : installe sans question et relance.
+        ui::setup(true);
+    } else if has("--setup") || (named_setup && args.is_empty()) {
+        ui::setup(false);
     } else if has("--simulate") {
         // Faux jeu intégré : le verrou nommé dit au reste de PaceWall qu'une simulation tourne (voir Réglages).
         let log = std::env::temp_dir().join("pw-simulation.log");

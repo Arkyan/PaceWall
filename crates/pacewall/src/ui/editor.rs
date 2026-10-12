@@ -139,6 +139,20 @@ impl State {
                     this.selected = None;
                 }
             }
+            // Copie en un clic vers l'autre cible, enregistrée tout de suite.
+            let other = if this.target == "player" { "obs" } else { "player" };
+            let label = format!("COPIER VERS {}", target_label(other).to_uppercase());
+            if ui.button(label).on_hover_text("Remplace la mise en page de l'autre cible par celle-ci (positions, tailles et réglages), et enregistre").clicked() {
+                let copy = this.cur().clone();
+                this.layouts.targets.insert(other.into(), copy);
+                this.status = match layout::save(&this.layouts) {
+                    Ok(()) => {
+                        this.dirty = false;
+                        format!("Copié vers {} et enregistré", target_label(other))
+                    }
+                    Err(e) => format!("Échec : {e}"),
+                };
+            }
             ui.add_space(14.0);
             ui.label(RichText::new("DONNÉES").size(11.0).color(MUTED));
             ui.selectable_value(&mut this.live, false, "DÉMO");
@@ -233,14 +247,6 @@ impl State {
             if ui.selectable_label(self.selected.as_deref() == Some(&id), label).clicked() {
                 self.selected = Some(id);
             }
-        }
-        ui.add_space(14.0);
-        let other = if self.target == "player" { "obs" } else { "player" };
-        if kit::button(ui, &format!("Copier vers {}", target_label(other))).clicked() {
-            let copy = self.cur().clone();
-            self.layouts.targets.insert(other.into(), copy);
-            self.dirty = true;
-            self.status = format!("Mise en page copiée vers {}", target_label(other));
         }
         ui.add_space(10.0);
         let hint = if self.target == "obs" {

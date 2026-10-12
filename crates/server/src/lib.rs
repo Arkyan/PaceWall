@@ -53,6 +53,14 @@ pub trait Painter {
     fn animated(&self, index: usize, spec: &WidgetSpec) -> bool;
     /// La mise en page a changé : oublier l'état des widgets.
     fn reset(&mut self);
+    /// Faut-il afficher les widgets en ce moment ? (OBS suit l'overlay du joueur : menus, pause, raccourci.)
+    fn visible(&mut self) -> bool {
+        true
+    }
+    /// Ce widget est masqué (raccourci du joueur).
+    fn hidden(&self, _spec: &WidgetSpec) -> bool {
+        false
+    }
 }
 
 /// Fabrique de `Painter` : appelée dans le fil d'exécution de chaque page ouverte.
@@ -351,9 +359,9 @@ fn render(shared: Arc<Shared>, id: u64, request: FramesRequest, factory: Painter
             version += 1;
         }
         let now = start.elapsed().as_secs_f64();
-        let (visible, data) = if request.demo { (true, Arc::new(pwcore::demo::data(now))) } else { (snap.game, snap.data.clone()) };
+        let (visible, data) = if request.demo { (true, Arc::new(pwcore::demo::data(now))) } else { (snap.game && painter.visible(), snap.data.clone()) };
         if !visible {
-            // Sans jeu, la page reste vide (OBS reste propre).
+            // Sans jeu, ou quand le joueur ne voit pas son overlay, la page reste vide (OBS reste propre).
             if shown {
                 shown = false;
                 for s in &mut state {
@@ -369,6 +377,15 @@ fn render(shared: Arc<Shared>, id: u64, request: FramesRequest, factory: Painter
         let tick = Instant::now();
         let mut wait = Duration::from_millis(200);
         for (i, spec) in widgets.iter().enumerate() {
+            // Widget masqué par un raccourci du joueur : une image vide, envoyée une fois.
+            if !request.demo && painter.hidden(spec) {
+                let empty = Frame { w: 0, h: 0, rgba: Vec::new() };
+                let print = fingerprint(&empty);
+                if state[i].2 != Some(print) && out.try_send(frame_message(i, spec, &empty)).is_ok() {
+                    state[i] = (far, 0, Some(print));
+                }
+                continue;
+            }
             let period = Duration::from_secs_f32(1.0 / painter.hz(i, spec).clamp(0.2, cap));
             let since = tick.duration_since(state[i].0);
             let moving = request.demo || painter.animated(i, spec);

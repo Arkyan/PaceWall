@@ -36,6 +36,23 @@ LMU ──► pwcore::live (mémoire partagée) ──┬─► overlay native (
 - la désinstallation (Réglages, « Applications installées » ou `pacewall.exe --uninstall [--purge]`) retire tout ; `--purge`
   supprime aussi l'historique, les mises en page et les réglages.
 
+## Versions et mises à jour
+
+- **Fichier d'installation** : `PaceWall-Setup-x.y.z.exe` est le programme lui-même sous un autre nom. Lancé ainsi, il ouvre
+  une fenêtre d'installation : première installation, mise à jour d'une version en place (réglages et données conservés),
+  ou « Essayer sans installer ».
+- **Numéro de version** : un seul pour tout le projet, dans `Cargo.toml` (`[workspace.package]`). Il est inscrit dans le
+  programme (propriétés du fichier, « Applications installées », Réglages) avec la révision du code.
+- **Mises à jour** : PaceWall interroge le dépôt GitHub des versions (constante `REPO` de `crates/pacewall/src/update.rs`)
+  au démarrage puis deux fois par jour, annonce une nouvelle version sur l'accueil et dans le menu de l'icône, et l'installe
+  en un clic. Le fichier téléchargé n'est lancé que si son empreinte SHA-256 est celle annoncée. Réglage `update_check`.
+- **Publier une version** : décrire la version dans `CHANGELOG.md` (section `## x.y.z`), puis
+  `powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Version x.y.z`. Le script teste, compile, fabrique
+  `dist\PaceWall-Setup-x.y.z.exe` et `dist\latest.json`, commite et pose l'étiquette `vx.y.z`. Il reste à pousser et à
+  joindre les deux fichiers à la version sur GitHub.
+- Le programme n'est pas signé : au premier lancement, Windows SmartScreen affiche « Windows a protégé votre ordinateur »
+  (Informations complémentaires > Exécuter quand même). Seul un certificat de signature payant supprime cet écran.
+
 ## Utilisation
 
 1. Lancer `pacewall.exe` : l'icône apparaît dans la zone de notification, clic gauche pour ouvrir la fenêtre.

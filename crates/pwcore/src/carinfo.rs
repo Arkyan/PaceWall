@@ -20,6 +20,8 @@ pub struct Info {
     /// Durée de l'arrêt (secondes), et la part due aux réparations.
     pub stop_time: Option<f64>,
     pub repair_time: Option<f64>,
+    /// Tous les chiffres de l'estimation du jeu, tels qu'il les nomme (carburant, pneus, réparations, total…).
+    pub estimate: Vec<(String, f64)>,
     /// Dégâts aérodynamiques, de 0 (intacte) à 1.
     pub aero: Option<f64>,
     /// Dégâts de chaque suspension, de 0 à 1.
@@ -38,7 +40,7 @@ struct State {
     brake_max: [f64; 4],
 }
 
-static STATE: Mutex<State> = Mutex::new(State { touched: None, started: false, info: Info { stop_time: None, repair_time: None, aero: None, suspension: None, brakes: None, menu: Vec::new() }, brake_max: [0.0; 4] });
+static STATE: Mutex<State> = Mutex::new(State { touched: None, started: false, info: Info { stop_time: None, repair_time: None, estimate: Vec::new(), aero: None, suspension: None, brakes: None, menu: Vec::new() }, brake_max: [0.0; 4] });
 
 /// À appeler par quiconque affiche ces données : tant qu'on l'appelle, elles sont tenues à jour.
 pub fn touch() {
@@ -85,6 +87,9 @@ fn parse_pitstop(text: &str, info: &mut Info) {
     let Ok(json) = serde_json::from_str::<Value>(text) else { return };
     info.stop_time = json.get("total").and_then(Value::as_f64).filter(|v| *v >= 0.0);
     info.repair_time = json.get("damage").and_then(Value::as_f64).filter(|v| *v >= 0.0);
+    if let Some(map) = json.as_object() {
+        info.estimate = map.iter().filter_map(|(k, v)| Some((k.clone(), v.as_f64()?))).collect();
+    }
 }
 
 /// `{ "wearables": { "body": { "aero": 0.1 }, "brakes": [m, m, m, m], "suspension": [0, 0.2, 0, 0] }, … }`
@@ -152,6 +157,10 @@ pub fn build(info: &Info, brake_max: &[f64; 4]) -> Vec<Field> {
             }
         }
     }
+    // Détail brut de l'estimation, visible dans « Données en direct » : sert à comparer avec ce qu'affiche le jeu.
+    for (name, v) in info.estimate.iter().take(16) {
+        out.push(Field { key: format!("pit.estimate.{name}"), unit: "s", label: "Estimation du jeu (brut)", value: json!(v) });
+    }
     out.push(Field { key: "pit.menu.count".into(), unit: "", label: "Lignes du menu des stands", value: json!(info.menu.len()) });
     for (i, (name, text)) in info.menu.iter().enumerate().take(16) {
         out.push(Field { key: format!("pit.menu.{i}.name"), unit: "", label: "Menu des stands", value: json!(name) });
@@ -173,6 +182,7 @@ mod tests {
         assert_eq!((info.stop_time, info.repair_time, info.aero), (Some(38.5), Some(12.0), Some(0.25)));
         let fields = build(&info, &[0.030, 0.030, 0.030, 0.0]);
         let get = |k: &str| fields.iter().find(|f| f.key == k).and_then(|f| f.value.as_f64());
+        assert_eq!(get("pit.estimate.fuel"), Some(20.0));
         assert_eq!(get("pit.stop_time"), Some(38.5));
         assert_eq!(get("car.aero_damage"), Some(25.0));
         assert_eq!(get("car.suspension.fr"), Some(40.0));
