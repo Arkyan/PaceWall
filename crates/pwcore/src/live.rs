@@ -157,6 +157,8 @@ impl Live {
             // Prévisions météo : ajoutées seulement si un widget ou une alerte les a demandées.
             let forecast = crate::forecast::fields(&fields);
             fields.extend(forecast);
+            // État de la voiture et durée d'arrêt (service web du jeu) : mêmes conditions.
+            fields.extend(crate::carinfo::fields());
             return Update::Data(Data::new(fields));
         }
         // Plus rien ne bouge : jeu en pause (on garde la zone et les dernières données) ou jeu fermé (on la lâche).

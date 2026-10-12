@@ -10,7 +10,7 @@ use pwcore::trackmap::{self, TrackMap};
 use pwcore::Data;
 use std::collections::VecDeque;
 
-pub const KINDS: [(&str, &str); 12] = [
+pub const KINDS: [(&str, &str); 13] = [
     ("fuel", "Carburant et énergie"),
     ("tyres", "Pneus"),
     ("timing", "Chrono et écarts"),
@@ -23,6 +23,7 @@ pub const KINDS: [(&str, &str); 12] = [
     ("pit", "Arrêt au stand"),
     ("radar", "Radar de proximité"),
     ("forecast", "Prévisions météo"),
+    ("damage", "État de la voiture"),
 ];
 
 pub fn name(kind: &str) -> &'static str {
@@ -100,7 +101,11 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "behind", label: "Voitures derrière", kind: Num { min: 0.0, max: 6.0, step: 1.0, def: 3.0 } },
             Opt { id: "place", label: "Place affichée", kind: Choice(&[("class", "En classe"), ("overall", "Au général")], "class") },
         ],
-        "pit" => &[Opt { id: "loss", label: "Temps perdu par un arrêt (s)", kind: Num { min: 20.0, max: 150.0, step: 1.0, def: 60.0 } }],
+        "pit" => &[
+            Opt { id: "lane", label: "Temps perdu dans la voie des stands (s)", kind: Num { min: 5.0, max: 90.0, step: 1.0, def: 25.0 } },
+            Opt { id: "stop", label: "Durée d'arrêt si le jeu ne la donne pas (s)", kind: Num { min: 0.0, max: 120.0, step: 1.0, def: 35.0 } },
+        ],
+        "damage" => &[Opt { id: "brakes", label: "Usure des freins", kind: Bool(true) }],
         "radar" => &[
             Opt { id: "range", label: "Rayon affiché (m)", kind: Num { min: 8.0, max: 40.0, step: 1.0, def: 20.0 } },
             Opt { id: "autohide", label: "Masquer quand personne n'est proche", kind: Bool(true) },
@@ -213,6 +218,7 @@ pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, 
         "pit" => pit(d, spec, data),
         "radar" => radar(d, spec, data, st, now),
         "forecast" => forecast(d, spec, data),
+        "damage" => damage(d, spec, data),
         _ => (0.0, 0.0),
     }
 }
@@ -1536,9 +1542,15 @@ fn relative(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
 
 fn pit(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     let w = 300.0;
-    let loss = spec.num("loss", 60.0);
+    // Temps perdu = l'arrêt lui-même (estimé par le jeu : carburant, pneus, réparations) + la traversée de la voie
+    // des stands. Si le jeu ne donne pas son estimation, on prend la durée réglée sur le widget.
+    pwcore::carinfo::touch();
+    let lane = spec.num("lane", 25.0);
+    let game_stop = data.num("pit.stop_time").filter(|v| *v > 0.0);
+    let stop = game_stop.unwrap_or_else(|| spec.num("stop", 35.0));
+    let loss = lane + stop;
     let hdr = if d.titles() { 18.0 } else { 0.0 };
-    let h = hdr + 118.0;
+    let h = hdr + 138.0;
     d.card(w, h);
     if d.titles() {
         d.label(16.0, 10.0, "Arrêt au stand", MUTED);
@@ -1596,6 +1608,14 @@ fn pit(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     };
     line(y0 + 48.0, "Devant", front);
     line(y0 + 70.0, "Derrière", back);
+    // D'où vient le temps perdu : estimation du jeu (avec la part des réparations) ou réglage du widget.
+    let repair = data.num("pit.repair_time").filter(|v| *v >= 1.0);
+    let detail = match (game_stop, repair) {
+        (Some(s), Some(r)) => format!("Arrêt {s:.0} s · répar. {r:.0} s · voie {lane:.0} s"),
+        (Some(s), None) => format!("Arrêt {s:.0} s · voie {lane:.0} s"),
+        (None, _) => format!("Arrêt {stop:.0} s (réglage) · voie {lane:.0} s"),
+    };
+    d.text(16.0, y0 + 96.0, &detail, 11.5, MUTED, Font::Num, HAlign::Left);
     (w, h)
 }
 
@@ -1894,6 +1914,101 @@ fn forecast(d: &D, _spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         if past {
             // Étape passée : un voile sombre l'estompe.
             d.fill(cx - cell / 2.0 + 2.0, y - 2.0, cell - 4.0, 90.0, Color32::from_rgba_unmultiplied(8, 10, 14, 140));
+        }
+    }
+    (w, h)
+}
+
+/* ---------- État de la voiture ---------- */
+
+/// État de la voiture vue de dessus : carrosserie par zones, roues et suspensions, dégâts aérodynamiques, temps de
+/// réparation et freins. Les zones viennent de la mémoire partagée ; le reste du service web du jeu.
+fn damage(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
+    pwcore::carinfo::touch();
+    let brakes = spec.flag("brakes", true);
+    let w = 262.0;
+    let hdr = if d.titles() { 18.0 } else { 0.0 };
+    let h = hdr + 152.0;
+    d.card(w, h);
+    if d.titles() {
+        d.label(16.0, 10.0, "État de la voiture", MUTED);
+    }
+    let ok = Color32::from_rgb(58, 66, 80);
+    let detached = Color32::from_rgb(214, 104, 255);
+
+    // Schéma : une grille de 3 × 3 dont le centre est l'habitacle ; les huit autres cases sont les zones de carrosserie.
+    let (sx, sy) = (34.0, hdr + 14.0);
+    let (cw, ch, gap) = (26.0, 38.0, 3.0);
+    let cell = |i: usize| (sx + (i % 3) as f32 * (cw + gap), sy + (i / 3) as f32 * (ch + gap));
+    let mut zone = 0;
+    for i in 0..9 {
+        let (x, y) = cell(i);
+        if i == 4 {
+            d.fill(x, y, cw, ch, Color32::from_rgb(20, 24, 31));
+            continue;
+        }
+        let color = match data.f(&format!("car.dent.{zone}"), 0.0) as i64 {
+            0 => ok,
+            1 => WARN,
+            2 => BAD,
+            _ => detached,
+        };
+        d.fill(x, y, cw, ch, color);
+        zone += 1;
+    }
+    // Roues : la couleur dit l'état de la suspension ; une roue détachée est violette, un pneu crevé a un liseré rouge.
+    let body_w = 3.0 * cw + 2.0 * gap;
+    for (i, n) in ["fl", "fr", "rl", "rr"].iter().enumerate() {
+        let x = if i % 2 == 0 { sx - 12.0 } else { sx + body_w + 5.0 };
+        let y = if i < 2 { sy + 4.0 } else { sy + 2.0 * (ch + gap) + 4.0 };
+        let susp = data.f(&format!("car.suspension.{n}"), 0.0);
+        let color = if data.flag(&format!("tyre.{n}.detached")) {
+            detached
+        } else if susp >= 60.0 {
+            BAD
+        } else if susp >= 20.0 {
+            WARN
+        } else if susp >= 2.0 {
+            Color32::from_rgb(214, 190, 96)
+        } else {
+            ok
+        };
+        d.fill(x, y, 7.0, 30.0, color);
+        if data.flag(&format!("tyre.{n}.flat")) {
+            d.fill(x - 2.0, y - 2.0, 11.0, 2.0, BAD);
+            d.fill(x - 2.0, y + 30.0, 11.0, 2.0, BAD);
+        }
+    }
+
+    // Colonne de droite : chiffres.
+    let x = 156.0;
+    let mut y = hdr + 12.0;
+    let mut row = |label: &str, value: String, color: Color32| {
+        d.label(x, y + 3.0, label, MUTED);
+        d.text(w - 16.0, y, &value, 14.0, color, Font::Num, HAlign::Right);
+        y += 24.0;
+    };
+    match data.num("car.aero_damage") {
+        // On affiche ce qu'il reste de l'aérodynamique : 100 % = intacte.
+        Some(dmg) => row("Aéro", format!("{:.0} %", 100.0 - dmg), if dmg >= 25.0 { BAD } else if dmg >= 5.0 { WARN } else { OK }),
+        None => row("Aéro", "—".into(), MUTED),
+    }
+    match data.num("pit.repair_time") {
+        Some(t) if t >= 1.0 => row("Répar.", format!("{t:.0} s"), WARN),
+        Some(_) => row("Répar.", "aucune".into(), MUTED),
+        None => row("Répar.", "—".into(), MUTED),
+    }
+    if brakes {
+        y += 4.0;
+        d.label(x, y, "Freins", MUTED);
+        y += 16.0;
+        for (i, n) in ["fl", "fr", "rl", "rr"].iter().enumerate() {
+            let (bx, by) = (if i % 2 == 0 { x + 42.0 } else { w - 16.0 }, y + (i / 2) as f32 * 20.0);
+            let (text, color) = match data.num(&format!("car.brake_left.{n}")) {
+                Some(p) => (format!("{p:.0} %"), if p < 30.0 { BAD } else if p < 50.0 { WARN } else { TEXT }),
+                None => ("—".to_string(), MUTED),
+            };
+            d.text(bx, by, &text, 13.0, color, Font::Num, HAlign::Right);
         }
     }
     (w, h)

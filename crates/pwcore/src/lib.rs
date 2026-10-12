@@ -6,6 +6,7 @@
 //! - `recorder` / `db` : historique des tours (SQLite).
 //! - `settings` / `layout` : réglages et mises en page des overlays.
 
+pub mod carinfo;
 pub mod data;
 pub mod db;
 pub mod demo;

@@ -57,6 +57,10 @@ Aussi : **relatif** (voitures autour de soi sur la piste, écart en secondes, ro
 
 Le widget **Prévisions météo** affiche les cinq étapes de la session (début, 25 %, 50 %, 75 %, fin) : ciel, risque de pluie, température et délai avant chaque étape. Ces prévisions ne sont pas dans la mémoire partagée : elles viennent du service web local du jeu (`http://127.0.0.1:6397/rest/sessions/weather`, le même que lit TinyPedal ; port réglable par `lmu_api_port`). PaceWall ne l'interroge que si le widget ou l'alerte « pluie prévue » sert, une fois toutes les 30 secondes. Pour essayer sans le jeu : `PACEWALL_FORECAST_FILE=<fichier json>`.
 
+## État de la voiture et durée d'arrêt
+
+Le même service web du jeu donne la **durée de l'arrêt au stand** (`/rest/strategy/pitstop-estimate` : carburant, pneus, réparations) et l'**état de la voiture** (`/rest/garage/UIScreen/RepairAndRefuel` : dégâts aérodynamiques, suspensions, épaisseur des freins). Le widget **Arrêt au stand** s'en sert pour calculer la place de sortie (arrêt estimé par le jeu + traversée de la voie des stands, réglable) ; le widget **État de la voiture** montre la carrosserie par zones (mémoire partagée), les roues et suspensions, l'aérodynamique restante, le temps de réparation et les freins. Interrogation toutes les 2 secondes, seulement si un de ces widgets est affiché.
+
 ## Réglages communs
 
 Onglet Réglages : **unités** (km/h ou mph, °C ou °F, kPa / bar / psi, litres ou gallons), **seuils de couleur** (carburant, état et température des pneus), **couleur d'accent** de la fenêtre, et **raccourcis** : une touche (« Ctrl+Alt+O ») ou un bouton de volant (« Joy1:B7 ») pour afficher l'overlay, couper la voix, ou masquer et réafficher un type de widget en roulant. Les touches sont des raccourcis globaux de Windows ; les boutons sont lus vingt fois par seconde, seulement s'ils servent.

@@ -20,6 +20,7 @@ pub const WIDGET_ACTIONS: &[(&str, &str)] = &[
     ("hk_pit", "Arrêt au stand"),
     ("hk_radar", "Radar de proximité"),
     ("hk_forecast", "Prévisions météo"),
+    ("hk_damage", "État de la voiture"),
 ];
 
 #[derive(Clone, Copy, PartialEq, Debug)]

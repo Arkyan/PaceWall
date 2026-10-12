@@ -28,6 +28,17 @@ pub fn data(t: f64) -> Data {
     put("session.max_laps", json!(0));
     put("session.track_length", json!(4000.0));
     put("demo.map", json!(true));
+    // État de la voiture de démonstration : avant droit touché, une suspension abîmée.
+    for (i, v) in [0, 1, 2, 0, 1, 0, 0, 0].iter().enumerate() {
+        put(&format!("car.dent.{i}"), json!(v));
+    }
+    put("car.aero_damage", json!(14.0));
+    put("pit.stop_time", json!(41.0));
+    put("pit.repair_time", json!(12.0));
+    for (n, susp, brake) in [("fl", 0.0, 82.0), ("fr", 35.0, 80.0), ("rl", 0.0, 91.0), ("rr", 0.0, 90.0)] {
+        put(&format!("car.suspension.{n}"), json!(susp));
+        put(&format!("car.brake_left.{n}"), json!(brake));
+    }
     // Prévisions de démonstration : la pluie arrive à mi-course.
     put("forecast.count", json!(5));
     for (i, (sky, temp, rain, minutes)) in [(1, 21.0, 5.0, -40.0), (3, 20.0, 25.0, 32.0), (6, 18.0, 65.0, 104.0), (8, 17.0, 90.0, 176.0), (2, 19.0, 15.0, 248.0)].iter().enumerate() {

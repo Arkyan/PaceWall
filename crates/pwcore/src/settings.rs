@@ -46,7 +46,7 @@ fn defaults() -> Map<String, Value> {
         "hk_overlay": "Ctrl+Alt+O",    // afficher / fermer l'overlay
         "hk_voice": "",                // couper / remettre la voix
         "hk_fuel": "", "hk_tyres": "", "hk_timing": "", "hk_inputs": "", "hk_standings": "", "hk_session": "",
-        "hk_trackmap": "", "hk_flags": "", "hk_relative": "", "hk_pit": "", "hk_radar": "", "hk_forecast": "",
+        "hk_trackmap": "", "hk_flags": "", "hk_relative": "", "hk_pit": "", "hk_radar": "", "hk_forecast": "", "hk_damage": "",
     }) else { unreachable!() };
     m
 }

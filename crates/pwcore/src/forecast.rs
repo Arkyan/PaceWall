@@ -67,12 +67,16 @@ fn fetch() -> Option<String> {
     if let Ok(path) = std::env::var("PACEWALL_FORECAST_FILE") {
         return std::fs::read_to_string(path).ok();
     }
-    let port = crate::settings::int_of("lmu_api_port", 6397).clamp(1, 65535) as u16;
-    http_get(port, "/rest/sessions/weather")
+    http_get(port(), "/rest/sessions/weather")
+}
+
+/// Port du service web local du jeu (réglage `lmu_api_port`).
+pub(crate) fn port() -> u16 {
+    crate::settings::int_of("lmu_api_port", 6397).clamp(1, 65535) as u16
 }
 
 /// Requête HTTP minimale vers la machine locale (aucune dépendance) : délais courts, la réponse entière ou rien.
-fn http_get(port: u16, path: &str) -> Option<String> {
+pub(crate) fn http_get(port: u16, path: &str) -> Option<String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(400)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;

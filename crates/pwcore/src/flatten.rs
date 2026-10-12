@@ -170,7 +170,17 @@ fn player(o: &mut Out, s: &VehicleScoring, t: &VehicleTelemetry) {
         o.num(format!("tyre.{n}.wear"), "%", "État du pneu (100 = neuf)", w.mWear * 100.0);
         o.num(format!("tyre.{n}.grip_slide"), "%", "Glissement", w.mGripFract * 100.0);
         o.flag(format!("tyre.{n}.flat"), "Crevé", w.mFlat != 0);
+        o.flag(format!("tyre.{n}.detached"), "Roue détachée", w.mDetached != 0);
         o.num(format!("brake.{n}.temp"), "°C", "Frein", w.mBrakeTemp);
+    }
+
+    // Carrosserie : huit zones autour de la voiture, dans l'ordre de lecture (avant gauche, avant, avant droit, gauche,
+    // droite, arrière gauche, arrière, arrière droit). 0 intacte, 1 abîmée, 2 très abîmée, 3 détachée (l'aileron
+    // arrière est la seule pièce qui se détache dans LMU). Même correspondance que TinyPedal.
+    let dents = t.mDentSeverity;
+    let rear = if t.mDetached != 0 { 3 } else { dents[4] };
+    for (i, v) in [dents[1], dents[0], dents[7], dents[2], dents[6], dents[3], rear, dents[5]].iter().enumerate() {
+        o.int(format!("car.dent.{i}"), "Carrosserie", *v as i64);
     }
 
     o.int("position.place", "Position", s.mPlace as i64);
