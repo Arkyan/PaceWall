@@ -20,6 +20,10 @@ pub struct UpdateBox {
     download: Option<Receiver<Result<PathBuf, String>>>,
     check: Option<Receiver<Result<Option<Release>, String>>>,
     message: String,
+    /// La recherche faite à l'ouverture de la fenêtre a déjà été lancée.
+    asked: bool,
+    /// Recherche silencieuse (à l'ouverture) : pas de message « à jour » ni d'erreur si elle échoue.
+    quiet: bool,
 }
 
 impl UpdateBox {
@@ -31,12 +35,13 @@ impl UpdateBox {
         if let Some(rx) = &self.check {
             match rx.try_recv() {
                 Ok(Ok(found)) => {
-                    self.message = if found.is_some() { String::new() } else { "PaceWall est à jour.".into() };
+                    self.message = if found.is_some() || self.quiet { String::new() } else { "PaceWall est à jour.".into() };
                     self.release = found;
                     self.check = None;
                 }
                 Ok(Err(e)) => {
-                    self.message = format!("Recherche impossible : {e}");
+                    // Sans connexion, la recherche automatique ne dit rien : seule une recherche demandée affiche l'erreur.
+                    self.message = if self.quiet { String::new() } else { format!("Recherche impossible : {e}") };
                     self.check = None;
                 }
                 Err(TryRecvError::Disconnected) => self.check = None,
@@ -77,8 +82,27 @@ impl UpdateBox {
         }
     }
 
+    fn search(&mut self, quiet: bool) {
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(update::check());
+        });
+        self.check = Some(rx);
+        self.quiet = quiet;
+        self.message.clear();
+    }
+
     /// Bandeau de l'accueil : rien tant qu'il n'y a pas de mise à jour.
     pub fn banner(&mut self, ui: &mut Ui) {
+        // À l'ouverture de la fenêtre, on cherche tout de suite si la dernière recherche date de plus d'une demi-heure :
+        // la mise à jour est proposée dès l'accueil, sans attendre le passage du processus de fond.
+        if !self.asked {
+            self.asked = true;
+            let recent = update::last_check().and_then(|t| SystemTime::now().duration_since(t).ok()).is_some_and(|d| d < Duration::from_secs(1800));
+            if update::configured() && settings::bool_of("update_check", true) && !recent {
+                self.search(true);
+            }
+        }
         self.refresh(ui);
         let Some(release) = self.release.clone() else { return };
         kit::panel_frame().show(ui, |ui| {
@@ -122,12 +146,7 @@ impl UpdateBox {
                 ui.spinner();
                 ui.label(RichText::new("Recherche…").color(MUTED));
             } else if kit::button(ui, "Chercher maintenant").clicked() {
-                let (tx, rx) = channel();
-                std::thread::spawn(move || {
-                    let _ = tx.send(update::check());
-                });
-                self.check = Some(rx);
-                self.message.clear();
+                self.search(false);
             }
         });
         if !self.message.is_empty() {

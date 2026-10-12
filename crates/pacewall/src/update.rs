@@ -138,7 +138,7 @@ pub fn apply(setup: &Path) -> Result<(), String> {
 
 /// Fil de fond du processus principal : une recherche peu après le démarrage, puis deux fois par jour.
 pub fn watch() {
-    std::thread::sleep(Duration::from_secs(20));
+    std::thread::sleep(Duration::from_secs(5));
     loop {
         if configured() && settings::bool_of("update_check", true) {
             let _ = check();
