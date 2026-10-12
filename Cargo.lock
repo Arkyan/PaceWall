@@ -410,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "collector"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "lmu",
 ]
@@ -807,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "fakegame"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "lmu",
  "windows",
@@ -1749,7 +1749,7 @@ checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 
 [[package]]
 name = "lmu"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "windows",
 ]
@@ -2250,7 +2250,7 @@ dependencies = [
 
 [[package]]
 name = "pacewall"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "ab_glyph",
  "eframe",
@@ -2504,7 +2504,7 @@ checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 
 [[package]]
 name = "pwcore"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "lmu",
  "miniz_oxide 0.8.9",
@@ -2785,7 +2785,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "axum",
  "pwcore",

@@ -4,7 +4,7 @@ members = ["crates/lmu", "crates/collector", "crates/fakegame", "crates/pwcore",
 
 # La version de PaceWall, pour tous les crates. Modifiée par tools/release.ps1.
 [workspace.package]
-version = "0.9.1"
+version = "0.9.2"
 
 [profile.release]
 opt-level = "s"
