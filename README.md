@@ -138,6 +138,7 @@ Variables utiles : `PACEWALL_DB` (dossier des fichiers de données, ex. `.dev/hi
 
 ## Données
 
+- Mémoire partagée du jeu, champ par champ : [docs/memoire-partagee.md](docs/memoire-partagee.md).
 - Sources, champs et pièges : [docs/donnees.md](docs/donnees.md).
 - Fichiers dans `%APPDATA%\PaceWall\` : `history.db` (tours), `layouts.json` (mises en page), `settings.json` (réglages).
 - **Stratégie** (`strategy.*`) : consommation moyenne des 3 derniers tours propres, tours restants, quantité à ajouter.

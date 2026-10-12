@@ -9,6 +9,7 @@ mod history;
 mod replay;
 mod home;
 mod kit;
+mod memory;
 mod settings_page;
 mod tutorial;
 
@@ -24,6 +25,7 @@ pub enum Page {
     Home,
     Overlays,
     Data,
+    Memory,
     History,
     Alerts,
     Settings,
@@ -34,6 +36,7 @@ impl Page {
         match s {
             "overlays" => Page::Overlays,
             "data" => Page::Data,
+            "memory" => Page::Memory,
             "history" => Page::History,
             "alerts" => Page::Alerts,
             "settings" => Page::Settings,
@@ -82,6 +85,7 @@ struct App {
     home: home::State,
     editor: editor::State,
     explorer: explorer::State,
+    memory: memory::State,
     history: history::State,
     settings: settings_page::State,
     alerts: alerts_page::State,
@@ -146,6 +150,7 @@ impl App {
             home: home::State::default(),
             editor: editor::State::default(),
             explorer: explorer::State::default(),
+            memory: memory::State::default(),
             history: history::State::default(),
             settings: settings_page::State::default(),
             alerts: alerts_page::State::default(),
@@ -194,6 +199,7 @@ impl App {
             (Page::Home, "Accueil"),
             (Page::Overlays, "Overlays"),
             (Page::Data, "Données en direct"),
+            (Page::Memory, "Mémoire du jeu"),
             (Page::History, "Historique"),
             (Page::Alerts, "Alertes"),
             (Page::Settings, "Réglages"),
@@ -269,6 +275,14 @@ fn icon(p: &egui::Painter, r: Rect, page: Page, color: Color32) {
             line(&[(3.0, 4.0), (3.0, 20.0), (21.0, 20.0)]);
             line(&[(7.0, 15.0), (11.0, 10.0), (14.0, 13.0), (19.0, 6.0)]);
         }
+        Page::Memory => {
+            // Barrette de mémoire : un boîtier et ses broches.
+            line(&[(4.0, 7.0), (20.0, 7.0), (20.0, 17.0), (4.0, 17.0), (4.0, 7.0)]);
+            for x in [8.0, 12.0, 16.0] {
+                line(&[(x, 3.0), (x, 7.0)]);
+                line(&[(x, 17.0), (x, 21.0)]);
+            }
+        }
         Page::History => {
             p.circle_stroke(pt(12.0, 12.0), 9.0 / 24.0 * r.width(), st);
             line(&[(12.0, 7.0), (12.0, 12.0), (15.0, 14.0)]);
@@ -325,6 +339,7 @@ impl eframe::App for App {
             Page::Home => self.home.show(ui, &mut self.feed),
             Page::Overlays => self.editor.show(ui, &mut self.feed, now),
             Page::Data => self.explorer.show(ui, &mut self.feed),
+            Page::Memory => self.memory.show(ui),
             Page::History => self.history.show(ui),
             Page::Alerts => self.alerts.show(ui),
             Page::Settings => self.settings.show(ui),

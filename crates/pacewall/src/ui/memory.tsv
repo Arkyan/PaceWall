@@ -1,0 +1,297 @@
+S	ObjectOut	SharedMemoryObjectOut	324820	La zone entière	Les quatre blocs, dans l'ordre. Décalages depuis le début de la zone.
+F	0	generic	SharedMemoryGeneric	332		Événements, version du jeu, retour de force, fenêtre.	0
+F	332	paths	SharedMemoryPathData	1300		Dossiers du jeu.	0
+F	1632	scoring	SharedMemoryScoringData	126832		Session, météo et classement de toutes les voitures.	0
+F	128464	telemetry	SharedMemoryTelemtryData	196356		Télémétrie détaillée de toutes les voitures.	0
+S	Generic	SharedMemoryGeneric	332	Bloc generic	Décalage 0.
+F	0	events	SharedMemoryEvent	64		Un indicateur par type d'événement. Voir la mise en garde sur leur comportement réel.	0
+F	64	gameVersion	int	4	entier	Version du jeu (relevé réel : 14200).	0
+F	68	FFBTorque	float	4		Couple du retour de force envoyé au volant.	0
+F	72	appInfo	ApplicationStateV01	260		Fenêtre du jeu et écran en cours.	0
+S	Event	SharedMemoryEvent	64	Événements	Seize entiers de 4 octets, dans generic.events.
+F	0	SME_ENTER	unsigned int	4	indicateur	Entrée dans le jeu.	0
+F	4	SME_EXIT	unsigned int	4	indicateur	Sortie du jeu.	0
+F	8	SME_STARTUP	unsigned int	4	indicateur	Démarrage du moteur de jeu.	0
+F	12	SME_SHUTDOWN	unsigned int	4	indicateur	Arrêt du moteur de jeu.	0
+F	16	SME_LOAD	unsigned int	4	indicateur	Chargement d'un circuit.	0
+F	20	SME_UNLOAD	unsigned int	4	indicateur	Déchargement du circuit.	0
+F	24	SME_START_SESSION	unsigned int	4	indicateur	Début d'une session.	0
+F	28	SME_END_SESSION	unsigned int	4	indicateur	Fin d'une session.	0
+F	32	SME_ENTER_REALTIME	unsigned int	4	indicateur	Le joueur prend le volant.	0
+F	36	SME_EXIT_REALTIME	unsigned int	4	indicateur	Le joueur revient au garage.	0
+F	40	SME_UPDATE_SCORING	unsigned int	4	indicateur	Le classement vient d'être publié.	0
+F	44	SME_UPDATE_TELEMETRY	unsigned int	4	indicateur	La télémétrie vient d'être publiée.	0
+F	48	SME_INIT_APPLICATION	unsigned int	4	indicateur	Initialisation de l'application.	0
+F	52	SME_UNINIT_APPLICATION	unsigned int	4	indicateur	Fermeture de l'application.	0
+F	56	SME_SET_ENVIRONMENT	unsigned int	4	indicateur	Les chemins (paths) ont été renseignés.	0
+F	60	SME_FFB	unsigned int	4	indicateur	Le couple du retour de force a été mis à jour.	0
+S	ApplicationState	ApplicationStateV01	260	Fenêtre du jeu	Dans generic.appInfo.
+F	0	mAppWindow	unsigned long long	8	HWND	Poignée de la fenêtre du jeu.	0
+F	8	mWidth	unsigned int	4	pixels	Largeur de l'image.	0
+F	12	mHeight	unsigned int	4	pixels	Hauteur de l'image.	0
+F	16	mRefreshRate	unsigned int	4	Hz	Fréquence d'affichage.	0
+F	20	mWindowed	unsigned int	4	0 / 1	Mode fenêtré.	0
+F	24	mOptionsLocation	unsigned char	1	code	Où est le joueur : 0 menus, 1 chargement du circuit, 2 moniteur du garage, 3 en piste.	0
+F	25	mOptionsPage	char[31]	31	texte	Nom de la page d'options ouverte.	0
+F	56	mExpansion	octets[204]	204		Réservé.	0
+S	PathData	SharedMemoryPathData	1300	Bloc paths	Cinq chemins de 260 caractères.
+F	0	userData	char[260]	260	texte	Dossier des données utilisateur du jeu (UserData).	0
+F	260	customVariables	char[260]	260	texte	Fichier des variables personnalisées des plugins.	0
+F	520	stewardResults	char[260]	260	texte	Dossier des résultats de session (fichiers XML).	0
+F	780	playerProfile	char[260]	260	texte	Dossier du profil du joueur.	0
+F	1040	pluginsFolder	char[260]	260	texte	Dossier des plugins.	0
+S	ScoringData	SharedMemoryScoringData	126832	Bloc scoring	Décalages depuis le début du bloc.
+F	0	scoringInfo	ScoringInfoV01	548		La session : circuit, temps, météo, drapeaux.	0
+F	548	scoringStreamSize	octets[12]	12	octets	Taille utile de scoringStream (un size_t, puis du remplissage).	0
+F	560	vehScoringInfo	VehicleScoringInfoV01[104]	60736		Une ligne par voiture. Seules les mNumVehicles premières sont valides. L'ordre n'est pas celui du classement : trier par mPlace.	0
+F	61296	scoringStream	char[65536]	65536	texte	Flux de résultats du jeu : lignes de texte ajoutées depuis la dernière mise à jour, terminées par un zéro.	0
+S	ScoringInfo	ScoringInfoV01	548	La session	Une seule, au début du bloc scoring.
+F	0	mTrackName	char[64]	64	texte	Nom du circuit.	0
+F	64	mSession	int	4	code	Type de session : 0 journée d'essais, 1 à 4 essais libres, 5 à 8 qualifications, 9 échauffement, 10 à 13 course.	0
+F	68	mCurrentET	double	8	s	Temps de session actuel. Avance ≈ 5 fois par seconde ; ne bouge plus en pause.	0
+F	76	mEndET	double	8	s	Temps de session auquel elle se termine.	0
+F	84	mMaxLaps	int	4	tours	Nombre de tours de la session. Très grand nombre quand elle est limitée au temps.	0
+F	88	mLapDist	double	8	m	Longueur du tour.	0
+F	96	mResultsStreamPointer	octets[8]	8	pointeur	Pointeur interne au jeu, inutilisable de l'extérieur. Le texte est dans scoringStream.	0
+F	104	mNumVehicles	int	4	entier	Nombre de voitures : les lignes 0 à mNumVehicles − 1 de vehScoringInfo sont valides.	0
+F	108	mGamePhase	unsigned char	1	code	0 avant la session, 1 tours de reconnaissance, 2 grille, 3 tour de formation, 4 feux de départ, 5 drapeau vert, 6 neutralisation (FCY / voiture de sécurité), 7 session arrêtée, 8 session terminée, 9 pause.	0
+F	109	mYellowFlagState	signed char	1	code	Neutralisation générale seulement : −1 invalide, 0 aucune, 1 annoncée, 2 stands fermés, 3 stands ouverts au tour du leader, 4 stands ouverts, 5 dernier tour, 6 reprise, 7 course arrêtée.	0
+F	110	mSectorFlag	octets[3]	3	code	Drapeau jaune local par secteur. Jaune seulement si la valeur est 1 : en jeu, la valeur n'est pas 0 au repos. Ordre des trois cases non garanti par l'en-tête.	0
+F	113	mStartLight	unsigned char	1	entier	Étape des feux de départ (le nombre d'étapes dépend du circuit).	0
+F	114	mNumRedLights	unsigned char	1	entier	Nombre de feux rouges de la procédure.	0
+F	115	mInRealtime	bool	1	0 / 1	Le joueur est en piste (et pas au moniteur du garage).	0
+F	116	mPlayerName	char[32]	32	texte	Nom du joueur.	0
+F	148	mPlrFileName	char[64]	64	texte	Nom du fichier de profil (peut être transformé pour rester un nom de fichier valide).	0
+F	212	mDarkCloud	double	8	0 à 1	Noirceur des nuages.	0
+F	220	mRaining	double	8	0 à 1	Intensité de la pluie.	0
+F	228	mAmbientTemp	double	8	°C	Température de l'air.	0
+F	236	mTrackTemp	double	8	°C	Température de la piste.	0
+F	244	mWind	TelemVect3	24	m/s	Vitesse du vent, dans le repère du monde.	0
+F	268	mMinPathWetness	double	8	0 à 1	Humidité minimale sur la trajectoire.	0
+F	276	mMaxPathWetness	double	8	0 à 1	Humidité maximale sur la trajectoire.	0
+F	284	mGameMode	unsigned char	1	code	1 serveur, 2 client, 3 les deux.	0
+F	285	mIsPasswordProtected	bool	1	0 / 1	Serveur protégé par mot de passe.	0
+F	286	mServerPort	unsigned short	2	entier	Port du serveur.	0
+F	288	mServerPublicIP	unsigned int	4	entier	Adresse IP publique du serveur.	0
+F	292	mMaxPlayers	int	4	entier	Nombre maximal de voitures dans la session.	0
+F	296	mServerName	char[32]	32	texte	Nom du serveur.	0
+F	328	mStartET	float	4	s	Heure de début de l'épreuve, en secondes depuis minuit.	0
+F	332	mAvgPathWetness	double	8	0 à 1	Humidité moyenne sur la trajectoire.	0
+F	340	mSessionTimeRemaining	float	4	s	Temps de session restant.	1
+F	344	mTimeOfDay	float	4	s	Heure dans le jeu : 0 à 86 400 secondes depuis minuit.	1
+F	348	mIsFixedSetup	bool	1	0 / 1	Réglages imposés.	1
+F	349	mTrackGripLevel	unsigned char	1	code	Gomme déposée sur la piste : 0 verte, 1 faible, 2 moyenne, 3 forte, 4 saturée. La pluie la lave.	1
+F	350	mCloudCoverage	unsigned char	1	code	Ciel : 0 dégagé, 1 quelques nuages, 2 partiellement nuageux, 3 très nuageux, 4 couvert, 5 bruine, 6 pluie légère (nuageux), 7 pluie légère (couvert), 8 pluie, 9 forte pluie, 10 orage.	1
+F	351	mTrackLimitsStepsPerPenalty	unsigned char	1	pas	Nombre de pas de limites de piste qui déclenchent une pénalité.	1
+F	352	mTrackLimitsStepsPerPoint	unsigned char	1	pas	Nombre de pas par point de limites de piste.	1
+F	353	mExpansion	octets[187]	187		Réservé.	0
+F	540	mVehiclePointer	octets[8]	8	pointeur	Pointeur interne au jeu, inutilisable de l'extérieur. Les voitures sont dans vehScoringInfo.	0
+S	VehicleScoring	VehicleScoringInfoV01	584	Une voiture au classement	104 emplacements à la suite. Décalages depuis le début de l'emplacement.
+F	0	mID	int	4	entier	Identifiant de la voiture, le même que dans la télémétrie.	0
+F	4	mDriverName	char[32]	32	texte	Nom du pilote au volant.	0
+F	36	mVehicleName	char[64]	64	texte	Nom de la voiture (engagement).	0
+F	100	mTotalLaps	short	2	entier	Tours terminés. Tour en cours = mTotalLaps + 1.	0
+F	102	mSector	signed char	1	code	Secteur en cours : 0 = secteur 3, 1 = secteur 1, 2 = secteur 2.	0
+F	103	mFinishStatus	signed char	1	code	0 en course, 1 arrivé, 2 abandon, 3 disqualifié.	0
+F	104	mLapDist	double	8	m	Distance parcourue dans le tour, depuis la ligne. Peut être légèrement négative ou dépasser la longueur du tour.	0
+F	112	mPathLateral	double	8	m	Position latérale par rapport à une trajectoire « centrale » très approximative.	0
+F	120	mTrackEdge	double	8	m	Bord de piste du côté de la voiture, par rapport à cette même trajectoire.	0
+F	128	mBestSector1	double	8	s	Meilleur secteur 1.	0
+F	136	mBestSector2	double	8	s	Meilleur temps au bout du secteur 2 (secteur 1 compris).	0
+F	144	mBestLapTime	double	8	s	Meilleur tour. Zéro ou négatif = aucun.	0
+F	152	mLastSector1	double	8	s	Secteur 1 du dernier tour.	0
+F	160	mLastSector2	double	8	s	Temps au bout du secteur 2 du dernier tour (secteur 1 compris).	0
+F	168	mLastLapTime	double	8	s	Dernier tour. Zéro ou négatif = pas de temps (tour invalide, tour de sortie).	0
+F	176	mCurSector1	double	8	s	Secteur 1 du tour en cours, s'il est valide. Remis à zéro au passage de la ligne.	0
+F	184	mCurSector2	double	8	s	Temps au bout du secteur 2 du tour en cours (secteur 1 compris), s'il est valide.	0
+F	192	mNumPitstops	short	2	entier	Arrêts aux stands effectués.	0
+F	194	mNumPenalties	short	2	entier	Pénalités restant à purger.	0
+F	196	mIsPlayer	bool	1	0 / 1	C'est la voiture du joueur. Le moyen fiable de trouver le joueur.	0
+F	197	mControl	signed char	1	code	Qui conduit : −1 personne, 0 joueur local, 1 IA locale, 2 joueur distant, 3 replay.	0
+F	198	mInPits	bool	1	0 / 1	Entre l'entrée et la sortie de la voie des stands. Pas toujours exact pour les voitures distantes.	0
+F	199	mPlace	unsigned char	1	entier	Position au classement général, à partir de 1.	0
+F	200	mVehicleClass	char[32]	32	texte	Classe en clair (« Hypercar », « LMP2 », « LMGT3 »…).	0
+F	232	mTimeBehindNext	double	8	s	Retard sur la voiture classée juste devant.	0
+F	240	mLapsBehindNext	int	4	tours	Tours de retard sur la voiture classée juste devant.	0
+F	244	mTimeBehindLeader	double	8	s	Retard sur le leader.	0
+F	252	mLapsBehindLeader	int	4	tours	Tours de retard sur le leader.	0
+F	256	mLapStartET	double	8	s	Temps de session au début du tour en cours.	0
+F	264	mPos	TelemVect3	24	m	Position dans le monde. Moins fraîche que celle de la télémétrie (classement ≈ 5 fois par seconde).	0
+F	288	mLocalVel	TelemVect3	24	m/s	Vitesse dans le repère de la voiture.	0
+F	312	mLocalAccel	TelemVect3	24	m/s²	Accélération dans le repère de la voiture.	0
+F	336	mOri	TelemVect3[3]	72	matrice	Matrice d'orientation, comme en télémétrie.	0
+F	408	mLocalRot	TelemVect3	24	rad/s	Vitesse de rotation.	0
+F	432	mLocalRotAccel	TelemVect3	24	rad/s²	Accélération de rotation.	0
+F	456	mHeadlights	bool	1	code	État des phares.	0
+F	457	mPitState	unsigned char	1	code	Arrêt au stand : 0 rien, 1 demandé, 2 entrée, 3 arrêté, 4 sortie.	0
+F	458	mServerScored	unsigned char	1	0 / 1	La voiture est classée par le serveur.	0
+F	459	mIndividualPhase	unsigned char	1	code	Phase de jeu propre à cette voiture : les valeurs de mGamePhase, plus 9 après la formation, 10 sous jaune, 11 sous bleu (inutilisé).	0
+F	460	mQualification	int	4	entier	Position en qualification, à partir de 1 ; −1 si aucune.	0
+F	464	mTimeIntoLap	double	8	s	Temps estimé depuis le début du tour, d'après la position sur la piste. Base des écarts entre voitures.	0
+F	472	mEstimatedLapTime	double	8	s	Temps au tour estimé, utilisé par le jeu pour mTimeIntoLap et les retards. Peut changer selon la voiture et les réglages.	0
+F	480	mPitGroup	char[24]	24	texte	Groupe de stand (le nom de l'équipe, sauf stand partagé).	0
+F	504	mFlag	unsigned char	1	code	Drapeau montré à cette voiture : 0 vert, 6 bleu. Aucune autre valeur.	0
+F	505	mUnderYellow	bool	1	0 / 1	A franchi la ligne sous neutralisation générale.	0
+F	506	mCountLapFlag	unsigned char	1	code	0 ni le tour ni le temps ne comptent, 1 le tour compte mais pas le temps, 2 les deux comptent.	0
+F	507	mInGarageStall	bool	1	0 / 1	La voiture est dans son box.	0
+F	508	mUpgradePack	octets[16]	16	octets	Options de la voiture, codées.	0
+F	524	mPitLapDist	float	4	m	Emplacement du stand de la voiture, en distance dans le tour.	0
+F	528	mBestLapSector1	float	4	s	Secteur 1 du meilleur tour (pas forcément le meilleur secteur 1).	0
+F	532	mBestLapSector2	float	4	s	Temps au bout du secteur 2 du meilleur tour (secteur 1 compris).	0
+F	536	mSteamID	unsigned long long	8	entier	Identifiant Steam du pilote, s'il y en a un.	1
+F	544	mVehFilename	char[32]	32	texte	Nom du fichier .veh qui identifie la voiture.	1
+F	576	mAttackMode	short	2	code	Mode attaque (Formule E, hérité).	1
+F	578	mFuelFraction	unsigned char	1	0 à 255	Carburant ou batterie restant : 0 = vide, 255 = plein. Disponible pour toutes les voitures.	1
+F	579	mDRSState	bool	1	0 / 1	DRS (volet arrière) ouvert.	1
+F	580	mExpansion	octets[4]	4		Réservé.	0
+S	TelemetryData	SharedMemoryTelemtryData	196356	Bloc telemetry	Décalages depuis le début du bloc.
+F	0	activeVehicles	unsigned char	1	entier	Nombre d'entrées valides dans telemInfo.	0
+F	1	playerVehicleIdx	unsigned char	1	index	Index de la voiture du joueur dans telemInfo. Préférer la recherche par mIsPlayer puis mID.	0
+F	2	playerHasVehicle	bool	1	0 / 1	Le joueur a une voiture (faux dans les menus ou en spectateur).	0
+F	4	telemInfo	TelemInfoV01[104]	196352		Une entrée par voiture, adversaires compris. L'index n'est pas celui du classement : associer par mID.	0
+S	VehicleTelemetry	TelemInfoV01	1888	La télémétrie d'une voiture	104 emplacements à la suite. Décalages depuis le début de l'emplacement.
+F	0	mID	int	4	entier	Identifiant de la voiture (« slot »). C'est la clé pour relier télémétrie et classement. Peut être réattribué en multijoueur quand quelqu'un part.	0
+F	4	mDeltaTime	double	8	s	Temps écoulé depuis la mise à jour précédente de cette voiture.	0
+F	12	mElapsedTime	double	8	s	Temps de session au moment de cette télémétrie. Sert à savoir de quand date la position (extrapolation).	0
+F	20	mLapNumber	int	4	entier	Numéro du tour en cours.	0
+F	24	mLapStartET	double	8	s	Temps de session au début du tour en cours. Chrono du tour en cours = mElapsedTime − mLapStartET.	0
+F	32	mVehicleName	char[64]	64	texte	Nom de la voiture (engagement : numéro, équipe…).	0
+F	96	mTrackName	char[64]	64	texte	Nom du circuit.	0
+F	160	mPos	TelemVect3	24	m	Position dans le monde. Vue de dessus : abscisse x, ordonnée −z ; y est l'altitude.	0
+F	184	mLocalVel	TelemVect3	24	m/s	Vitesse dans le repère de la voiture. Vitesse = norme du vecteur ; vitesse vers l'avant = −z.	0
+F	208	mLocalAccel	TelemVect3	24	m/s²	Accélération dans le repère de la voiture. En g : diviser par 9,81. Latéral = x, longitudinal = z.	0
+F	232	mOri	TelemVect3[3]	72	matrice	Les trois lignes de la matrice d'orientation (repère voiture → monde). Cap = atan2(mOri[2].x, mOri[2].z).	0
+F	304	mLocalRot	TelemVect3	24	rad/s	Vitesse de rotation dans le repère de la voiture (y = lacet).	0
+F	328	mLocalRotAccel	TelemVect3	24	rad/s²	Accélération de rotation dans le repère de la voiture.	0
+F	352	mGear	int	4	code	Rapport engagé : −1 marche arrière, 0 point mort, 1 et plus.	0
+F	356	mEngineRPM	double	8	tr/min	Régime moteur.	0
+F	364	mEngineWaterTemp	double	8	°C	Température d'eau.	0
+F	372	mEngineOilTemp	double	8	°C	Température d'huile.	0
+F	380	mClutchRPM	double	8	tr/min	Régime côté embrayage (boîte).	0
+F	388	mUnfilteredThrottle	double	8	0 à 1	Accélérateur, tel que le pilote l'enfonce.	0
+F	396	mUnfilteredBrake	double	8	0 à 1	Frein, tel que le pilote l'enfonce.	0
+F	404	mUnfilteredSteering	double	8	−1 à 1	Volant, de la gauche (−1) à la droite (+1).	0
+F	412	mUnfilteredClutch	double	8	0 à 1	Embrayage, tel que le pilote l'enfonce.	0
+F	420	mFilteredThrottle	double	8	0 à 1	Accélérateur réellement appliqué (après antipatinage, limiteur, etc.).	0
+F	428	mFilteredBrake	double	8	0 à 1	Frein réellement appliqué (après ABS).	0
+F	436	mFilteredSteering	double	8	−1 à 1	Volant réellement appliqué.	0
+F	444	mFilteredClutch	double	8	0 à 1	Embrayage réellement appliqué (après anti-calage, départ automatique).	0
+F	452	mSteeringShaftTorque	double	8	N·m	Couple dans la colonne de direction (la base du retour de force).	0
+F	460	mFront3rdDeflection	double	8	m	Débattement du troisième élément avant.	0
+F	468	mRear3rdDeflection	double	8	m	Débattement du troisième élément arrière.	0
+F	476	mFrontWingHeight	double	8	m	Hauteur de l'aileron avant.	0
+F	484	mFrontRideHeight	double	8	m	Hauteur de caisse avant.	0
+F	492	mRearRideHeight	double	8	m	Hauteur de caisse arrière.	0
+F	500	mDrag	double	8	N	Traînée aérodynamique.	0
+F	508	mFrontDownforce	double	8	N	Appui avant.	0
+F	516	mRearDownforce	double	8	N	Appui arrière.	0
+F	524	mFuel	double	8	L	Carburant dans le réservoir.	0
+F	532	mEngineMaxRPM	double	8	tr/min	Régime du limiteur (rupteur).	0
+F	540	mScheduledStops	unsigned char	1	entier	Nombre d'arrêts aux stands programmés.	0
+F	541	mOverheating	bool	1	0 / 1	Le témoin de surchauffe est affiché.	0
+F	542	mDetached	bool	1	0 / 1	Une pièce (autre qu'une roue) s'est détachée. Dans LMU, en pratique l'aileron arrière.	0
+F	543	mHeadlights	bool	1	0 / 1	Phares allumés.	0
+F	544	mDentSeverity	octets[8]	8	0, 1, 2	Enfoncement de la carrosserie en 8 points autour de la voiture : 0 intact, 1 abîmé, 2 très abîmé. Ordre des zones : voir « Dégâts » plus bas.	0
+F	552	mLastImpactET	double	8	s	Temps de session du dernier choc.	0
+F	560	mLastImpactMagnitude	double	8		Force du dernier choc.	0
+F	568	mLastImpactPos	TelemVect3	24	m	Point d'impact du dernier choc, dans le repère de la voiture.	0
+F	592	mEngineTorque	double	8	N·m	Couple moteur actuel.	0
+F	600	mCurrentSector	int	4	code	Secteur en cours, base 0 (0, 1, 2), avec la voie des stands dans le bit de signe : 0x80000002 = entrée aux stands depuis le 3e secteur. Secteur = valeur & 0x7FFFFFFF. Numérotation différente de mSector du classement.	0
+F	604	mSpeedLimiter	unsigned char	1	0 / 1	Limiteur de vitesse enclenché.	0
+F	605	mMaxGears	unsigned char	1	entier	Nombre de rapports avant.	0
+F	606	mFrontTireCompoundIndex	unsigned char	1	index	Rang de la gomme avant dans la marque.	0
+F	607	mRearTireCompoundIndex	unsigned char	1	index	Rang de la gomme arrière dans la marque.	0
+F	608	mFuelCapacity	double	8	L	Capacité du réservoir.	0
+F	616	mFrontFlapActivated	unsigned char	1	0 / 1	Volet avant actionné.	0
+F	617	mRearFlapActivated	unsigned char	1	0 / 1	Volet arrière (DRS) actionné.	0
+F	618	mRearFlapLegalStatus	unsigned char	1	code	DRS : 0 interdit, 1 conditions réunies mais pas encore autorisé, 2 autorisé.	0
+F	619	mIgnitionStarter	unsigned char	1	code	0 coupé, 1 contact, 2 contact + démarreur.	0
+F	620	mFrontTireCompoundName	char[18]	18	texte	Nom de la gomme avant (par exemple « Medium »).	0
+F	638	mRearTireCompoundName	char[18]	18	texte	Nom de la gomme arrière.	0
+F	656	mSpeedLimiterAvailable	unsigned char	1	0 / 1	La voiture a un limiteur de vitesse.	0
+F	657	mAntiStallActivated	unsigned char	1	0 / 1	L'anti-calage est intervenu.	0
+F	658	mUnused	octets[2]	2		Inutilisé.	0
+F	660	mVisualSteeringWheelRange	float	4	degrés	Débattement visuel du volant affiché dans l'habitacle.	0
+F	664	mRearBrakeBias	double	8	0 à 1	Part du freinage envoyée à l'arrière. Répartition avant = 1 − mRearBrakeBias.	0
+F	672	mTurboBoostPressure	double	8		Pression de suralimentation, si la voiture a un turbo. Unité non précisée par l'en-tête.	0
+F	680	mPhysicsToGraphicsOffset	float[3]	12	m	Décalage entre le centre de gravité et le centre du modèle 3D.	0
+F	692	mPhysicalSteeringWheelRange	float	4	degrés	Débattement physique du volant (butée à butée).	0
+F	696	mDeltaBest	double	8	s	Avance (négatif) ou retard (positif) sur le meilleur tour, calculé par le jeu.	1
+F	704	mBatteryChargeFraction	double	8	0 à 1	Charge de la batterie hybride.	0
+F	712	mElectricBoostMotorTorque	double	8	N·m	Couple du moteur électrique (négatif en régénération).	0
+F	720	mElectricBoostMotorRPM	double	8	tr/min	Régime du moteur électrique.	0
+F	728	mElectricBoostMotorTemperature	double	8	°C	Température du moteur électrique.	0
+F	736	mElectricBoostWaterTemperature	double	8	°C	Température d'eau du refroidissement du moteur électrique (0 s'il n'y en a pas).	0
+F	744	mElectricBoostMotorState	unsigned char	1	code	0 indisponible, 1 inactif, 2 propulsion, 3 régénération.	0
+F	745	mLapInvalidated	bool	1	0 / 1	Le tour en cours est invalidé (limites de piste).	1
+F	746	mABSActive	bool	1	0 / 1	L'ABS est en train d'agir.	1
+F	747	mTCActive	bool	1	0 / 1	L'antipatinage est en train d'agir.	1
+F	748	mSpeedLimiterActive	bool	1	0 / 1	Le limiteur de vitesse est en train de brider la voiture.	1
+F	749	mWiperState	unsigned char	1	code	Essuie-glace : 0 arrêt, 1 automatique, 2 lent, 3 rapide.	1
+F	750	mTC	unsigned char	1	cran	Réglage d'antipatinage.	1
+F	751	mTCMax	unsigned char	1	cran	Nombre de crans d'antipatinage.	1
+F	752	mTCSlip	unsigned char	1	cran	Réglage du glissement toléré par l'antipatinage.	1
+F	753	mTCSlipMax	unsigned char	1	cran	Nombre de crans de glissement.	1
+F	754	mTCCut	unsigned char	1	cran	Réglage de la coupure de puissance de l'antipatinage.	1
+F	755	mTCCutMax	unsigned char	1	cran	Nombre de crans de coupure.	1
+F	756	mABS	unsigned char	1	cran	Réglage d'ABS.	1
+F	757	mABSMax	unsigned char	1	cran	Nombre de crans d'ABS.	1
+F	758	mMotorMap	unsigned char	1	cran	Cartographie moteur.	1
+F	759	mMotorMapMax	unsigned char	1	cran	Nombre de cartographies.	1
+F	760	mMigration	unsigned char	1	cran	Migration de freinage.	1
+F	761	mMigrationMax	unsigned char	1	cran	Nombre de crans de migration.	1
+F	762	mFrontAntiSway	unsigned char	1	cran	Barre antiroulis avant.	1
+F	763	mFrontAntiSwayMax	unsigned char	1	cran	Nombre de crans de barre avant.	1
+F	764	mRearAntiSway	unsigned char	1	cran	Barre antiroulis arrière.	1
+F	765	mRearAntiSwayMax	unsigned char	1	cran	Nombre de crans de barre arrière.	1
+F	766	mLiftAndCoastProgress	unsigned char	1	0 à 255	Progression du « lift and coast » (économie par relâché).	1
+F	767	mTrackLimitsSteps	unsigned char	1	pas	Limites de piste accumulées, en pas : points × mTrackLimitsStepsPerPoint de la session.	1
+F	768	mRegen	float	4	kW	Puissance récupérée par le moteur électrique.	1
+F	772	mStateOfCharge	float	4	%	Charge de la batterie. Plage (0-1 ou 0-100) non contrôlée sur le vrai jeu.	1
+F	776	mVirtualEnergy	float	4	fraction	Énergie virtuelle restante. Plage (0-1 ou 0-100) non contrôlée sur le vrai jeu ; le maximum est dans le service web (fuelInfo.maxVirtualEnergy).	1
+F	780	mTimeGapCarAhead	float	4	s	Écart avec la voiture devant sur la piste.	1
+F	784	mTimeGapCarBehind	float	4	s	Écart avec la voiture derrière sur la piste.	1
+F	788	mTimeGapPlaceAhead	float	4	s	Écart avec la voiture classée juste devant.	1
+F	792	mTimeGapPlaceBehind	float	4	s	Écart avec la voiture classée juste derrière.	1
+F	796	mVehicleModel	char[30]	30	texte	Marque et modèle (par exemple « Ferrari 499P »).	1
+F	826	mVehicleClass	unsigned char	1	code	Classe : 0 Hypercar, 2 LMP2 ELMS, 3 LMP2, 4 LMP3, 5 GTE, 6 GT3, 8 voiture de sécurité, 255 inconnue. Le classement donne la classe en texte.	1
+F	827	mVehicleChampionship	unsigned char	1	code	Championnat : 0 à 3 = WEC 2023 à 2026, 16 et 17 = ELMS 2025 et 2026, 255 inconnu.	1
+F	828	mExpansion	octets[20]	20		Réservé.	0
+F	848	mWheels	TelemWheelV01[4]	1040		Les quatre roues : 0 avant gauche, 1 avant droite, 2 arrière gauche, 3 arrière droite. Détail dans TelemWheelV01.	0
+S	Wheel	TelemWheelV01	260	Une roue	Quatre à la fin de chaque télémétrie. Décalages depuis le début de la roue.
+F	0	mSuspensionDeflection	double	8	m	Débattement de la suspension.	0
+F	8	mRideHeight	double	8	m	Hauteur de caisse à cette roue.	0
+F	16	mSuspForce	double	8	N	Effort dans le poussoir (pushrod).	0
+F	24	mBrakeTemp	double	8	°C	Température du disque de frein. Attention : en degrés Celsius, alors que les pneus sont en Kelvin.	0
+F	32	mBrakePressure	double	8	0 à 1	Pression de frein, en fraction : dépend de la pédale et de la répartition. Ce n'est pas une pression réelle.	0
+F	40	mRotation	double	8	rad/s	Vitesse de rotation de la roue. Vitesse de roue en m/s = |mRotation| × rayon.	0
+F	48	mLateralPatchVel	double	8	m/s	Vitesse latérale de la gomme au point de contact.	0
+F	56	mLongitudinalPatchVel	double	8	m/s	Vitesse longitudinale de la gomme au point de contact.	0
+F	64	mLateralGroundVel	double	8	m/s	Vitesse latérale du sol sous la roue.	0
+F	72	mLongitudinalGroundVel	double	8	m/s	Vitesse longitudinale du sol sous la roue. Glissement = écart entre la gomme (Patch) et le sol (Ground).	0
+F	80	mCamber	double	8	rad	Carrossage. Positif vers la gauche pour les roues gauches, vers la droite pour les roues droites.	0
+F	88	mLateralForce	double	8	N	Effort latéral du pneu.	0
+F	96	mLongitudinalForce	double	8	N	Effort longitudinal du pneu.	0
+F	104	mTireLoad	double	8	N	Charge verticale sur le pneu.	0
+F	112	mGripFract	double	8	0 à 1	Part approximative de la surface de contact qui glisse.	0
+F	120	mPressure	double	8	kPa	Pression de l'air dans le pneu. 1 bar = 100 kPa, 1 psi = 6,895 kPa.	0
+F	128	mTemperature	double[3]	24	K	Température de surface : gauche / centre / droite du pneu (pas intérieur / extérieur). °C = K − 273,15.	0
+F	152	mWear	double	8	0 à 1	Gomme restante : 1 = pneu neuf, descend avec l'usure. L'en-tête dit « wear, fraction of maximum », mais la valeur part de 1 (TinyPedal l'appelle « tread »). Pas proportionnel à la perte d'adhérence.	0
+F	160	mTerrainName	char[16]	16	texte	Nom du revêtement sous la roue (préfixe de matériau du fichier TDF du circuit).	0
+F	176	mSurfaceType	unsigned char	1	code	Surface sous la roue : 0 sec, 1 mouillé, 2 herbe, 3 terre, 4 gravier, 5 vibreur, 6 spécial.	0
+F	177	mFlat	bool	1	0 / 1	Pneu crevé.	0
+F	178	mDetached	bool	1	0 / 1	Roue arrachée.	0
+F	179	mStaticUndeflectedRadius	unsigned char	1	cm	Rayon du pneu au repos, en centimètres entiers.	0
+F	180	mVerticalTireDeflection	double	8	m	Écrasement du pneu par rapport à son rayon (qui dépend de la vitesse).	0
+F	188	mWheelYLocation	double	8	m	Hauteur de la roue par rapport à la hauteur de la voiture.	0
+F	196	mToe	double	8	rad	Pincement / ouverture actuel, par rapport à la voiture.	0
+F	204	mTireCarcassTemperature	double	8	K	Température moyenne de la carcasse. La plus proche de ce qu'affiche le jeu.	0
+F	212	mTireInnerLayerTemperature	double[3]	24	K	Température de la couche de gomme la plus profonde (avant la carcasse) : gauche / centre / droite.	0
+F	236	mOptimalTemp	float	4	°C	Température idéale de la gomme montée.	1
+F	240	mCompoundIndex	unsigned char	1	index	Rang de la gomme dans la liste des gommes disponibles pour cette voiture sur ce circuit.	1
+F	241	mCompoundType	unsigned char	1	code	Famille de gomme : 0 tendre, 1 medium, 2 dure, 3 pluie.	1
+F	242	mExpansion	octets[18]	18		Réservé.	0
+S	Vect3	TelemVect3	24	Un vecteur	Trois double, soit 24 octets.
+F	0	x	double	8		Axe X : vers la gauche de la voiture (repère local) ou axe du monde.	0
+F	8	y	double	8		Axe Y : vers le haut.	0
+F	16	z	double	8		Axe Z : vers l'arrière de la voiture. Avancer = Z négatif.	0
