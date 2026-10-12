@@ -94,6 +94,7 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "others", label: "Afficher les autres voitures", kind: Bool(true) },
             Opt { id: "fps", label: "Fluidité (images/s)", kind: Choice(&[("10", "10"), ("20", "20"), ("30", "30")], "20") },
             Opt { id: "sectors", label: "Limites des secteurs", kind: Bool(true) },
+            Opt { id: "pitexit", label: "Repère de sortie des stands", kind: Choice(&[("request", "Arrêt demandé ou en cours"), ("always", "Toujours"), ("off", "Jamais")], "request") },
             Opt { id: "numbers", label: "Numéro dans les pastilles", kind: Choice(&[("none", "Aucun"), ("class", "Place en classe"), ("overall", "Place au général")], "none") },
         ],
         "relative" => &[
@@ -102,8 +103,9 @@ pub fn options(kind: &str) -> &'static [Opt] {
             Opt { id: "place", label: "Place affichée", kind: Choice(&[("class", "En classe"), ("overall", "Au général")], "class") },
         ],
         "pit" => &[
-            Opt { id: "lane", label: "Temps perdu dans la voie des stands (s)", kind: Num { min: 5.0, max: 90.0, step: 1.0, def: 25.0 } },
+            Opt { id: "lane", label: "Voie des stands tant que le circuit n'est pas appris (s)", kind: Num { min: 5.0, max: 90.0, step: 1.0, def: 25.0 } },
             Opt { id: "stop", label: "Durée d'arrêt si le jeu ne la donne pas (s)", kind: Num { min: 0.0, max: 120.0, step: 1.0, def: 35.0 } },
+            Opt { id: "menu", label: "Afficher le menu des stands du jeu", kind: Bool(true) },
         ],
         "damage" => &[Opt { id: "brakes", label: "Usure des freins", kind: Bool(true) }],
         "radar" => &[
@@ -194,6 +196,8 @@ pub struct WState {
     radar_dir: Option<(f32, f32)>,
     /// Radar : (temps du jeu, horloge du widget) à la dernière mesure de la voiture du joueur.
     radar_clock: Option<(f64, f64)>,
+    /// Instant d'entrée dans la voie des stands (chronomètre de l'arrêt en cours).
+    pit_since: Option<f64>,
     /// Le widget s'anime en ce moment (drapeau qui flotte) : il doit être redessiné même sans nouvelle donnée.
     animating: bool,
 }
@@ -215,7 +219,7 @@ pub fn draw(kind: &str, d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, 
         "trackmap" => trackmap_widget(d, spec, data, st, now),
         "flags" => flags(d, spec, data, st, now),
         "relative" => relative(d, spec, data),
-        "pit" => pit(d, spec, data),
+        "pit" => pit(d, spec, data, st, now),
         "radar" => radar(d, spec, data, st, now),
         "forecast" => forecast(d, spec, data),
         "damage" => damage(d, spec, data),
@@ -1143,6 +1147,15 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
     } else {
         rotate.parse().unwrap_or(0.0)
     };
+    // Repère de sortie des stands (comme TinyPedal) : une voiture qui se trouve à cet endroit maintenant sera à
+    // notre hauteur quand on ressortira.
+    let pit_mode = spec.choice("pitexit", "request");
+    let pit_exit = if pit_mode == "always" || (pit_mode == "request" && (data.flag("pit.in_pits") || data.f("pit.state", 0.0) >= 1.0)) {
+        pwcore::carinfo::touch();
+        Some(pit_plan(data, st, now, 25.0, 35.0))
+    } else {
+        None
+    };
     let map = st.map.as_ref().and_then(|(_, m)| m.as_ref());
 
     let (sin, cos) = angle_deg.to_radians().sin_cos();
@@ -1304,6 +1317,15 @@ fn trackmap_widget(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: 
                 }
             }
         });
+        // Le chiffre du repère est le temps total de l'arrêt, voie des stands comprise.
+        if let (Some(plan), Some(m)) = (&pit_exit, map) {
+            if let Some(ghost) = plan.ghost {
+                let length = data.f("session.track_length", 0.0).max(1.0);
+                let (x, y) = to_screen(rot(trackmap::at(m, ghost / length)));
+                d.circle(x, y, 10.0 * k, Color32::from_rgba_unmultiplied(8, 11, 16, 200), Some((2.0 * k, WARN)));
+                d.text(x, y - 5.5 * k, &format!("{:.0}", plan.lane + plan.stop), 9.5 * k, WARN, Font::Num, HAlign::Center);
+            }
+        }
         // Les autres d'abord, le joueur par-dessus.
         for c in &cars {
             let (x, y) = to_screen(rot(c.xy));
@@ -1357,6 +1379,44 @@ mod gap_tests {
             }
         }
         Data::new(f)
+    }
+
+    #[test]
+    fn pit_plan_follows_the_learned_lane() {
+        use super::{pit_plan, WState};
+        // Circuit de 5 km bouclé en 100 s (50 m/s). Voie des stands de 4700 m à 250 m (550 m) à 20 m/s : 27,5 s.
+        let scene = |dist: f64, in_pits: bool, lane: bool| {
+            let mut f = data(&[(dist, true, in_pits)], 180.0).fields;
+            let mut put = |k: &str, v: serde_json::Value| f.push(Field { key: k.into(), unit: "", label: "", value: v });
+            put("grid.000.est_lap", json!(100.0));
+            put("position.lap_dist", json!(dist));
+            put("pit.in_pits", json!(in_pits));
+            put("pit.stop_time", json!(40.0));
+            if lane {
+                put("pit.lane_entry", json!(4700.0));
+                put("pit.lane_exit", json!(250.0));
+                put("pit.lane_speed", json!(20.0));
+            }
+            Data::new(f)
+        };
+        let mut st = WState::default();
+        let p = pit_plan(&scene(1000.0, false, true), &mut st, 0.0, 25.0, 35.0);
+        assert!(p.stop_from_game && p.lane_measured);
+        assert!((p.lane - 27.5).abs() < 1e-9);
+        // En piste, ces 550 m prennent 11 s : l'arrêt coûte 27,5 + 40 − 11.
+        assert!((p.loss - 56.5).abs() < 1e-9);
+        // On ressort dans 74 s (jusqu'à l'entrée) + 67,5 s : la voiture qui sera alors à la sortie est à 3175 m.
+        assert!((p.ghost.unwrap() - 3175.0).abs() < 1e-6);
+        // Dans la voie depuis 10 s : il reste 57,5 s.
+        pit_plan(&scene(4800.0, true, true), &mut st, 100.0, 25.0, 35.0);
+        let p = pit_plan(&scene(4900.0, true, true), &mut st, 110.0, 25.0, 35.0);
+        assert!((p.ghost.unwrap() - 2375.0).abs() < 1e-6);
+        // Arrêt plus long que prévu : on ne ressort jamais avant d'avoir parcouru le reste de la voie.
+        let p = pit_plan(&scene(4900.0, true, true), &mut st, 400.0, 25.0, 35.0);
+        assert!((p.ghost.unwrap() - (250.0 - 17.5 * 50.0 + 5000.0)).abs() < 1e-6);
+        // Circuit pas encore appris : les réglages du widget, et pas de point de sortie.
+        let p = pit_plan(&scene(1000.0, false, false), &mut WState::default(), 0.0, 25.0, 35.0);
+        assert!(!p.lane_measured && p.ghost.is_none() && (p.loss - 65.0).abs() < 1e-9);
     }
 
     #[test]
@@ -1540,21 +1600,81 @@ fn relative(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
 
 /* ---------- Arrêt au stand ---------- */
 
-fn pit(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
-    let w = 300.0;
-    // Temps perdu = l'arrêt lui-même (estimé par le jeu : carburant, pneus, réparations) + la traversée de la voie
-    // des stands. Si le jeu ne donne pas son estimation, on prend la durée réglée sur le widget.
-    pwcore::carinfo::touch();
-    let lane = spec.num("lane", 25.0);
+/// Ce qu'un arrêt au stand coûterait maintenant.
+struct PitPlan {
+    /// Durée de l'arrêt lui-même, et si elle vient du jeu (sinon du réglage du widget).
+    stop: f64,
+    stop_from_game: bool,
+    /// Temps de traversée de la voie des stands, et s'il a été mesuré sur ce circuit (sinon réglage du widget).
+    lane: f64,
+    lane_measured: bool,
+    /// Temps perdu par rapport à une voiture restée en piste.
+    loss: f64,
+    /// Distance dans le tour d'une voiture qui, si elle y est maintenant, sera à notre hauteur quand on ressortira.
+    ghost: Option<f64>,
+    /// Vitesse moyenne sur un tour (m/s), pour convertir des distances en temps.
+    pace: f64,
+}
+
+/// Calcule le coût d'un arrêt, à la façon de TinyPedal : la voie des stands est celle apprise sur ce circuit
+/// (longueur ÷ vitesse du limiteur), l'arrêt est celui que le jeu estime. `lane_opt` et `stop_opt` : réglages du widget,
+/// utilisés tant que le circuit n'est pas appris ou que le jeu ne donne pas son estimation.
+fn pit_plan(data: &Data, st: &mut WState, now: f64, lane_opt: f64, stop_opt: f64) -> PitPlan {
     let game_stop = data.num("pit.stop_time").filter(|v| *v > 0.0);
-    let stop = game_stop.unwrap_or_else(|| spec.num("stop", 35.0));
-    let loss = lane + stop;
+    let stop = game_stop.unwrap_or(stop_opt);
+    let length = data.f("session.track_length", 0.0);
+    let n = (data.f("session.vehicles", 0.0) as usize).min(104);
+    let me = (0..n).find(|i| data.flag(&format!("grid.{i:03}.is_player")));
+    // Temps au tour : celui que le jeu estime pour nous, sinon notre meilleur ou notre dernier tour.
+    let lap_time = me
+        .and_then(|i| data.num(&format!("grid.{i:03}.est_lap")))
+        .filter(|v| *v > 1.0)
+        .or_else(|| data.num("position.best_lap").filter(|v| *v > 1.0))
+        .or_else(|| data.num("position.last_lap").filter(|v| *v > 1.0));
+    let in_pits = data.flag("pit.in_pits");
+    // Chronomètre de l'arrêt en cours : depuis l'instant où on est entré dans la voie.
+    if in_pits {
+        st.pit_since.get_or_insert(now);
+    } else {
+        st.pit_since = None;
+    }
+    let (entry, exit, speed) = (data.num("pit.lane_entry"), data.num("pit.lane_exit"), data.f("pit.lane_speed", 60.0 / 3.6).max(1.0));
+    match (entry, exit, lap_time) {
+        (Some(entry), Some(exit), Some(lap_time)) if length > 100.0 => {
+            let pace = length / lap_time;
+            let lane_length = (exit - entry).rem_euclid(length);
+            let lane = lane_length / speed;
+            // Pendant qu'on traverse la voie et qu'on s'arrête, une voiture en piste parcourt la même portion à son rythme.
+            let loss = (lane + stop - lane_length / pace).max(0.0);
+            let my_dist = data.f("position.lap_dist", 0.0);
+            // Temps avant de ressortir : jusqu'à l'entrée, puis la voie et l'arrêt ; une fois dedans, ce qu'il en reste.
+            let remaining = match st.pit_since {
+                Some(since) => (lane + stop - (now - since)).max((exit - my_dist).rem_euclid(length).min(lane_length) / speed),
+                None => (entry - my_dist).rem_euclid(length) / pace + lane + stop,
+            };
+            PitPlan { stop, stop_from_game: game_stop.is_some(), lane, lane_measured: true, loss, ghost: Some((exit - remaining * pace).rem_euclid(length)), pace }
+        }
+        _ => PitPlan { stop, stop_from_game: game_stop.is_some(), lane: lane_opt, lane_measured: false, loss: lane_opt + stop, ghost: None, pace: lap_time.filter(|_| length > 100.0).map_or(50.0, |t| length / t) },
+    }
+}
+
+fn pit(d: &D, spec: &WidgetSpec, data: &Data, st: &mut WState, now: f64) -> (f32, f32) {
+    let w = 300.0;
+    pwcore::carinfo::touch();
+    let plan = pit_plan(data, st, now, spec.num("lane", 25.0), spec.num("stop", 35.0));
+    // Menu des stands du jeu : ce qui est programmé pour le prochain arrêt.
+    let menu: Vec<(String, String)> = if spec.flag("menu", true) {
+        (0..(data.f("pit.menu.count", 0.0) as usize).min(6)).map(|i| (data.text(&format!("pit.menu.{i}.name")).to_string(), data.text(&format!("pit.menu.{i}.value")).to_string())).collect()
+    } else {
+        Vec::new()
+    };
     let hdr = if d.titles() { 18.0 } else { 0.0 };
-    let h = hdr + 138.0;
+    let menu_h = if menu.is_empty() { 0.0 } else { 10.0 + menu.len() as f32 * 17.0 };
+    let h = hdr + 138.0 + menu_h;
     d.card(w, h);
     if d.titles() {
         d.label(16.0, 10.0, "Arrêt au stand", MUTED);
-        d.label_right(w - 16.0, 10.0, &format!("{loss:.0} s perdues"), d.accent());
+        d.label_right(w - 16.0, 10.0, &format!("{:.0} s perdues", plan.loss), d.accent());
     }
     let y0 = hdr + 10.0;
     let is_race = (10..=13).contains(&(data.f("session.type", -1.0) as i64));
@@ -1580,25 +1700,41 @@ fn pit(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
         return (w, h);
     };
     // Après l'arrêt : notre retard sur le leader augmente du temps perdu ; on se replace parmi les autres.
-    let mine = behind[me] + loss;
+    let mine = behind[me] + plan.loss;
     let others = || (0..cars.len()).filter(|&i| i != me);
     let place = 1 + others().filter(|&i| behind[i] < mine).count();
     let class_place = 1 + others().filter(|&i| behind[i] < mine && cars[i].class == cars[me].class).count();
-    let front = others().filter(|&i| behind[i] < mine).max_by(|a, b| behind[*a].total_cmp(&behind[*b]));
-    let back = others().filter(|&i| behind[i] >= mine).min_by(|a, b| behind[*a].total_cmp(&behind[*b]));
-
     let lost = place as i64 - cars[me].place;
     d.text(16.0, y0, &format!("P{place}"), 30.0, TEXT, Font::Num, HAlign::Left);
     d.text(w - 16.0, y0 + 2.0, &format!("P{class_place} en classe"), 13.0, MUTED, Font::Num, HAlign::Right);
     d.text(w - 16.0, y0 + 20.0, &if lost > 0 { format!("{lost} place(s) perdue(s)") } else { "aucune place perdue".into() }, 12.0, if lost > 0 { WARN } else { OK }, Font::Ui, HAlign::Right);
     d.sep(16.0, y0 + 42.0, w - 32.0);
-    let line = |y: f32, label: &str, who: Option<usize>| {
+
+    // Qui sera devant et derrière nous à la sortie. Circuit appris : les voitures qui roulent autour du point de la
+    // piste où on ressort (trafic réel, voitures à un tour comprises). Sinon : nos voisines au classement.
+    let (front, back): (Option<(usize, f64)>, Option<(usize, f64)>) = match plan.ghost {
+        Some(ghost) => {
+            let rel = |i: usize| {
+                let d = (cars[i].dist.rem_euclid(length) - ghost).rem_euclid(length);
+                (if d > length / 2.0 { d - length } else { d }) / plan.pace
+            };
+            let on_track: Vec<(usize, f64)> = others().filter(|&i| !cars[i].pit).map(|i| (i, rel(i))).collect();
+            (
+                on_track.iter().filter(|c| c.1 > 0.0).min_by(|a, b| a.1.total_cmp(&b.1)).copied(),
+                on_track.iter().filter(|c| c.1 <= 0.0).max_by(|a, b| a.1.total_cmp(&b.1)).map(|c| (c.0, -c.1)),
+            )
+        }
+        None => (
+            others().filter(|&i| behind[i] < mine).max_by(|a, b| behind[*a].total_cmp(&behind[*b])).map(|i| (i, mine - behind[i])),
+            others().filter(|&i| behind[i] >= mine).min_by(|a, b| behind[*a].total_cmp(&behind[*b])).map(|i| (i, behind[i] - mine)),
+        ),
+    };
+    let line = |y: f32, label: &str, who: Option<(usize, f64)>| {
         d.label(16.0, y + 4.0, label, MUTED);
         match who {
-            Some(i) => {
+            Some((i, gap)) => {
                 d.text(86.0, y + 1.0, &short_name(&cars[i].name), 14.0, TEXT, Font::Ui, HAlign::Left);
                 // Moins de 3 s d'écart à la sortie : on ressort dans le trafic.
-                let gap = (behind[i] - mine).abs();
                 d.text(w - 16.0, y + 1.0, &format!("{gap:.1} s"), 14.0, if gap < 3.0 { WARN } else { TEXT }, Font::Num, HAlign::Right);
             }
             None => {
@@ -1608,14 +1744,24 @@ fn pit(d: &D, spec: &WidgetSpec, data: &Data) -> (f32, f32) {
     };
     line(y0 + 48.0, "Devant", front);
     line(y0 + 70.0, "Derrière", back);
-    // D'où vient le temps perdu : estimation du jeu (avec la part des réparations) ou réglage du widget.
+    // D'où vient le temps perdu : arrêt estimé par le jeu ou réglé, voie des stands mesurée sur ce circuit ou réglée.
     let repair = data.num("pit.repair_time").filter(|v| *v >= 1.0);
-    let detail = match (game_stop, repair) {
-        (Some(s), Some(r)) => format!("Arrêt {s:.0} s · répar. {r:.0} s · voie {lane:.0} s"),
-        (Some(s), None) => format!("Arrêt {s:.0} s · voie {lane:.0} s"),
-        (None, _) => format!("Arrêt {stop:.0} s (réglage) · voie {lane:.0} s"),
+    let stop_txt = match (plan.stop_from_game, repair) {
+        (true, Some(r)) => format!("Arrêt {:.0} s (répar. {r:.0})", plan.stop),
+        (true, None) => format!("Arrêt {:.0} s", plan.stop),
+        (false, _) => format!("Arrêt {:.0} s (réglage)", plan.stop),
     };
-    d.text(16.0, y0 + 96.0, &detail, 11.5, MUTED, Font::Num, HAlign::Left);
+    let lane_txt = if plan.lane_measured { format!("voie {:.0} s", plan.lane) } else { format!("voie {:.0} s (réglage)", plan.lane) };
+    d.text(16.0, y0 + 96.0, &format!("{stop_txt} · {lane_txt}"), 11.5, MUTED, Font::Num, HAlign::Left);
+    if !menu.is_empty() {
+        let top = y0 + 118.0;
+        d.sep(16.0, top, w - 32.0);
+        for (i, (name, value)) in menu.iter().enumerate() {
+            let y = top + 8.0 + i as f32 * 17.0;
+            d.label(16.0, y + 2.0, name, MUTED);
+            d.text(w - 16.0, y, value, 12.5, TEXT, Font::Num, HAlign::Right);
+        }
+    }
     (w, h)
 }
 

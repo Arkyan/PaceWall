@@ -198,6 +198,42 @@ mod bench {
         }
     }
 
+    /// Aperçu de l'arrêt au stand et du repère de sortie sur la carte, en images (`PACEWALL_SHOT_DIR`).
+    #[test]
+    #[ignore]
+    fn pit_preview() {
+        let Ok(dir) = std::env::var("PACEWALL_SHOT_DIR") else { return };
+        let mut fonts = Fonts::load();
+        let mut f = data(1.0).fields;
+        let mut put = |k: &str, v: serde_json::Value| f.push(Field { key: k.into(), unit: "", label: "", value: v });
+        for (k, v) in [("pit.lane_entry", 3700.0), ("pit.lane_exit", 300.0), ("pit.lane_speed", 16.7), ("pit.stop_time", 43.5), ("pit.repair_time", 14.0), ("pit.menu.count", 4.0)] {
+            put(k, json!(v));
+        }
+        for (i, (n, v)) in [("FUEL", "+35 L"), ("VIRTUAL ENERGY", "80 %"), ("TIRES", "Medium x4"), ("DAMAGE", "Repair all")].iter().enumerate() {
+            put(&format!("pit.menu.{i}.name"), json!(n));
+            put(&format!("pit.menu.{i}.value"), json!(v));
+        }
+        let data = Data::new(f);
+        for kind in ["pit", "trackmap"] {
+            let mut spec = WidgetSpec::new(kind, kind, 0.0, 0.0);
+            spec.opts.insert("pitexit".into(), json!("always"));
+            let (accent, bar, titles, bg) = (widgets::accent(&spec), widgets::bar(&spec), widgets::titles(&spec), widgets::bg(&spec));
+            let mut st = WState::default();
+            let (w, h) = {
+                let mut m = Measure;
+                let d = D::new(&mut m, (0.0, 0.0), 1.0, 1.0, bg).styled(accent, bar).titled(titles);
+                widgets::draw(kind, &d, &spec, &data, &mut st, 1.0)
+            };
+            let mut pm = Pixmap::new((w * 2.0).ceil() as u32 + 2, (h * 2.0).ceil() as u32 + 2).unwrap();
+            {
+                let mut c = SoftCanvas { pm: pm.as_mut(), fonts: &mut fonts };
+                let d = D::new(&mut c, (0.0, 0.0), 2.0, 1.0, bg).styled(accent, bar).titled(titles);
+                widgets::draw(kind, &d, &spec, &data, &mut st, 1.0);
+            }
+            pm.save_png(format!("{dir}/pit_{kind}.png")).unwrap();
+        }
+    }
+
     /// Mesure du coût de dessin de chaque widget (µs par image, à l'échelle 1080p) :
     /// `cargo test --release -p pacewall bench -- --ignored --nocapture`
     #[test]

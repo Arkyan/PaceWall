@@ -26,6 +26,8 @@ pub struct Info {
     pub suspension: Option<[f64; 4]>,
     /// Épaisseur restante de chaque frein, en mètres.
     pub brakes: Option<[f64; 4]>,
+    /// Ce qui est programmé dans le menu des stands du jeu : (ligne, choix en cours).
+    pub menu: Vec<(String, String)>,
 }
 
 struct State {
@@ -36,7 +38,7 @@ struct State {
     brake_max: [f64; 4],
 }
 
-static STATE: Mutex<State> = Mutex::new(State { touched: None, started: false, info: Info { stop_time: None, repair_time: None, aero: None, suspension: None, brakes: None }, brake_max: [0.0; 4] });
+static STATE: Mutex<State> = Mutex::new(State { touched: None, started: false, info: Info { stop_time: None, repair_time: None, aero: None, suspension: None, brakes: None, menu: Vec::new() }, brake_max: [0.0; 4] });
 
 /// À appeler par quiconque affiche ces données : tant qu'on l'appelle, elles sont tenues à jour.
 pub fn touch() {
@@ -88,6 +90,20 @@ fn parse_pitstop(text: &str, info: &mut Info) {
 /// `{ "wearables": { "body": { "aero": 0.1 }, "brakes": [m, m, m, m], "suspension": [0, 0.2, 0, 0] }, … }`
 fn parse_repair(text: &str, info: &mut Info) {
     let Ok(json) = serde_json::from_str::<Value>(text) else { return };
+    // Menu des stands : chaque ligne a un nom et un choix en cours (un index dans ses réglages, ou une valeur).
+    if let Some(items) = json.get("pitMenu").and_then(|m| m.get("pitMenu")).and_then(Value::as_array) {
+        for item in items {
+            let Some(name) = item.get("name").and_then(Value::as_str) else { continue };
+            let current = item.get("currentSetting");
+            let text = current
+                .and_then(Value::as_u64)
+                .and_then(|i| item.get("settings")?.get(i as usize)?.get("text")?.as_str().map(str::to_string))
+                .or_else(|| current.and_then(|c| c.as_f64()).map(|v| format!("{v:.0}")));
+            if let Some(text) = text {
+                info.menu.push((name.trim().trim_end_matches(':').to_string(), text.trim().to_string()));
+            }
+        }
+    }
     let Some(w) = json.get("wearables") else { return };
     let four = |v: Option<&Value>| -> Option<[f64; 4]> {
         let a = v?.as_array()?;
@@ -136,6 +152,11 @@ pub fn build(info: &Info, brake_max: &[f64; 4]) -> Vec<Field> {
             }
         }
     }
+    out.push(Field { key: "pit.menu.count".into(), unit: "", label: "Lignes du menu des stands", value: json!(info.menu.len()) });
+    for (i, (name, text)) in info.menu.iter().enumerate().take(16) {
+        out.push(Field { key: format!("pit.menu.{i}.name"), unit: "", label: "Menu des stands", value: json!(name) });
+        out.push(Field { key: format!("pit.menu.{i}.value"), unit: "", label: "Choix", value: json!(text) });
+    }
     out
 }
 
@@ -147,7 +168,8 @@ mod tests {
     fn reads_the_game_answers() {
         let mut info = Info::default();
         parse_pitstop(r#"{"total": 38.5, "damage": 12.0, "fuel": 20.0}"#, &mut info);
-        parse_repair(r#"{"wearables": {"body": {"aero": 0.25}, "brakes": [0.030, 0.030, 0.021, 0.028], "suspension": [0, 0.4, 0, 0]}, "pitMenu": {}}"#, &mut info);
+        parse_repair(r#"{"wearables": {"body": {"aero": 0.25}, "brakes": [0.030, 0.030, 0.021, 0.028], "suspension": [0, 0.4, 0, 0]}, "pitMenu": {"pitMenu": [{"name": "FUEL:", "currentSetting": 1, "settings": [{"text": "+0 L"}, {"text": "+35 L"}]}, {"name": "VIRTUAL ENERGY:", "currentSetting": 80}]}}"#, &mut info);
+        assert_eq!(info.menu, vec![("FUEL".to_string(), "+35 L".to_string()), ("VIRTUAL ENERGY".to_string(), "80".to_string())]);
         assert_eq!((info.stop_time, info.repair_time, info.aero), (Some(38.5), Some(12.0), Some(0.25)));
         let fields = build(&info, &[0.030, 0.030, 0.030, 0.0]);
         let get = |k: &str| fields.iter().find(|f| f.key == k).and_then(|f| f.value.as_f64());
@@ -161,6 +183,6 @@ mod tests {
         let mut empty = Info::default();
         parse_pitstop("pas du json", &mut empty);
         parse_repair("{}", &mut empty);
-        assert!(build(&empty, &[0.0; 4]).is_empty());
+        assert_eq!(build(&empty, &[0.0; 4]).len(), 1); // seulement le compteur du menu, à zéro
     }
 }

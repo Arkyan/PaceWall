@@ -100,6 +100,8 @@ pub struct Live {
     last_change: Instant,
     last_open: Instant,
     reported_absent: bool,
+    /// Voie des stands du circuit en cours (relue toutes les 5 s : l'enregistreur peut venir de l'apprendre).
+    pit_lane: Option<(String, Option<crate::pitlane::PitLane>, Instant)>,
 }
 
 impl Default for Live {
@@ -119,6 +121,7 @@ impl Live {
             last_change: Instant::now(),
             last_open: Instant::now() - Duration::from_secs(10),
             reported_absent: false,
+            pit_lane: None,
         }
     }
 
@@ -159,6 +162,19 @@ impl Live {
             fields.extend(forecast);
             // État de la voiture et durée d'arrêt (service web du jeu) : mêmes conditions.
             fields.extend(crate::carinfo::fields());
+            // Voie des stands apprise pour ce circuit : de quoi calculer le temps réellement perdu par un arrêt.
+            let track = fields.iter().find(|f| f.key == "session.track").and_then(|f| f.value.as_str()).unwrap_or("").to_string();
+            if self.pit_lane.as_ref().is_none_or(|(t, _, at)| *t != track || at.elapsed() > Duration::from_secs(5)) {
+                let lane = if track.is_empty() { None } else { crate::pitlane::load(&track) };
+                self.pit_lane = Some((track, lane, Instant::now()));
+            }
+            if let Some((_, Some(lane), _)) = &self.pit_lane {
+                if lane.known() {
+                    for (key, label, v) in [("pit.lane_entry", "Entrée des stands", lane.entry), ("pit.lane_exit", "Sortie des stands", lane.exit), ("pit.lane_speed", "Vitesse du limiteur", lane.speed())] {
+                        fields.push(crate::flatten::Field { key: key.into(), unit: if key.ends_with("speed") { "m/s" } else { "m" }, label, value: serde_json::json!(v) });
+                    }
+                }
+            }
             return Update::Data(Data::new(fields));
         }
         // Plus rien ne bouge : jeu en pause (on garde la zone et les dernières données) ou jeu fermé (on la lâche).

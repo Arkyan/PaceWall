@@ -111,9 +111,11 @@ struct MapState {
     builder: Option<Builder>,
     sectors: SectorLearner,
     need_sectors: bool,
+    /// Voie des stands du circuit, apprise en roulant.
+    pit: crate::pitlane::Learner,
 }
 
-/// Renvoie `true` tant que la carte du circuit est en construction.
+/// Renvoie `true` quand il faut lire plus souvent : carte du circuit en construction, ou voiture aux stands.
 fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<Session>, map: &mut Option<MapState>) -> bool {
     let Some((si, ti)) = r.player_indexes() else { return false };
     let (Some(s), Some(t)) = (r.vehicle_scoring(si), r.telemetry(ti)) else { return false };
@@ -138,11 +140,23 @@ fn sample(conn: &Connection, r: &Reader, start_event: u32, session: &mut Option<
             builder: existing.is_none().then(|| Builder::new(&track, info.mLapDist)),
             need_sectors: existing.as_ref().is_none_or(|m| m.sectors.len() < 2),
             sectors: SectorLearner::default(),
+            pit: crate::pitlane::Learner::new(&track),
             track: track.clone(),
         });
     }
-    let mut building = false;
+    // Aux stands ou arrêt demandé : on lit plus souvent, pour relever l'entrée et la sortie de la voie au plus juste.
+    let mut building = s.mInPits != 0 || s.mPitState == 1;
     if let Some(m) = map.as_mut() {
+        // Voie des stands : entrée, sortie et vitesse du limiteur, relevées quand on y passe.
+        let v = t.mLocalVel;
+        m.pit.update(&crate::pitlane::Sample {
+            in_pits: s.mInPits != 0,
+            lap_dist: s.mLapDist,
+            speed: (v.x * v.x + v.y * v.y + v.z * v.z).sqrt(),
+            limiter: t.mSpeedLimiterActive != 0,
+            throttle: t.mUnfilteredThrottle.max(t.mFilteredThrottle),
+            brake: t.mUnfilteredBrake.max(t.mFilteredBrake),
+        });
         if let Some(b) = m.builder.as_mut() {
             building = true;
             let pos = s.mPos;
