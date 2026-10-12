@@ -191,32 +191,85 @@ fn player(o: &mut Out, s: &VehicleScoring, t: &VehicleTelemetry) {
 
 fn grid(o: &mut Out, i: usize, s: &VehicleScoring, pose: Option<&lmu::reader::Pose>) {
     let p = format!("grid.{i:03}");
-    o.text(format!("{p}.driver"), "Pilote", c_str(&s.mDriverName));
-    o.text(format!("{p}.class"), "Classe", c_str(&s.mVehicleClass));
-    o.int(format!("{p}.place"), "Position", s.mPlace as i64);
-    o.int(format!("{p}.laps"), "Tours", s.mTotalLaps as i64);
-    o.num(format!("{p}.last_lap"), "s", "Dernier tour", s.mLastLapTime);
-    o.num(format!("{p}.best_lap"), "s", "Meilleur tour", s.mBestLapTime);
-    o.num(format!("{p}.behind_next"), "s", "Retard devant", s.mTimeBehindNext);
-    o.num(format!("{p}.behind_leader"), "s", "Retard leader", s.mTimeBehindLeader);
-    o.flag(format!("{p}.in_pits"), "Aux stands", s.mInPits != 0);
-    o.flag(format!("{p}.is_player"), "Joueur", s.mIsPlayer != 0);
+    // Clé « grid.007.place » assemblée à la main : cette fonction écrit des centaines de clés à chaque lecture, et
+    // `format!` coûte nettement plus cher qu'une simple concaténation.
+    let key = |suffix: &str| {
+        let mut k = String::with_capacity(p.len() + suffix.len());
+        k.push_str(&p);
+        k.push_str(suffix);
+        k
+    };
+    o.text(key(".driver"), "Pilote", c_str(&s.mDriverName));
+    o.text(key(".class"), "Classe", c_str(&s.mVehicleClass));
+    o.int(key(".place"), "Position", s.mPlace as i64);
+    o.int(key(".laps"), "Tours", s.mTotalLaps as i64);
+    o.num(key(".last_lap"), "s", "Dernier tour", s.mLastLapTime);
+    o.num(key(".best_lap"), "s", "Meilleur tour", s.mBestLapTime);
+    o.num(key(".behind_next"), "s", "Retard devant", s.mTimeBehindNext);
+    o.num(key(".behind_leader"), "s", "Retard leader", s.mTimeBehindLeader);
+    o.flag(key(".in_pits"), "Aux stands", s.mInPits != 0);
+    o.flag(key(".is_player"), "Joueur", s.mIsPlayer != 0);
     // Position dans le monde (mètres) pour la carte du circuit.
     // La télémétrie de la voiture, quand elle existe, est plus fraîche que le classement : on la préfère, avec son
     // instant, son cap et sa vitesse (pour le radar et pour prolonger le mouvement).
     let pos = s.mPos;
     let (x, z) = pose.filter(|p| p.x != 0.0 || p.z != 0.0).map_or((pos.x, pos.z), |p| (p.x, p.z));
-    o.num(format!("{p}.x"), "m", "Position X", x);
-    o.num(format!("{p}.z"), "m", "Position Z", z);
+    o.num(key(".x"), "m", "Position X", x);
+    o.num(key(".z"), "m", "Position Z", z);
     if let Some(ps) = pose {
         // Pas d'arrondi au millième ici : l'instant sert à calculer des vitesses entre deux mesures.
-        o.0.push(Field { key: format!("{p}.t"), unit: "s", label: "Instant de la position", value: json!(ps.elapsed) });
-        o.num(format!("{p}.yaw"), "rad", "Cap", ps.yaw);
-        o.num(format!("{p}.speed"), "m/s", "Vitesse", ps.speed);
+        o.0.push(Field { key: key(".t"), unit: "s", label: "Instant de la position", value: json!(ps.elapsed) });
+        o.num(key(".yaw"), "rad", "Cap", ps.yaw);
+        o.num(key(".speed"), "m/s", "Vitesse", ps.speed);
     }
-    o.num(format!("{p}.lap_dist"), "m", "Distance dans le tour", s.mLapDist);
+    o.num(key(".lap_dist"), "m", "Distance dans le tour", s.mLapDist);
     // Temps écoulé dans le tour et temps au tour estimés par le jeu : la base des écarts (comme TinyPedal).
-    o.num(format!("{p}.time_into"), "s", "Temps dans le tour (estimé)", s.mTimeIntoLap);
-    o.num(format!("{p}.est_lap"), "s", "Temps au tour estimé", s.mEstimatedLapTime);
-    o.flag(format!("{p}.garage"), "Au garage", s.mInGarageStall != 0);
+    o.num(key(".time_into"), "s", "Temps dans le tour (estimé)", s.mTimeIntoLap);
+    o.num(key(".est_lap"), "s", "Temps au tour estimé", s.mEstimatedLapTime);
+    o.flag(key(".garage"), "Au garage", s.mInGarageStall != 0);
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use std::time::Instant;
+
+    /// Coût d'une lecture complète du jeu. À lancer pendant qu'une simulation (ou le jeu) tourne :
+    /// `cargo test --release -p pwcore flatten::bench -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn read_cost() {
+        let Some(r) = Reader::open() else {
+            println!("pas de jeu ni de simulation en cours");
+            return;
+        };
+        let n = 2000;
+        for (label, grid) in [("sans le classement", false), ("avec le classement", true)] {
+            let t = Instant::now();
+            let mut fields = 0;
+            for _ in 0..n {
+                fields = read_all(&r, grid).len();
+            }
+            let read = t.elapsed().as_micros() as f64 / n as f64;
+            let t = Instant::now();
+            for _ in 0..n {
+                std::hint::black_box(crate::Data::new(read_all(&r, grid)));
+            }
+            let both = t.elapsed().as_micros() as f64 / n as f64;
+            println!("{label} : lecture {read:.0} µs, index {:.0} µs ({fields} valeurs)", both - read);
+        }
+        let mut strategy = crate::strategy::Strategy::default();
+        let mut sets: Vec<Vec<Field>> = (0..n).map(|_| read_all(&r, true)).collect();
+        let t = Instant::now();
+        for f in &mut sets {
+            strategy.update(f);
+        }
+        println!("stratégie carburant : {:.1} µs", t.elapsed().as_micros() as f64 / n as f64);
+        let mut pulse = crate::pulse::Pulse::new();
+        let t = Instant::now();
+        for _ in 0..n {
+            std::hint::black_box(pulse.changed(&r));
+        }
+        println!("témoin « le jeu a-t-il publié ? » : {:.1} µs", t.elapsed().as_micros() as f64 / n as f64);
+    }
 }
