@@ -358,8 +358,11 @@ impl eframe::App for App {
         if TUTORIAL_REQUEST.with(|r| r.replace(false)) {
             self.tutorial.restart();
         }
-        if let Some(tutorial::Action::Open(page)) = self.tutorial.show(ui.ctx()) {
-            self.enter(page);
+        match self.tutorial.show(ui.ctx()) {
+            Some(tutorial::Action::Open(page)) => self.enter(page),
+            // Le configurateur vient d'écrire la mise en page : l'éditeur la relit (sinon il réenregistrerait l'ancienne).
+            Some(tutorial::Action::LayoutChanged) => self.editor = editor::State::default(),
+            None => {}
         }
     }
 }

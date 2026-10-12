@@ -3,6 +3,11 @@
 Une section par version, la plus récente en haut. Le texte de la section est repris tel quel dans l'annonce de mise à
 jour affichée par PaceWall : phrases courtes, du point de vue de l'utilisateur.
 
+## 0.9.1
+
+- Premier lancement : un configurateur fait choisir les widgets, les unités et la voix. Une installation neuve n'affiche plus aucun widget tant que tu n'as pas choisi.
+- Éditeur : le message « Modifications non enregistrées » ne passe plus par-dessus les boutons.
+
 ## 0.9.0
 
 - Première version distribuable : fichier d'installation unique, mise à jour en un clic depuis PaceWall.

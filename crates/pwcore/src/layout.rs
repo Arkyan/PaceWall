@@ -69,18 +69,30 @@ impl Default for Layouts {
     }
 }
 
-pub fn default_layout() -> Layout {
-    let w = |id: &str, x: f32, y: f32| WidgetSpec::new(id, id, x, y);
-    Layout {
-        widgets: vec![
-            w("standings", 0.012, 0.05),
-            w("timing", 0.012, 0.42),
-            w("fuel", 0.012, 0.66),
-            w("tyres", 0.18, 0.66),
-            w("session", 0.42, 0.02),
-            w("inputs", 0.40, 0.76),
-        ],
+/// Emplacement conseillé de chaque type de widget (fractions d'un écran 16:9) : là où le configurateur de premier
+/// lancement le pose. Les widgets ne se chevauchent pas ; chacun se déplace ensuite dans l'éditeur.
+pub fn suggested(kind: &str) -> (f32, f32) {
+    match kind {
+        "standings" => (0.012, 0.05),
+        "relative" => (0.012, 0.47),
+        "timing" => (0.012, 0.76),
+        "session" => (0.42, 0.02),
+        "flags" => (0.455, 0.14),
+        "trackmap" => (0.80, 0.03),
+        "forecast" => (0.80, 0.34),
+        "damage" => (0.85, 0.56),
+        "pit" => (0.83, 0.78),
+        "fuel" => (0.19, 0.80),
+        "inputs" => (0.40, 0.82),
+        "tyres" => (0.64, 0.78),
+        "radar" => (0.445, 0.56),
+        _ => (0.40, 0.40),
     }
+}
+
+/// Mise en page faite des types de widgets choisis, chacun à son emplacement conseillé.
+pub fn from_kinds(kinds: &[&str]) -> Layout {
+    Layout { widgets: kinds.iter().map(|k| { let (x, y) = suggested(k); WidgetSpec::new(k, k, x, y) }).collect() }
 }
 
 pub fn path() -> PathBuf {
@@ -91,9 +103,10 @@ pub fn load() -> Layouts {
     std::fs::read_to_string(path()).ok().and_then(|t| serde_json::from_str(t.trim_start_matches('\u{feff}')).ok()).unwrap_or_default()
 }
 
-/// Mise en page d'une cible (`player` ou `obs`), ou celle par défaut.
+/// Mise en page d'une cible (`player` ou `obs`). Vide tant que l'utilisateur n'a rien choisi : une installation neuve
+/// n'affiche aucun widget, c'est le configurateur de premier lancement qui les propose.
 pub fn load_target(target: &str) -> Layout {
-    load().targets.remove(target).unwrap_or_else(default_layout)
+    load().targets.remove(target).unwrap_or_default()
 }
 
 pub fn save(layouts: &Layouts) -> std::io::Result<()> {

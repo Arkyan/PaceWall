@@ -29,7 +29,8 @@ LMU ──► pwcore::live (mémoire partagée) ──┬─► overlay native (
 ## Installation
 
 `pacewall.exe` s'installe lui-même, sans installateur externe et sans droits administrateur :
-- au premier lancement, un **tutoriel** en six étapes prépare le jeu, les overlays, les alertes vocales et OBS, et propose d'installer ;
+- au premier lancement, un **configurateur** en sept étapes prépare le jeu, fait choisir les widgets (une installation neuve
+  n'en affiche aucun), les unités et la voix, présente OBS, et propose d'installer ;
 - ou Réglages > Application > **Installer PaceWall** ; en ligne de commande : `pacewall.exe --install [--desktop] [--autostart]` ;
 - l'installation copie le programme dans `%LOCALAPPDATA%\Programs\PaceWall`, crée un raccourci du menu Démarrer (et du bureau
   si demandé), peut lancer PaceWall avec Windows, et l'ajoute à « Applications installées » ;
@@ -48,8 +49,9 @@ LMU ──► pwcore::live (mémoire partagée) ──┬─► overlay native (
   en un clic. Le fichier téléchargé n'est lancé que si son empreinte SHA-256 est celle annoncée. Réglage `update_check`.
 - **Publier une version** : décrire la version dans `CHANGELOG.md` (section `## x.y.z`), puis
   `powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Version x.y.z`. Le script teste, compile, fabrique
-  `dist\PaceWall-Setup-x.y.z.exe` et `dist\latest.json`, commite et pose l'étiquette `vx.y.z`. Il reste à pousser et à
-  joindre les deux fichiers à la version sur GitHub.
+  `dist\PaceWall-Setup-x.y.z.exe` et `dist\latest.json`, commite, pose l'étiquette `vx.y.z`, envoie le tout et crée la version sur GitHub avec ses deux fichiers.
+  Il utilise l'identifiant GitHub que git a déjà sur l'ordinateur ; `-NoPublish` s'arrête avant l'envoi, `-NoGit` ne fait
+  qu'un essai local.
 - Le programme n'est pas signé : au premier lancement, Windows SmartScreen affiche « Windows a protégé votre ordinateur »
   (Informations complémentaires > Exécuter quand même). Seul un certificat de signature payant supprime cet écran.
 

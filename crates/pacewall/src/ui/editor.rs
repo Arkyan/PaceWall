@@ -60,7 +60,7 @@ fn target_label(t: &str) -> &'static str {
 impl State {
     fn cur(&mut self) -> &mut Layout {
         let t = self.target.clone();
-        self.layouts.targets.entry(t).or_insert_with(layout::default_layout)
+        self.layouts.targets.entry(t).or_default()
     }
 
     pub fn show(&mut self, ui: &mut Ui, feed: &mut Feed, now: f64) {
@@ -130,7 +130,7 @@ impl State {
 
     fn top_bar(&mut self, ui: &mut Ui, live_missing: bool, show_left: bool, show_right: bool) {
         // Une seule ligne si la fenêtre est large ; sinon les réglages et l'enregistrement passent sur une seconde ligne.
-        let one_line = ui.available_width() >= 1040.0;
+        let one_line = ui.available_width() >= 1330.0;
         let controls = |this: &mut Self, ui: &mut Ui| {
             ui.label(RichText::new("CIBLE").size(11.0).color(MUTED));
             for t in ["player", "obs"] {
@@ -401,7 +401,7 @@ impl State {
             return;
         };
         let target = self.target.clone();
-        let layout = self.layouts.targets.entry(target).or_insert_with(layout::default_layout);
+        let layout = self.layouts.targets.entry(target).or_default();
         let Some(idx) = layout.widgets.iter().position(|w| w.id == id) else {
             self.selected = None;
             return;

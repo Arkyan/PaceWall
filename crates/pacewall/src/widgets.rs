@@ -1384,6 +1384,19 @@ mod gap_tests {
     }
 
     #[test]
+    fn every_widget_has_its_own_suggested_place() {
+        // Le configurateur de premier lancement pose chaque widget à son emplacement conseillé : tous différents, dans l'écran.
+        let places: Vec<(f32, f32)> = super::KINDS.iter().map(|(kind, _)| pwcore::layout::suggested(kind)).collect();
+        for (i, a) in places.iter().enumerate() {
+            assert!(a.0 >= 0.0 && a.0 < 0.9 && a.1 >= 0.0 && a.1 < 0.9, "{} hors écran", super::KINDS[i].0);
+            assert!(places.iter().skip(i + 1).all(|b| b != a), "{} partage sa place", super::KINDS[i].0);
+        }
+        assert_eq!(pwcore::layout::from_kinds(&["fuel", "radar"]).widgets.len(), 2);
+        // Installation neuve : aucune mise en page, donc aucun widget.
+        assert!(pwcore::layout::Layout::default().widgets.is_empty());
+    }
+
+    #[test]
     fn pit_plan_follows_the_learned_lane() {
         use super::{pit_plan, WState};
         // Circuit de 5 km bouclé en 100 s (50 m/s). Voie des stands de 4700 m à 250 m (550 m) à 20 m/s : 27,5 s.
